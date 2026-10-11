@@ -4,6 +4,9 @@ import { requireAuth, requireSecurityAdmin } from '../middleware/auth.js';
 import { EndpointService, EndpointError } from '../services/endpoint-service.js';
 import { endpointRequestContext, endpointFailure } from '../middleware/endpoint-errors.js';
 import { sseManager } from '../services/sse.js';
+function appProxySetting(req) {
+  return req.app.get('trust proxy');
+}
 const router = express.Router();
 const service = new EndpointService(prisma);
 const attempts = new Map();
@@ -12,6 +15,15 @@ router.use((req, res, next) => {
   // Fail closed rather than acknowledge Prisma's existing memory-mode proxy.
   if (!isValidPostgresUrl(process.env.DATABASE_URL)) return res.status(503).json({ error: 'Durable PostgreSQL required' });
   const loopback = ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+  if (process.env.NODE_ENV === 'production' && !req.secure) {
+  console.warn('[endpoint-https-check]', JSON.stringify({
+    secure: req.secure,
+    encrypted: Boolean(req.socket.encrypted),
+    remoteAddress: req.socket.remoteAddress,
+    forwardedProto: req.get('x-forwarded-proto'),
+    trustProxy: appProxySetting(req)
+  }));
+}
   if (!req.secure && !(process.env.NODE_ENV !== 'production' && process.env.ENDPOINT_ALLOW_LOOPBACK_HTTP === 'true' && loopback)) return res.status(426).json({ error: 'HTTPS required. Local development on loopback requires ENDPOINT_ALLOW_LOOPBACK_HTTP=true and a backend restart.' });
   if (['POST','PUT'].includes(req.method) && (!req.is('application/json') || !req.body || Array.isArray(req.body) || typeof req.body !== 'object')) return endpointFailure(req, res, 400, 'JSON object required with Content-Type: application/json.', 'ENDPOINT_JSON_OBJECT_REQUIRED');
   next();

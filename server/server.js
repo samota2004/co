@@ -24,7 +24,6 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 dotenv.config();
 
 const app = express();
-app.use(securityHttp);
 const PORT = Number(process.env.PORT || 3000);
 if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
   console.error('[CyberOrbit SOC] PORT must be a number between 0 and 65535.');
@@ -41,7 +40,7 @@ if(process.env.TRUST_PROXY){
  if(proxies.some(x=>x!=='loopback'&&!isIP(x)))throw new Error('TRUST_PROXY must contain loopback or explicit trusted proxy IP addresses.');
  app.set('trust proxy',proxies);
 }
-
+app.use(securityHttp);
 // CORS
 app.use(
   cors({
