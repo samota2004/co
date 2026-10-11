@@ -25,7 +25,7 @@ npm run build
 After migrations, restart your **existing** VS Code backend terminal: Ctrl+C, then `npm start` from `server\`. Do not open a second backend on port 3000. The existing separate frontend continues with `npm --prefix client run dev` on 5173. Alternatively, `npm run dev` from the root serves API and frontend together on 3000; use one of these backend entry points.
 
 
-For local endpoint enrollment, explicitly set `ENDPOINT_ALLOW_LOOPBACK_HTTP=true` in `.env`. For local MFA without sending email, explicitly set `DEV_MFA_MODE=true`; codes are returned only to loopback clients outside production, never logged. These exceptions do not work in production. The normal SMTP configuration continues to work. `SECURITY_TIMEZONE` controls office-hour comparisons; daily baseline and research windows remain UTC.
+For local endpoint enrollment, explicitly set `ENDPOINT_ALLOW_LOOPBACK_HTTP=true` in `.env`. For local MFA without sending email, explicitly set `DEV_MFA_MODE=true`; codes are returned only to loopback clients outside production, never logged. These exceptions do not work in production. Normal email delivery uses the Mailjet HTTPS API; configure the four MAILJET variables described below. `SECURITY_TIMEZONE` controls office-hour comparisons; daily baseline and research windows remain UTC.
 
 Start/restart the existing Python ML terminal with:
 
@@ -91,3 +91,31 @@ Deploy the frontend, backend, PostgreSQL and ML service manually using your host
 Gemini remains optional: local rule summaries work without an external request. For an approved integration, set `GEMINI_ENABLED=true`, `GEMINI_API_KEY` and `GEMINI_MODEL` on the backend. Never put the key in frontend environment variables.
 
 Audits are application append-oriented, company scoped and not editable through employee APIs; PostgreSQL administrators can still change storage. Central tamper-evident archival, enterprise SSO, hardware MFA, large-scale workers, external resource gateways and licensed CERT preprocessing provenance require additional production integration. Optional RL is not trained or claimed.
+
+
+## Mailjet email delivery on Render
+
+The existing Node backend sends OTP and password-reset emails through Mailjet Send API v3.1 over HTTPS. No frontend credentials or SMTP connection is used. `sendOtpEmail` and `sendPasswordResetEmail` retain their existing interfaces and templates. Provider acceptance is not proof of inbox delivery. No invitation/activation email endpoint currently exists; administrators created through Admin Management receive OTPs when they log in.
+
+Keep Render build `npm ci && npm run build` and start `npm start`, Neon `DATABASE_URL`, Prisma migrations, JWT secrets, origins and proxy settings unchanged. No migration or reseeding is needed for this email change.
+
+1. In Mailjet, obtain the API key and secret, and verify/activate the sender address under that same key. Complete any Mailjet account sending approval required for your account. Verify a domain and configure its authentication records when available.
+2. In Render, select the existing **cyberorbit-backend** web service, then **Environment**. Add `MAILJET_API_KEY`, `MAILJET_SECRET_KEY`, `MAILJET_FROM_EMAIL` (the verified address), and `MAILJET_FROM_NAME=CyberOrbit Security`. Keep `APP_URL=https://cyberorbit-backend.onrender.com` for reset links, `NODE_ENV=production`, and `DEV_MFA_MODE=false`. These are backend secrets; never use VITE-prefixed keys. Do not paste secrets into Git or logs.
+3. Save without deploying if that option is available. Coordinate environment changes with the separately approved code deployment; this task does not push or deploy. The new code needs Mailjet configuration before it can send emails.
+4. After deployment approval, verify main-admin and second-admin OTPs, resend, and password reset using approved real recipients. Check both Mailjet delivery status and the inbox. No live emails were sent by the automated tests.
+5. Only after successful live verification, manually remove `RESEND_API_KEY` and `RESEND_FROM_EMAIL` from Render. Local existing secret files are not edited by this migration.
+
+Mailjet errors and ambiguous timeouts fail closed with safe messages. A failed OTP send marks its challenge FAILED and cannot create a session. A failed reset send invalidates that specific reset token. OTPs keep their five-minute expiry, five-attempt limit and 30-second resend cooldown; password reset keeps its 15-minute expiry and one-time use. Production ignores the existing explicit local development MFA option.
+
+Local verification (run database tests only against a designated test database; each creates and cleans an isolated random schema):
+
+```powershell
+node --test --test-isolation=none server/test/mailjet-email.test.js
+node --test --test-isolation=none server/test/mailjet-auth.test.js
+node --test --test-isolation=none server/test/admin-only-login.test.js
+npm run build
+```
+
+The Mailjet tests replace external HTTP calls with mocks and never send real emails. The auth test deliberately sets development MFA mode inside its test process while using production mode to confirm no OTP bypass is exposed. `.env.example` contains placeholders only. Mailjet account restrictions, sender verification, quota, suppression and recipient spam filtering still affect actual delivery.
+
+API reference: https://dev.mailjet.com/docs/email-api/send-api-v31/send-basic-email

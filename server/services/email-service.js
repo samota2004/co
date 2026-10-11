@@ -1,106 +1,62 @@
-
-/**
- * CYBERORBIT - Email Service
- *
- * Provider: Resend HTTPS API
- * Supports:
- * 1. Login OTP verification emails
- * 2. Password reset emails
- *
- * Required environment variables:
- * RESEND_API_KEY
- * RESEND_FROM_EMAIL
- * APP_URL (for password reset)
- */
-
-const RESEND_API_URL = "https://api.resend.com/emails";
-
+/** Mailjet Send API v3.1. Credentials remain on the backend. */
+const MAILJET_API_URL = "https://api.mailjet.com/v3.1/send";
 const EMAIL_TIMEOUT_MS = 15000;
+const validEmail = value => typeof value === 'string' && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
 
-// Escape dynamic values before inserting into HTML.
 function escapeHtml(value) {
-  return String(value ?? "").replace(
-    /[&<>"']/g,
-    (char) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-      })[char]
-  );
+  return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 }
 
-// Validate Resend environment configuration.
+export class EmailDeliveryError extends Error {
+  constructor(code) {
+    super('Email delivery is temporarily unavailable. Please try again.');
+    this.name = 'EmailDeliveryError';
+    this.code = code;
+  }
+}
+
 function validateEmailConfig() {
-  const requiredVariables = [
-    "RESEND_API_KEY",
-    "RESEND_FROM_EMAIL"
-  ];
-
-  const missingVariables = requiredVariables.filter(
-    (variable) => !process.env[variable]
-  );
-
-  if (missingVariables.length > 0) {
-    throw new Error(
-      `Missing email configuration: ${missingVariables.join(", ")}`
-    );
+  if (!['MAILJET_API_KEY','MAILJET_SECRET_KEY','MAILJET_FROM_EMAIL'].every(key => process.env[key]?.trim()) ||
+      !validEmail(process.env.MAILJET_FROM_EMAIL) || /[\r\n]/.test(process.env.MAILJET_FROM_NAME || '')) {
+    throw new EmailDeliveryError('EMAIL_CONFIGURATION');
   }
 }
 
-// Shared email delivery function.
-async function sendEmail({ to, subject, text, html }) {
+async function sendEmail({to, subject, text, html}) {
   validateEmailConfig();
-
-  if (
-    typeof to !== "string" ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)
-  ) {
-    throw new Error("Invalid recipient email address");
-  }
-
-  const fromEmail = process.env.RESEND_FROM_EMAIL;
-
-  let response;
-
+  if (!validEmail(to)) throw new EmailDeliveryError('EMAIL_RECIPIENT');
+  let response, result;
   try {
-    response = await fetch(RESEND_API_URL, {
-      method: "POST",
-
+    response = await fetch(MAILJET_API_URL, {
+      method: 'POST', redirect: 'error',
       headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json"
+        Authorization: 'Basic ' + Buffer.from(process.env.MAILJET_API_KEY + ':' + process.env.MAILJET_SECRET_KEY).toString('base64'),
+        'Content-Type': 'application/json',
       },
-
-      body: JSON.stringify({
-        from: `CyberOrbit Security <${fromEmail}>`,
-        to: [to],
-        subject,
-        text,
-        html
-      }),
-
-      signal: AbortSignal.timeout(EMAIL_TIMEOUT_MS)
+      body: JSON.stringify({Messages: [{
+        From: {Email: process.env.MAILJET_FROM_EMAIL, Name: process.env.MAILJET_FROM_NAME || 'CyberOrbit Security'},
+        To: [{Email: to}], Subject: subject, TextPart: text, HTMLPart: html,
+      }]}),
+      signal: AbortSignal.timeout(EMAIL_TIMEOUT_MS),
     });
+    if (!response.ok) {
+      const code = [401,403].includes(response.status) ? 'EMAIL_AUTHENTICATION' : response.status === 429 ? 'EMAIL_RATE_LIMIT' : 'EMAIL_REJECTED';
+      throw new EmailDeliveryError(code);
+    }
+    result = await response.json();
   } catch (error) {
-    // Do not log API keys, OTPs, or reset tokens.
-    throw new Error(
-      "Email provider connection failed",
-      { cause: error }
-    );
+    // Never attach raw provider responses or network errors: they can contain secrets.
+    if (error instanceof EmailDeliveryError) throw error;
+    throw new EmailDeliveryError('EMAIL_NETWORK_OR_RESPONSE');
   }
-
-  if (!response.ok) {
-    // Avoid exposing provider responses containing
-    // potentially sensitive information.
-    throw new Error(
-      `Email provider rejected request (HTTP ${response.status})`
-    );
+  const message = result?.Messages?.[0];
+  if (result?.Messages?.length !== 1 || message?.Status !== 'success' || message?.Errors?.length ||
+      message?.To?.length !== 1 || message.To[0].Email !== to ||
+      !(message.To[0].MessageUUID || message.To[0].MessageID)) {
+    throw new EmailDeliveryError('EMAIL_MESSAGE_REJECTED');
   }
-
-  // Resend accepted the email request.
+  // Provider acceptance, not confirmation of inbox delivery. Do not retry an
+  // ambiguous timeout automatically, which could send duplicate security emails.
   return true;
 }
 

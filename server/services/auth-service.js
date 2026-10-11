@@ -24,7 +24,7 @@ export async function startChallenge(user,req,action='LOGIN'){
   try{await sendOtpEmail({to:user.email,name:user.name,otp,expiryMinutes:5});}
   catch{await prisma.mfaSession.update({where:{id:session.id},data:{status:'FAILED'}});return fail(503,'OTP_EMAIL_FAILED','Email MFA is temporarily unavailable.');}
  }
- await audit(prisma,user,'MFA_CHALLENGE',{action,delivery:demo?'explicit-local-development':'resend-api'});
+ await audit(prisma,user,'MFA_CHALLENGE',{action,delivery:demo?'explicit-local-development':'mailjet-api'});
  return{success:true,status:200,requiresMfa:true,challengeId:session.id,user:publicUser(user),message:demo?'Development MFA: use the displayed one-time code.':'Enter the code sent to your email.',...(demo?{developmentOtp:otp}: {})};
 }
 export async function loginWithPassword(identifier,password,req){
