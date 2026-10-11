@@ -385,6 +385,7 @@ class UserRepository {
 
     return {
       id: record.id,
+      companyId: record.companyId,
 
       employeeId:
         record.employeeId,

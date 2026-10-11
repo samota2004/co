@@ -1,19 +1,20 @@
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PredictionRequest(BaseModel):
-    user: str
+    model_config = ConfigDict(extra="forbid")
+    user: str = Field(min_length=1, max_length=128)
     features: Dict[str, Any]
 
 
 class PredictionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     user: str
     threat_probability: float = Field(ge=0.0, le=1.0)
-    contextual_risk_score: float = Field(ge=0.0, le=100.0)
-    risk_score: float = Field(ge=0.0, le=100.0)
-    trust_score: float = Field(ge=0.0, le=100.0)
-    policy_action: str
-    policy_reason: str
+    predicted_class: Literal[0, 1]
+    operating_threshold: float = Field(ge=0.0, le=1.0)
+    model_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     xai_reasons: list
+    authority: str

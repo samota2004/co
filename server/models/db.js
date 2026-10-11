@@ -343,7 +343,7 @@ class EnterpriseDatabase {
     this.users = [
       {
         id: "user-001",
-        employeeId: "EMP100",
+        employeeId: "ADMIN001",
 
         name: "Priyanka Samota",
         email: "priyankasamota946@gmail.com",
@@ -497,10 +497,16 @@ class EnterpriseDatabase {
    */
 
   getDeviceById(id) {
-    return this.devices.find(
-      (device) => device.id === id
-    );
+  if (!id) {
+    return undefined;
   }
+
+  return this.devices.find(
+    (device) =>
+      device.id === id ||
+      device.deviceId === id
+  );
+}
 
   /*
    * ============================================================

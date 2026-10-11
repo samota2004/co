@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from "react";
+import {requestApi} from "../services/api.js";
 import {
   Activity,
   AlertTriangle,
@@ -13,7 +14,7 @@ import {
   Users,
   Wifi,
   Zap,
-} from 'lucide-react';
+} from "lucide-react";
 
 import {
   Area,
@@ -28,53 +29,64 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from 'recharts';
+} from "recharts";
 
-import { useTheme } from '../context/ThemeContext';
+import { useTheme } from "../context/ThemeContext";
 
-/* =========================================================
-   SMALL UI COMPONENTS
-========================================================= */
+// ============================================================
+// DASHBOARD PAGE
+// CYBERORBIT — SECURITY OPERATIONS CENTER
+// ============================================================
+
+// ============================================================
+// 1. IMPORTS
+// ============================================================
+
+// ============================================================
+// 2. REUSABLE UI COMPONENTS
+// ============================================================
 
 const MetricCard = ({
   label,
   value,
   description,
   icon: Icon,
-  accent = 'gold',
+  accent = "gold",
   isDark,
 }) => {
   const accentClasses = {
-    gold: 'text-[#D4AF37]',
-    red: 'text-red-400',
-    green: 'text-emerald-400',
-    neutral: isDark ? 'text-white' : 'text-[#111111]',
+    cyan: "text-[#67E8F9]",
+    gold: "text-[#D4AF37]",
+    red: "text-red-400",
+    green: "text-emerald-400",
+    neutral: isDark ? "text-white" : "text-[#111111]",
   };
 
   return (
     <div
       className={`
         group relative overflow-hidden
+        rounded-2xl
         border
+        bg-[#050A10]
+        border-white/10
+        shadow-[0_18px_60px_rgba(0,0,0,0.18)]
         transition-all duration-300
         hover:-translate-y-0.5
-        ${
-          isDark
-            ? 'bg-[#0D0D0D] border-white/10 hover:border-[#D4AF37]/50'
-            : 'bg-white border-black/10 hover:border-[#D4AF37]/60'
-        }
+        hover:border-[#67E8F9]/30
+        hover:bg-[#070C12]
       `}
     >
-      <div className="absolute left-0 top-0 h-full w-[2px] bg-[#D4AF37] opacity-0 group-hover:opacity-100 transition-opacity" />
+      <div className="absolute left-0 top-0 h-full w-[2px] bg-[#67E8F9] opacity-0 group-hover:opacity-100 transition-opacity" />
 
-      <div className="p-5 sm:p-6">
+      <div className="p-5 sm:p-6 lg:p-7">
         <div className="flex items-start justify-between gap-3">
           <span
             className={`
-              text-[9px] sm:text-[10px]
+              text-[12px] sm:text-[12px]
               uppercase tracking-[0.18em]
               font-mono
-              ${isDark ? 'text-gray-500' : 'text-gray-500'}
+              ${isDark ? "text-[#7F8A96]" : "text-[#7F8A96]"}
             `}
           >
             {label}
@@ -83,12 +95,13 @@ const MetricCard = ({
           <div
             className={`
               w-8 h-8
+              rounded-lg
               flex items-center justify-center
               border
               ${
                 isDark
-                  ? 'border-white/10 bg-white/[0.02]'
-                  : 'border-black/10 bg-[#F7F4EC]'
+                  ? "border-white/10 bg-white/[0.02]"
+                  : "border-black/10 bg-[#F5F8FA]"
               }
             `}
           >
@@ -99,8 +112,7 @@ const MetricCard = ({
         <div className="mt-5">
           <div
             className={`
-              font-serif-display
-              text-3xl sm:text-4xl
+                            text-3xl sm:text-4xl
               font-light
               tracking-tight
               ${accentClasses[accent]}
@@ -112,11 +124,11 @@ const MetricCard = ({
           <p
             className={`
               mt-2
-              text-[10px]
+              text-[12px]
               font-mono
               uppercase
               tracking-wide
-              ${isDark ? 'text-gray-500' : 'text-gray-500'}
+              ${isDark ? "text-[#7F8A96]" : "text-[#7F8A96]"}
             `}
           >
             {description}
@@ -135,19 +147,19 @@ const SectionHeader = ({
   isDark,
 }) => {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7">
+    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-5 mb-7">
       <div>
-        <span className="block text-[9px] sm:text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] mb-2">
+        <span className="block text-[12px] uppercase tracking-[0.2em] text-[#67E8F9] mb-2">
           {eyebrow}
         </span>
 
         <h2
           className={`
-            font-serif-display
-            text-2xl sm:text-3xl
+                        text-2xl
             font-light
             tracking-tight
-            ${isDark ? 'text-white' : 'text-[#111111]'}
+            leading-[0.95]
+            ${isDark ? "text-white" : "text-[#111111]"}
           `}
         >
           {title}
@@ -158,9 +170,9 @@ const SectionHeader = ({
             className={`
               mt-2
               max-w-2xl
-              text-xs
-              leading-relaxed
-              ${isDark ? 'text-gray-500' : 'text-gray-500'}
+              text-[13px]
+              leading-5
+              ${isDark ? "text-[#7F8A96]" : "text-[#7F8A96]"}
             `}
           >
             {description}
@@ -173,16 +185,21 @@ const SectionHeader = ({
   );
 };
 
-const Panel = ({ children, className = '', isDark }) => {
+const Panel = ({ children, className = "", isDark }) => {
   return (
     <div
       className={`
-        border
-        ${
-          isDark
-            ? 'bg-[#0B0B0B] border-white/10'
-            : 'bg-white border-black/10'
-        }
+        group relative overflow-hidden
+        rounded-2xl
+        border border-white/10
+        bg-[#050A10]
+        p-5
+        shadow-[0_18px_60px_rgba(0,0,0,0.18)]
+        transition-all duration-300
+        hover:border-[#67E8F9]/30
+        hover:bg-[#070C12]
+        sm:p-6
+        lg:p-7
         ${className}
       `}
     >
@@ -191,29 +208,30 @@ const Panel = ({ children, className = '', isDark }) => {
   );
 };
 
-const RiskBadge = ({ score }) => {
-  let label = 'SAFE';
-  let classes =
-    'border-emerald-500/30 bg-emerald-500/5 text-emerald-400';
+const RiskBadge = ({ score, level }) => {
+  let label = "LOW";
+  let classes = "border-emerald-500/30 bg-emerald-500/5 text-emerald-400";
 
-  if (score >= 75) {
-    label = 'CRITICAL';
-    classes = 'border-red-500/40 bg-red-500/5 text-red-400';
+  if (score >= 90) {
+    label = "CRITICAL";
+    classes = "border-red-500/40 bg-red-500/5 text-red-400";
   } else if (score >= 60) {
-    label = 'HIGH';
-    classes = 'border-orange-500/40 bg-orange-500/5 text-orange-400';
+    label = "HIGH";
+    classes = "border-orange-500/40 bg-orange-500/5 text-orange-400";
   } else if (score >= 40) {
-    label = 'MEDIUM';
-    classes = 'border-[#D4AF37]/40 bg-[#D4AF37]/5 text-[#D4AF37]';
+    label = "MEDIUM";
+    classes = "border-[#D4AF37]/40 bg-[#D4AF37]/5 text-[#D4AF37]";
   }
 
+  if(level)label=level.replaceAll("_"," ");
   return (
     <span
       className={`
         inline-flex items-center gap-1.5
         px-2 py-1
+        rounded-md
         border
-        text-[9px]
+        text-[12px]
         font-mono
         tracking-wider
         ${classes}
@@ -226,15 +244,14 @@ const RiskBadge = ({ score }) => {
 };
 
 const StatusBadge = ({ status }) => {
-  const normalized = status || 'ACTIVE';
+  const normalized = status || "ACTIVE";
 
-  let classes =
-    'border-emerald-500/30 text-emerald-400 bg-emerald-500/5';
+  let classes = "border-emerald-500/30 text-emerald-400 bg-emerald-500/5";
 
-  if (normalized === 'FROZEN') {
-    classes = 'border-red-500/40 text-red-400 bg-red-500/5';
-  } else if (normalized === 'RESTRICTED') {
-    classes = 'border-orange-500/40 text-orange-400 bg-orange-500/5';
+  if (normalized === "FROZEN") {
+    classes = "border-red-500/40 text-red-400 bg-red-500/5";
+  } else if (normalized === "RESTRICTED") {
+    classes = "border-orange-500/40 text-orange-400 bg-orange-500/5";
   }
 
   return (
@@ -242,8 +259,9 @@ const StatusBadge = ({ status }) => {
       className={`
         inline-flex
         px-2 py-1
+        rounded-md
         border
-        text-[9px]
+        text-[12px]
         font-mono
         uppercase
         tracking-wider
@@ -261,17 +279,18 @@ const EmptyState = ({ message, isDark }) => (
       min-h-[150px]
       flex items-center justify-center
       text-center
+      rounded-xl
       border
       border-dashed
       ${
         isDark
-          ? 'border-white/10 text-gray-600'
-          : 'border-black/10 text-gray-500'
+          ? "border-white/10 text-[#7F8A96]"
+          : "border-black/10 text-[#7F8A96]"
       }
     `}
   >
     <div>
-      <div className="text-[10px] font-mono uppercase tracking-wider">
+      <div className="text-[12px] font-mono uppercase tracking-wider">
         No data
       </div>
       <p className="mt-2 text-xs">{message}</p>
@@ -279,9 +298,9 @@ const EmptyState = ({ message, isDark }) => (
   </div>
 );
 
-/* =========================================================
-   MAIN DASHBOARD
-========================================================= */
+// ============================================================
+// 4. MAIN DASHBOARD
+// ============================================================
 
 export const DashboardPage = ({
   users = [],
@@ -296,63 +315,54 @@ export const DashboardPage = ({
 }) => {
   const { isDark } = useTheme();
 
+  const [overview,setOverview]=useState(null),[overviewError,setOverviewError]=useState("");
+  useEffect(()=>{
+    let cancelled=false;
+    const load=()=>Promise.all([
+      requestApi("/api/dashboard/summary"),requestApi("/api/dashboard/risk-distribution"),
+      requestApi("/api/dashboard/risk-trends")
+    ]).then(([summary,distribution,trends])=>{if(!cancelled){setOverview({...summary,...distribution,...trends});setOverviewError("");}})
+      .catch(e=>!cancelled&&setOverviewError(e.message));
+    load();const timer=setInterval(load,30000);
+    return()=>{cancelled=true;clearInterval(timer);};
+  },[]);
+  const trend=useMemo(()=>{
+    const days=new Map();
+    for(const row of overview?.history||[]){
+      const day=new Date(row.timestamp).toISOString().slice(0,10);
+      const bucket=days.get(day)||{date:day,total:0,count:0};
+      bucket.total+=row.score;bucket.count++;days.set(day,bucket);
+    }
+    return [...days.values()].map(d=>({date:d.date,risk:d.total/d.count}));
+  },[overview]);
   /* =======================================================
      CORE METRICS
   ======================================================= */
 
-  const totalEmployees = users.length;
-
-  const onlineUsers = users.filter((user) => {
-    if (user.status === 'ACTIVE') return true;
-
-    if (!user.lastLoginAt) return false;
-
-    const lastLogin = new Date(user.lastLoginAt).getTime();
-
-    if (Number.isNaN(lastLogin)) return false;
-
-    return lastLogin > Date.now() - 24 * 60 * 60 * 1000;
-  }).length;
-
-  const highRisk = users.filter(
-    (user) => Number(user.currentRiskScore || 0) >= 60
-  ).length;
-
-  const mediumRisk = users.filter((user) => {
-    const score = Number(user.currentRiskScore || 0);
-
-    return score >= 40 && score < 60;
-  }).length;
-
-  const safeUsers = users.filter(
-    (user) => Number(user.currentRiskScore || 0) < 40
-  ).length;
-
-  const criticalIncidents = incidents.filter(
-    (incident) =>
-      incident.severity === 'CRITICAL' &&
-      incident.status !== 'RESOLVED'
-  ).length;
+  const totalEmployees = overview?.summary.users ?? "—";
+  const onlineUsers = overview?.summary.activeUsers ?? "—";
+  const highRisk = overview?.summary.highRiskUsers ?? "—";
+  const mediumRisk = overview?.summary.restrictedAccounts ?? "—";
+  const safeUsers = overview?.summary.pendingApprovals ?? "—";
+  const criticalIncidents = overview?.summary.criticalAlerts ?? "—";
 
   const avgTrustScore =
-    totalEmployees > 0
+    users.length > 0
       ? Math.round(
           users.reduce(
-            (sum, user) =>
-              sum + Number(user.currentTrustScore ?? 0),
-            0
-          ) / totalEmployees
+            (sum, user) => sum + Number(user.currentTrustScore ?? 0),
+            0,
+          ) / users.length,
         )
       : null;
 
   const avgRiskScore =
-    totalEmployees > 0
+    users.length > 0
       ? Math.round(
           users.reduce(
-            (sum, user) =>
-              sum + Number(user.currentRiskScore ?? 0),
-            0
-          ) / totalEmployees
+            (sum, user) => sum + Number(user.currentRiskScore ?? 0),
+            0,
+          ) / users.length,
         )
       : null;
 
@@ -361,47 +371,11 @@ export const DashboardPage = ({
   ======================================================= */
 
   const riskDistData = useMemo(() => {
-    const safe = users.filter(
-      (user) => Number(user.currentRiskScore || 0) < 40
-    ).length;
-
-    const medium = users.filter((user) => {
-      const score = Number(user.currentRiskScore || 0);
-      return score >= 40 && score < 60;
-    }).length;
-
-    const high = users.filter((user) => {
-      const score = Number(user.currentRiskScore || 0);
-      return score >= 60 && score < 75;
-    }).length;
-
-    const critical = users.filter(
-      (user) => Number(user.currentRiskScore || 0) >= 75
-    ).length;
-
-    return [
-      {
-        name: 'Safe',
-        value: safe,
-        color: '#D4AF37',
-      },
-      {
-        name: 'Medium',
-        value: medium,
-        color: '#E5D39A',
-      },
-      {
-        name: 'High',
-        value: high,
-        color: '#C8792A',
-      },
-      {
-        name: 'Critical',
-        value: critical,
-        color: '#C94C4C',
-      },
-    ].filter((item) => item.value > 0);
-  }, [users]);
+    const colors={LOW:"#22C55E",MEDIUM:"#D4AF37",HIGH:"#F59E0B",VERY_HIGH:"#F97316",CRITICAL:"#EF4444"};
+    return (overview?.distribution||[]).map(row=>({
+      name:row.riskLevel.replaceAll("_"," "),value:row._count._all,color:colors[row.riskLevel]
+    })).filter(row=>row.value>0);
+  },[overview]);
 
   /* =======================================================
      EVENT ANALYSIS
@@ -412,13 +386,13 @@ export const DashboardPage = ({
       (event) =>
         event.isAnomalous ||
         Number(event.riskContribution || 0) >= 50 ||
-        event.severity === 'CRITICAL' ||
-        event.severity === 'HIGH'
+        event.severity === "CRITICAL" ||
+        event.severity === "HIGH",
     )
     .slice(0, 6);
 
   const activeIncidents = incidents
-    .filter((incident) => incident.status !== 'RESOLVED')
+    .filter((incident) => incident.status !== "RESOLVED")
     .slice(0, 6);
 
   /* =======================================================
@@ -429,7 +403,7 @@ export const DashboardPage = ({
     const map = {};
 
     users.forEach((user) => {
-      const department = user.department || 'Unassigned';
+      const department = user.department || "Unassigned";
 
       if (!map[department]) {
         map[department] = {
@@ -444,14 +418,13 @@ export const DashboardPage = ({
     return Object.values(map)
       .map((department) => {
         const scores = department.users.map((user) =>
-          Number(user.currentRiskScore || 0)
+          Number(user.currentRiskScore || 0),
         );
 
         const avg =
           scores.length > 0
             ? Math.round(
-                scores.reduce((sum, score) => sum + score, 0) /
-                  scores.length
+                scores.reduce((sum, score) => sum + score, 0) / scores.length,
               )
             : 0;
 
@@ -478,40 +451,31 @@ export const DashboardPage = ({
         incident.title ||
           incident.eventType ||
           incident.type ||
-          'Uncategorized Threat'
+          "Uncategorized Threat",
       );
 
-      let category = 'Other Security Event';
+      let category = "Other Security Event";
 
       const lower = title.toLowerCase();
 
-      if (
-        lower.includes('privilege') ||
-        lower.includes('escalation')
-      ) {
-        category = 'Privilege Escalation';
+      if (lower.includes("privilege") || lower.includes("escalation")) {
+        category = "Privilege Escalation";
+      } else if (lower.includes("exfiltration") || lower.includes("data")) {
+        category = "Data Exfiltration";
       } else if (
-        lower.includes('exfiltration') ||
-        lower.includes('data')
+        lower.includes("hour") ||
+        lower.includes("after") ||
+        lower.includes("off-hours")
       ) {
-        category = 'Data Exfiltration';
+        category = "Off-Hours Anomaly";
       } else if (
-        lower.includes('hour') ||
-        lower.includes('after') ||
-        lower.includes('off-hours')
+        lower.includes("usb") ||
+        lower.includes("hardware") ||
+        lower.includes("device")
       ) {
-        category = 'Off-Hours Anomaly';
-      } else if (
-        lower.includes('usb') ||
-        lower.includes('hardware') ||
-        lower.includes('device')
-      ) {
-        category = 'Unapproved Hardware';
-      } else if (
-        lower.includes('shell') ||
-        lower.includes('command')
-      ) {
-        category = 'Shell / Command Activity';
+        category = "Unapproved Hardware";
+      } else if (lower.includes("shell") || lower.includes("command")) {
+        category = "Shell / Command Activity";
       }
 
       categories[category] = (categories[category] || 0) + 1;
@@ -523,10 +487,7 @@ export const DashboardPage = ({
       .map(([type, count]) => ({
         type,
         count,
-        percentage:
-          total > 0
-            ? Math.round((count / total) * 100)
-            : 0,
+        percentage: total > 0 ? Math.round((count / total) * 100) : 0,
       }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
@@ -549,7 +510,7 @@ export const DashboardPage = ({
       if (Number.isNaN(date.getTime())) return;
 
       const hour = date.getHours();
-      const label = `${String(hour).padStart(2, '0')}:00`;
+      const label = `${String(hour).padStart(2, "0")}:00`;
 
       if (!buckets[label]) {
         buckets[label] = {
@@ -558,22 +519,18 @@ export const DashboardPage = ({
         };
       }
 
-      const eventType = String(
-        event.eventType || ''
-      ).toLowerCase();
+      const eventType = String(event.eventType || "").toLowerCase();
 
       if (
-        eventType.includes('login') ||
-        eventType.includes('authentication') ||
-        eventType.includes('auth')
+        eventType.includes("login") ||
+        eventType.includes("authentication") ||
+        eventType.includes("auth")
       ) {
         buckets[label].logins += 1;
       }
     });
 
-    return Object.values(buckets).sort((a, b) =>
-      a.time.localeCompare(b.time)
-    );
+    return Object.values(buckets).sort((a, b) => a.time.localeCompare(b.time));
   }, [recentEvents]);
 
   /* =======================================================
@@ -585,7 +542,7 @@ export const DashboardPage = ({
 
     return [
       {
-        label: 'Current',
+        label: "Current",
         risk: avgRiskScore ?? 0,
         trust: avgTrustScore ?? 0,
       },
@@ -597,27 +554,30 @@ export const DashboardPage = ({
   ======================================================= */
 
   const tooltipStyle = {
-    backgroundColor: isDark ? '#0B0B0B' : '#FFFFFF',
-    border: '1px solid rgba(212,175,55,0.5)',
-    borderRadius: '0px',
-    color: isDark ? '#FFFFFF' : '#111111',
-    fontSize: '11px',
-    fontFamily: 'monospace',
+    backgroundColor: isDark ? "#050A10" : "#FFFFFF",
+    border: "1px solid rgba(103,232,249,0.35)",
+    borderRadius: "10px",
+    color: isDark ? "#FFFFFF" : "#111111",
+    fontSize: "11px",
+    fontFamily: "monospace",
   };
 
-  const axisColor = isDark ? '#555555' : '#A3A3A3';
+  const axisColor = isDark ? "#555555" : "#A3A3A3";
 
   return (
     <div
       id="cyberorbit-dashboard"
       className={`
         min-h-full
+        mx-auto
+        w-full
+        max-w-[1500px]
+        space-y-5
+        px-5
         pb-10
-        ${
-          isDark
-            ? 'text-white'
-            : 'text-[#111111]'
-        }
+        sm:px-8
+        lg:px-12
+        text-white
       `}
     >
       {/* =====================================================
@@ -625,60 +585,98 @@ export const DashboardPage = ({
       ===================================================== */}
 
       <section
-        className={`
-          relative
-          overflow-hidden
-          border
-          p-6 sm:p-8 lg:p-10
-          ${
-            isDark
-              ? 'bg-[#0B0B0B] border-white/10'
-              : 'bg-[#F7F4EC] border-black/10'
-          }
+        className={`console-hero 
+          group relative min-h-[210px] overflow-hidden rounded-2xl
+          border border-[#67E8F9]/55
+          bg-[#050A10]
+          shadow-[0_18px_60px_rgba(0,0,0,0.28)]
+          transition-all duration-300
+          hover:-translate-y-0.5
+          hover:border-[#67E8F9]/85
+          hover:shadow-[0_22px_70px_rgba(103,232,249,0.12)]
         `}
       >
-        <div className="absolute right-0 top-0 w-40 h-40 border-l border-b border-[#D4AF37]/20 pointer-events-none" />
+        {/* Enterprise telemetry grid */}
+        <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[52%] opacity-70 lg:block">
+          <div className="absolute inset-y-0 left-[8%] w-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-y-0 left-[24%] w-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-y-0 left-[40%] w-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-y-0 left-[56%] w-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-y-0 left-[72%] w-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-y-0 left-[88%] w-px bg-[#67E8F9]/10" />
 
-        <div className="relative flex flex-col xl:flex-row xl:items-end justify-between gap-8">
-          <div className="max-w-3xl">
+          <div className="absolute inset-x-0 top-[20%] h-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-x-0 top-[40%] h-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-x-0 top-[60%] h-px bg-[#67E8F9]/10" />
+          <div className="absolute inset-x-0 top-[80%] h-px bg-[#67E8F9]/10" />
+        </div>
+
+        {/* Security telemetry core */}
+        <div className="pointer-events-none absolute right-[7%] top-1/2 hidden h-44 w-44 -translate-y-1/2 lg:block">
+          <div className="absolute inset-1 rounded-full border border-[#67E8F9]/12" />
+          <div className="absolute inset-5 rounded-full border border-[#D4AF37]/25" />
+          <div className="absolute inset-10 rounded-full border border-[#67E8F9]/25" />
+          <div className="absolute inset-[29%] rounded-full border border-[#67E8F9]/20" />
+
+          <div
+            className="absolute left-1/2 top-1/2 flex h-20 w-20
+    -translate-x-1/2 -translate-y-1/2 items-center justify-center
+    rounded-2xl border border-[#67E8F9]/55 bg-[#070C12]/95
+    shadow-[0_0_35px_rgba(103,232,249,0.14)]"
+          >
+            <Shield className="h-9 w-9 text-[#67E8F9]" />
+          </div>
+
+          <div
+            className="absolute left-1/2 top-0 h-2 w-2
+    -translate-x-1/2 rounded-full bg-[#D4AF37]
+    shadow-[0_0_12px_rgba(212,175,55,0.55)]"
+          />
+
+          <div
+            className="absolute bottom-0 left-1/2 h-2 w-2
+    -translate-x-1/2 rounded-full bg-[#67E8F9]
+    shadow-[0_0_12px_rgba(103,232,249,0.55)]"
+          />
+        </div>
+
+        <div className="pointer-events-none absolute left-0 top-0 h-10 w-1 rounded-r-full bg-[#D4AF37]" />
+        <div className="pointer-events-none absolute bottom-0 right-0 h-10 w-1 rounded-l-full bg-[#67E8F9]" />
+
+        <div className="relative z-10 flex min-h-[210px] items-center px-6 py-7 sm:px-8 lg:px-9">
+          <div className="max-w-[74%]">
             <div className="flex flex-wrap items-center gap-3 mb-5">
-              <span className="inline-flex items-center gap-2 text-[9px] font-mono uppercase tracking-[0.2em] text-[#D4AF37]">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-pulse" />
+              <span className="inline-flex items-center gap-2 text-[12px] uppercase tracking-[0.22em] text-[#D4AF37]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#D4AF37] shadow-[0_0_10px_rgba(212,175,55,0.55)]" />
                 CyberOrbit Security Operations
               </span>
 
-              <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500">
+              <span className="text-[13px] uppercase tracking-wider text-[#7F8A96]">
                 Live Monitoring
               </span>
             </div>
 
-            <h1 className="font-serif-display text-4xl sm:text-5xl lg:text-6xl font-light tracking-tight leading-[0.95]">
+            <h1 className="text-4xl font-light leading-[0.95] tracking-tight text-[#F4F7FA] sm:text-5xl lg:text-6xl">
               Security
-              <span className="block italic text-[#D4AF37]">
-                Operations Center
-              </span>
+              <span className="block text-[#67E8F9]">Operations Center</span>
             </h1>
 
             <p
               className={`
-                mt-6
+                mt-4
                 max-w-2xl
-                text-sm
-                leading-7
-                ${
-                  isDark
-                    ? 'text-gray-400'
-                    : 'text-gray-600'
-                }
+                text-[14px]
+                leading-6
+                text-[#A7B0BA]
               `}
             >
-              Continuous behavioral intelligence across identities,
-              devices and security events — providing a unified
-              view of organizational risk and trust posture.
+              Continuous behavioral intelligence across identities, devices and
+              security events — providing a unified view of organizational risk
+              and trust posture.
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 shrink-0">
+          <div className="absolute bottom-9 right-9 z-20 flex items-center gap-3">
             <button
               id="dashboard-btn-simulator"
               onClick={onNavigateToSimulator}
@@ -686,17 +684,16 @@ export const DashboardPage = ({
                 group
                 inline-flex items-center justify-center gap-2
                 px-5 py-3
-                bg-[#D4AF37]
-                border border-[#D4AF37]
-                text-black
-                text-[10px]
-                font-mono
+                rounded-xl bg-[#67E8F9]
+                border border-[#67E8F9]
+                text-[#050A10]
+                text-[12px]
                 font-semibold
                 uppercase
                 tracking-[0.12em]
                 transition-all duration-300
                 hover:bg-transparent
-                hover:text-[#D4AF37]
+                hover:text-[#67E8F9]
               "
             >
               <Radio className="w-3.5 h-3.5" />
@@ -710,20 +707,14 @@ export const DashboardPage = ({
               className={`
                 inline-flex items-center justify-center gap-2
                 px-5 py-3
-                border
-                text-[10px]
-                font-mono
+                rounded-xl border border-[#67E8F9]/40
+                text-[12px]
                 uppercase
                 tracking-[0.12em]
-                text-[#D4AF37]
+                text-[#67E8F9]
                 transition-all duration-300
-                hover:bg-[#D4AF37]
-                hover:text-black
-                ${
-                  isDark
-                    ? 'border-[#D4AF37]/40'
-                    : 'border-[#D4AF37]/60'
-                }
+                hover:bg-[#67E8F9]
+                hover:text-[#050A10]
               `}
             >
               <Sparkles className="w-3.5 h-3.5" />
@@ -737,22 +728,22 @@ export const DashboardPage = ({
           KPI STRIP
       ===================================================== */}
 
-      <section className="mt-8">
+      <section className="mt-5">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#D4AF37]">
+            <span className="text-[12px] font-mono uppercase tracking-[0.28em] text-[#67E8F9]">
               Security Intelligence
             </span>
           </div>
 
-          <span className="hidden sm:block text-[9px] font-mono uppercase tracking-wider text-gray-500">
+          <span className="hidden sm:block text-[12px] font-mono uppercase tracking-wider text-[#7F8A96]">
             Continuous Monitoring
           </span>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
           <MetricCard
-            label="Total Employees"
+            label="Total Users"
             value={totalEmployees}
             description="Monitored identities"
             icon={Users}
@@ -761,36 +752,36 @@ export const DashboardPage = ({
           />
 
           <MetricCard
-            label="Online Users"
+            label="Active Accounts"
             value={onlineUsers}
-            description="Active sessions"
+            description="Enabled accounts, not online sessions"
             icon={Wifi}
-            accent="gold"
+            accent="cyan"
             isDark={isDark}
           />
 
           <MetricCard
             label="High Risk"
             value={highRisk}
-            description="Risk score ≥ 60"
+            description="Configured high-risk threshold"
             icon={ShieldAlert}
-            accent={highRisk > 0 ? 'red' : 'neutral'}
+            accent={highRisk > 0 ? "red" : "neutral"}
             isDark={isDark}
           />
 
           <MetricCard
-            label="Medium Risk"
+            label="Restricted Accounts"
             value={mediumRisk}
-            description="Risk score 40–59"
+            description="Reversible restrictions"
             icon={Activity}
             accent="gold"
             isDark={isDark}
           />
 
           <MetricCard
-            label="Safe Users"
+            label="Pending Approvals"
             value={safeUsers}
-            description="Risk score < 40"
+            description="Awaiting an authorized review"
             icon={UserCheck}
             accent="green"
             isDark={isDark}
@@ -801,7 +792,7 @@ export const DashboardPage = ({
             value={criticalIncidents}
             description="Pending containment"
             icon={AlertTriangle}
-            accent={criticalIncidents > 0 ? 'red' : 'neutral'}
+            accent={criticalIncidents > 0 ? "red" : "neutral"}
             isDark={isDark}
           />
         </div>
@@ -811,11 +802,8 @@ export const DashboardPage = ({
           POSTURE + RISK DISTRIBUTION
       ===================================================== */}
 
-      <section className="mt-8 grid grid-cols-1 xl:grid-cols-12 gap-5">
-        <Panel
-          isDark={isDark}
-          className="xl:col-span-8 p-6 sm:p-8"
-        >
+      <section className="mt-10 grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <Panel isDark={isDark} className="xl:col-span-8 p-6 sm:p-8">
           <SectionHeader
             eyebrow="Posture Intelligence"
             title="Risk & Trust Overview"
@@ -824,20 +812,20 @@ export const DashboardPage = ({
             rightContent={
               <div className="flex gap-6">
                 <div>
-                  <span className="block text-[9px] font-mono text-gray-500 uppercase">
+                  <span className="block text-[12px] font-mono text-[#7F8A96] uppercase">
                     Risk
                   </span>
-                  <span className="text-xl font-serif-display text-[#D4AF37]">
-                    {avgRiskScore ?? '—'}
+                  <span className="text-xl text-[#67E8F9]">
+                    {avgRiskScore ?? "—"}
                   </span>
                 </div>
 
                 <div>
-                  <span className="block text-[9px] font-mono text-gray-500 uppercase">
+                  <span className="block text-[12px] font-mono text-[#7F8A96] uppercase">
                     Trust
                   </span>
                   <span className="text-xl font-serif-display">
-                    {avgTrustScore ?? '—'}
+                    {avgTrustScore ?? "—"}
                   </span>
                 </div>
               </div>
@@ -845,7 +833,7 @@ export const DashboardPage = ({
           />
 
           {postureData.length > 0 ? (
-            <div className="h-[280px]">
+            <div className="h-[280px] rounded-xl border border-white/10 bg-[#070C12] p-2">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={postureData}>
                   <defs>
@@ -858,23 +846,17 @@ export const DashboardPage = ({
                     >
                       <stop
                         offset="0%"
-                        stopColor="#D4AF37"
+                        stopColor="#67E8F9"
                         stopOpacity={0.22}
                       />
-                      <stop
-                        offset="100%"
-                        stopColor="#D4AF37"
-                        stopOpacity={0}
-                      />
+                      <stop offset="100%" stopColor="#67E8F9" stopOpacity={0} />
                     </linearGradient>
                   </defs>
 
                   <CartesianGrid
                     vertical={false}
                     stroke={
-                      isDark
-                        ? 'rgba(255,255,255,0.05)'
-                        : 'rgba(0,0,0,0.06)'
+                      isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)"
                     }
                   />
 
@@ -898,16 +880,14 @@ export const DashboardPage = ({
                     contentStyle={tooltipStyle}
                     formatter={(value, name) => [
                       `${value}/100`,
-                      name === 'risk'
-                        ? 'Composite Risk'
-                        : 'Fleet Trust',
+                      name === "risk" ? "Composite Risk" : "Fleet Trust",
                     ]}
                   />
 
                   <Area
                     type="monotone"
                     dataKey="risk"
-                    stroke="#D4AF37"
+                    stroke="#67E8F9"
                     strokeWidth={2}
                     fill="url(#cyberOrbitRiskGradient)"
                     name="risk"
@@ -916,11 +896,7 @@ export const DashboardPage = ({
                   <Line
                     type="monotone"
                     dataKey="trust"
-                    stroke={
-                      isDark
-                        ? '#E5E7EB'
-                        : '#4B5563'
-                    }
+                    stroke={isDark ? "#E5E7EB" : "#4B5563"}
                     strokeWidth={1.5}
                     dot={false}
                     name="trust"
@@ -936,10 +912,7 @@ export const DashboardPage = ({
           )}
         </Panel>
 
-        <Panel
-          isDark={isDark}
-          className="xl:col-span-4 p-6 sm:p-8"
-        >
+        <Panel isDark={isDark} className="xl:col-span-4 p-6 sm:p-8">
           <SectionHeader
             eyebrow="Risk Classification"
             title="Risk Distribution"
@@ -949,7 +922,7 @@ export const DashboardPage = ({
 
           {riskDistData.length > 0 ? (
             <>
-              <div className="relative h-[220px]">
+              <div className="relative h-[220px] rounded-xl border border-white/10 bg-[#070C12]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -965,29 +938,23 @@ export const DashboardPage = ({
                         <Cell
                           key={entry.name}
                           fill={entry.color}
-                          stroke={
-                            isDark
-                              ? '#0B0B0B'
-                              : '#FFFFFF'
-                          }
+                          stroke={isDark ? "#050A10" : "#FFFFFF"}
                           strokeWidth={2}
                         />
                       ))}
                     </Pie>
 
-                    <Tooltip
-                      contentStyle={tooltipStyle}
-                    />
+                    <Tooltip contentStyle={tooltipStyle} />
                   </PieChart>
                 </ResponsiveContainer>
 
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="text-center">
-                    <span className="block text-[9px] font-mono uppercase text-gray-500">
+                    <span className="block text-[12px] font-mono uppercase text-[#7F8A96]">
                       Total
                     </span>
 
-                    <span className="font-serif-display text-3xl font-light">
+                    <span className="text-3xl font-light tracking-tight">
                       {totalEmployees}
                     </span>
                   </div>
@@ -997,21 +964,13 @@ export const DashboardPage = ({
               <div
                 className={`
                   border-t pt-5 space-y-3
-                  ${
-                    isDark
-                      ? 'border-white/10'
-                      : 'border-black/10'
-                  }
+                  ${isDark ? "border-white/10" : "border-black/10"}
                 `}
               >
                 {riskDistData.map((item) => {
                   const percentage =
-                    totalEmployees > 0
-                      ? Math.round(
-                          (item.value /
-                            totalEmployees) *
-                            100
-                        )
+                    users.length > 0
+                      ? Math.round((item.value / users.length) * 100)
                       : 0;
 
                   return (
@@ -1023,18 +982,15 @@ export const DashboardPage = ({
                         <span
                           className="w-2 h-2"
                           style={{
-                            backgroundColor:
-                              item.color,
+                            backgroundColor: item.color,
                           }}
                         />
 
-                        <span className="text-xs">
-                          {item.name}
-                        </span>
+                        <span className="text-xs">{item.name}</span>
                       </div>
 
                       <div className="flex items-center gap-3 font-mono">
-                        <span className="text-[10px] text-gray-500">
+                        <span className="text-[12px] text-[#7F8A96]">
                           {percentage}%
                         </span>
 
@@ -1056,6 +1012,13 @@ export const DashboardPage = ({
         </Panel>
       </section>
 
+      <Panel isDark={isDark} className="mt-5">
+        <h2 className="text-xl text-cyan-200">Recorded risk trend</h2>
+        {overviewError&&<p role="alert" className="text-red-400">{overviewError}</p>}
+        <p className="text-sm text-slate-400">Mean recorded assessment risk per UTC day, from at most 2,000 events in the last 30 days.</p>
+        {trend.length?<div className="h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={trend}><XAxis dataKey="date"/><YAxis domain={[0,100]}/><Tooltip contentStyle={tooltipStyle}/><Line dataKey="risk" stroke="#67E8F9"/></LineChart></ResponsiveContainer></div>:<p>No recorded risk history yet.</p>}
+      </Panel>
+
       {/* =====================================================
           AUTHENTICATION
       ===================================================== */}
@@ -1068,23 +1031,21 @@ export const DashboardPage = ({
             description="Observed authentication events from the available telemetry stream."
             isDark={isDark}
             rightContent={
-              <div className="flex items-center gap-2 text-[9px] font-mono uppercase text-gray-500">
-                <Clock3 className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <div className="flex items-center gap-2 text-[12px] font-mono uppercase text-[#7F8A96]">
+                <Clock3 className="w-3.5 h-3.5 text-[#67E8F9]" />
                 Event-derived
               </div>
             }
           />
 
           {authenticationData.length > 0 ? (
-            <div className="h-[230px]">
+            <div className="h-[230px] rounded-xl border border-white/10 bg-[#070C12] p-2">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={authenticationData}>
                   <CartesianGrid
                     vertical={false}
                     stroke={
-                      isDark
-                        ? 'rgba(255,255,255,0.05)'
-                        : 'rgba(0,0,0,0.06)'
+                      isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)"
                     }
                   />
 
@@ -1104,21 +1065,17 @@ export const DashboardPage = ({
                     fontSize={10}
                   />
 
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                  />
+                  <Tooltip contentStyle={tooltipStyle} />
 
                   <Line
                     type="monotone"
                     dataKey="logins"
-                    stroke="#D4AF37"
+                    stroke="#67E8F9"
                     strokeWidth={2}
                     dot={{
                       r: 3,
-                      fill: isDark
-                        ? '#0B0B0B'
-                        : '#FFFFFF',
-                      stroke: '#D4AF37',
+                      fill: isDark ? "#050A10" : "#FFFFFF",
+                      stroke: "#67E8F9",
                       strokeWidth: 2,
                     }}
                     name="Authentication Events"
@@ -1139,11 +1096,8 @@ export const DashboardPage = ({
           ORGANIZATIONAL INTELLIGENCE
       ===================================================== */}
 
-      <section className="mt-5 grid grid-cols-1 xl:grid-cols-12 gap-5">
-        <Panel
-          isDark={isDark}
-          className="xl:col-span-8 p-6 sm:p-8"
-        >
+      <section className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <Panel isDark={isDark} className="xl:col-span-8 p-6 sm:p-8">
           <SectionHeader
             eyebrow="Organizational Exposure"
             title="Department Risk Intelligence"
@@ -1161,11 +1115,9 @@ export const DashboardPage = ({
                         {department.name}
                       </span>
 
-                      <span className="ml-2 text-[10px] font-mono text-gray-500">
-                        {department.count}{' '}
-                        {department.count === 1
-                          ? 'user'
-                          : 'users'}
+                      <span className="ml-2 text-[12px] font-mono text-[#7F8A96]">
+                        {department.count}{" "}
+                        {department.count === 1 ? "user" : "users"}
                       </span>
                     </div>
 
@@ -1174,12 +1126,12 @@ export const DashboardPage = ({
                         text-xs font-mono font-semibold
                         ${
                           department.risk >= 75
-                            ? 'text-red-400'
+                            ? "text-red-400"
                             : department.risk >= 60
-                            ? 'text-orange-400'
-                            : department.risk >= 40
-                            ? 'text-[#D4AF37]'
-                            : 'text-emerald-400'
+                              ? "text-orange-400"
+                              : department.risk >= 40
+                                ? "text-[#D4AF37]"
+                                : "text-emerald-400"
                         }
                       `}
                     >
@@ -1190,33 +1142,28 @@ export const DashboardPage = ({
                   <div
                     className={`
                       h-2
+                      rounded-full
                       overflow-hidden
-                      ${
-                        isDark
-                          ? 'bg-white/5'
-                          : 'bg-black/5'
-                      }
+                      ${isDark ? "bg-white/5" : "bg-black/5"}
                     `}
                   >
                     <div
                       className={`
                         h-full
+                        rounded-full
                         transition-all duration-700
                         ${
                           department.risk >= 75
-                            ? 'bg-red-500'
+                            ? "bg-red-500"
                             : department.risk >= 60
-                            ? 'bg-orange-500'
-                            : department.risk >= 40
-                            ? 'bg-[#D4AF37]'
-                            : 'bg-emerald-500'
+                              ? "bg-orange-500"
+                              : department.risk >= 40
+                                ? "bg-[#D4AF37]"
+                                : "bg-emerald-500"
                         }
                       `}
                       style={{
-                        width: `${Math.min(
-                          100,
-                          department.risk
-                        )}%`,
+                        width: `${Math.min(100, department.risk)}%`,
                       }}
                     />
                   </div>
@@ -1231,10 +1178,7 @@ export const DashboardPage = ({
           )}
         </Panel>
 
-        <Panel
-          isDark={isDark}
-          className="xl:col-span-4 p-6 sm:p-8"
-        >
+        <Panel isDark={isDark} className="xl:col-span-4 p-6 sm:p-8">
           <SectionHeader
             eyebrow="Threat Taxonomy"
             title="Threat Distribution"
@@ -1244,44 +1188,35 @@ export const DashboardPage = ({
 
           {threatDistribution.length > 0 ? (
             <div className="space-y-5">
-              {threatDistribution.map(
-                (threat, index) => (
-                  <div key={threat.type}>
-                    <div className="flex justify-between gap-3 mb-2">
-                      <span className="text-xs text-gray-400">
-                        {threat.type}
-                      </span>
+              {threatDistribution.map((threat, index) => (
+                <div key={threat.type}>
+                  <div className="flex justify-between gap-3 mb-2">
+                    <span className="text-xs text-[#A7B0BA]">
+                      {threat.type}
+                    </span>
 
-                      <span className="text-[10px] font-mono">
-                        {threat.count} ·{' '}
-                        {threat.percentage}%
-                      </span>
-                    </div>
-
-                    <div
-                      className={`
-                        h-1.5
-                        ${
-                          isDark
-                            ? 'bg-white/5'
-                            : 'bg-black/5'
-                        }
-                      `}
-                    >
-                      <div
-                        className="h-full bg-[#D4AF37]"
-                        style={{
-                          width: `${threat.percentage}%`,
-                          opacity:
-                            1 -
-                            index *
-                              0.12,
-                        }}
-                      />
-                    </div>
+                    <span className="text-[12px] font-mono">
+                      {threat.count} · {threat.percentage}%
+                    </span>
                   </div>
-                )
-              )}
+
+                  <div
+                    className={`
+                        h-1.5
+                        rounded-full
+                        ${isDark ? "bg-white/5" : "bg-black/5"}
+                      `}
+                  >
+                    <div
+                      className="h-full bg-[#67E8F9]"
+                      style={{
+                        width: `${threat.percentage}%`,
+                        opacity: 1 - index * 0.12,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <EmptyState
@@ -1306,101 +1241,71 @@ export const DashboardPage = ({
               isDark={isDark}
               rightContent={
                 <div className="text-right">
-                  <span className="block text-[9px] font-mono uppercase text-gray-500">
+                  <span className="block text-[12px] font-mono uppercase text-[#7F8A96]">
                     Monitored
                   </span>
 
-                  <span className="font-serif-display text-2xl">
-                    {totalEmployees}
-                  </span>
+                  <span className="text-2xl">{totalEmployees}</span>
                 </div>
               }
             />
           </div>
 
           {users.length > 0 ? (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-xl border border-white/5">
               <table className="w-full min-w-[950px] text-left">
                 <thead>
                   <tr
                     className={`
                       border-y
-                      text-[9px]
+                      bg-white/[0.015]
+                      text-[12px]
                       font-mono
                       uppercase
                       tracking-[0.15em]
                       ${
                         isDark
-                          ? 'border-white/10 text-gray-500'
-                          : 'border-black/10 text-gray-500'
+                          ? "border-white/10 text-[#7F8A96]"
+                          : "border-black/10 text-[#7F8A96]"
                       }
                     `}
                   >
-                    <th className="px-6 py-4">
-                      Employee
-                    </th>
+                    <th className="px-6 py-4">Employee</th>
 
-                    <th className="px-4 py-4">
-                      Department
-                    </th>
+                    <th className="px-4 py-4">Department</th>
 
-                    <th className="px-4 py-4">
-                      Risk
-                    </th>
+                    <th className="px-4 py-4">Risk</th>
 
-                    <th className="px-4 py-4">
-                      Trust
-                    </th>
+                    <th className="px-4 py-4">Trust</th>
 
-                    <th className="px-4 py-4">
-                      Status
-                    </th>
+                    <th className="px-4 py-4">Status</th>
 
-                    <th className="px-4 py-4">
-                      Last Login
-                    </th>
+                    <th className="px-4 py-4">Last Login</th>
 
-                    <th className="px-4 py-4">
-                      Trust State
-                    </th>
+                    <th className="px-4 py-4">Trust State</th>
 
-                    <th className="px-6 py-4">
-                      Session
-                    </th>
+                    <th className="px-6 py-4">Session</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {users.map((user) => {
-                    const risk = Number(
-                      user.currentRiskScore ?? 0
-                    );
+                    const risk = Number(user.currentRiskScore ?? 0);
 
-                    const trust = Number(
-                      user.currentTrustScore ?? 0
-                    );
+                    const trust = Number(user.currentTrustScore ?? 0);
 
                     const initials =
                       user.name
-                        ?.split(' ')
-                        .map(
-                          (part) =>
-                            part[0]
-                        )
-                        .join('')
+                        ?.split(" ")
+                        .map((part) => part[0])
+                        .join("")
                         .slice(0, 2)
-                        .toUpperCase() ||
-                      'U';
+                        .toUpperCase() || "U";
 
                     return (
                       <tr
                         key={user.id}
-                        onClick={() =>
-                          onSelectUser &&
-                          onSelectUser(
-                            user.id
-                          )
-                        }
+                        onClick={() => onSelectUser && onSelectUser(user.id)}
                         className={`
                           group
                           border-b
@@ -1408,8 +1313,8 @@ export const DashboardPage = ({
                           transition-colors
                           ${
                             isDark
-                              ? 'border-white/5 hover:bg-white/[0.025]'
-                              : 'border-black/5 hover:bg-[#F7F4EC]/60'
+                              ? "border-white/5 hover:bg-white/[0.025]"
+                              : "border-black/5 hover:bg-[#F5F8FA]/60"
                           }
                         `}
                       >
@@ -1418,11 +1323,12 @@ export const DashboardPage = ({
                             <div
                               className="
                                 w-9 h-9
+                                rounded-lg
                                 flex items-center justify-center
-                                border border-[#D4AF37]/40
-                                bg-[#D4AF37]/5
-                                text-[#D4AF37]
-                                text-[10px]
+                                border border-[#67E8F9]/40
+                                bg-[#67E8F9]/5
+                                text-[#67E8F9]
+                                text-[12px]
                                 font-mono
                                 font-bold
                               "
@@ -1432,23 +1338,21 @@ export const DashboardPage = ({
 
                             <div>
                               <div className="text-sm font-medium">
-                                {user.name ||
-                                  'Unnamed Employee'}
+                                {user.name || "Unnamed Employee"}
                               </div>
 
-                              <div className="mt-0.5 text-[10px] font-mono text-gray-500">
+                              <div className="mt-0.5 text-[12px] font-mono text-[#7F8A96]">
                                 {user.email ||
                                   user.employeeId ||
-                                  'No identifier'}
+                                  "No identifier"}
                               </div>
                             </div>
                           </div>
                         </td>
 
                         <td className="px-4 py-4">
-                          <span className="text-xs text-gray-400">
-                            {user.department ||
-                              'Unassigned'}
+                          <span className="text-xs text-[#A7B0BA]">
+                            {user.department || "Unassigned"}
                           </span>
                         </td>
 
@@ -1460,23 +1364,20 @@ export const DashboardPage = ({
                                 font-mono
                                 font-semibold
                                 ${
-                                  risk >=
-                                  75
-                                    ? 'text-red-400'
-                                    : risk >=
-                                      60
-                                    ? 'text-orange-400'
-                                    : risk >=
-                                      40
-                                    ? 'text-[#D4AF37]'
-                                    : 'text-emerald-400'
+                                  risk >= 75
+                                    ? "text-red-400"
+                                    : risk >= 60
+                                      ? "text-orange-400"
+                                      : risk >= 40
+                                        ? "text-[#67E8F9]"
+                                        : "text-emerald-400"
                                 }
                               `}
                             >
                               {risk}
                             </span>
 
-                            <span className="text-[9px] font-mono text-gray-600">
+                            <span className="text-[12px] font-mono text-[#7F8A96]">
                               /100
                             </span>
                           </div>
@@ -1488,40 +1389,29 @@ export const DashboardPage = ({
                               {trust}
                             </span>
 
-                            <span className="text-[9px] font-mono text-gray-600">
+                            <span className="text-[12px] font-mono text-[#7F8A96]">
                               /100
                             </span>
                           </div>
                         </td>
 
                         <td className="px-4 py-4">
-                          <StatusBadge
-                            status={user.status}
-                          />
+                          <StatusBadge status={user.status} />
                         </td>
 
                         <td className="px-4 py-4">
-                          <span className="text-[10px] font-mono text-gray-500">
+                          <span className="text-[12px] font-mono text-[#7F8A96]">
                             {user.lastLoginAt
-                              ? new Date(
-                                  user.lastLoginAt
-                                ).toLocaleString(
-                                  [],
-                                  {
-                                    dateStyle:
-                                      'medium',
-                                    timeStyle:
-                                      'short',
-                                  }
-                                )
-                              : '—'}
+                              ? new Date(user.lastLoginAt).toLocaleString([], {
+                                  dateStyle: "medium",
+                                  timeStyle: "short",
+                                })
+                              : "—"}
                           </span>
                         </td>
 
                         <td className="px-4 py-4">
-                          <RiskBadge
-                            score={risk}
-                          />
+                          <RiskBadge score={risk} level={user.currentRiskLevel} />
                         </td>
 
                         <td className="px-6 py-4">
@@ -1530,19 +1420,17 @@ export const DashboardPage = ({
                               className={`
                                 w-1.5 h-1.5 rounded-full
                                 ${
-                                  user.status ===
-                                  'FROZEN'
-                                    ? 'bg-red-500'
-                                    : 'bg-emerald-400'
+                                  user.status === "FROZEN"
+                                    ? "bg-red-500"
+                                    : "bg-emerald-400"
                                 }
                               `}
                             />
 
-                            <span className="text-[10px] font-mono text-gray-500">
-                              {user.status ===
-                              'FROZEN'
-                                ? 'Terminated'
-                                : 'Active'}
+                            <span className="text-[12px] font-mono text-[#7F8A96]">
+                              {user.status === "FROZEN"
+                                ? "Terminated"
+                                : "Active"}
                             </span>
                           </div>
                         </td>
@@ -1567,7 +1455,7 @@ export const DashboardPage = ({
           ALERTS + INCIDENTS
       ===================================================== */}
 
-      <section className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <section className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* ALERTS */}
 
         <Panel isDark={isDark} className="p-6 sm:p-8">
@@ -1580,14 +1468,14 @@ export const DashboardPage = ({
               <span
                 className="
                   inline-flex items-center gap-2
-                  text-[9px]
+                  text-[12px]
                   font-mono
                   uppercase
                   tracking-wider
-                  text-[#D4AF37]
+                  text-[#67E8F9]
                 "
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#67E8F9] animate-pulse" />
                 Live
               </span>
             }
@@ -1597,26 +1485,25 @@ export const DashboardPage = ({
             <div className="space-y-3">
               {recentAlerts.map((event) => {
                 const critical =
-                  event.severity ===
-                    'CRITICAL' ||
-                  event.isAnomalous;
+                  event.severity === "CRITICAL" || event.isAnomalous;
 
                 return (
                   <div
                     key={event.id}
                     className={`
                       group
+                      rounded-xl
                       border
                       p-4
                       transition-all
                       ${
                         critical
                           ? isDark
-                            ? 'border-red-500/20 bg-red-500/[0.025]'
-                            : 'border-red-500/20 bg-red-50/30'
+                            ? "border-red-500/20 bg-red-500/[0.025]"
+                            : "border-red-500/20 bg-red-50/30"
                           : isDark
-                          ? 'border-white/10 hover:border-[#D4AF37]/30'
-                          : 'border-black/10 hover:border-[#D4AF37]/40'
+                            ? "border-white/10 hover:border-[#67E8F9]/30"
+                            : "border-black/10 hover:border-[#67E8F9]/35"
                       }
                     `}
                   >
@@ -1625,12 +1512,13 @@ export const DashboardPage = ({
                         className={`
                           mt-0.5
                           w-8 h-8
+                          rounded-lg
                           flex items-center justify-center
                           border
                           ${
                             critical
-                              ? 'border-red-500/30 text-red-400'
-                              : 'border-[#D4AF37]/30 text-[#D4AF37]'
+                              ? "border-red-500/30 text-red-400"
+                              : "border-[#67E8F9]/30 text-[#67E8F9]"
                           }
                         `}
                       >
@@ -1644,32 +1532,26 @@ export const DashboardPage = ({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                           <span className="text-sm font-medium">
-                            {event.eventType ||
-                              'Security Event'}
+                            {event.eventType || "Security Event"}
                           </span>
 
-                          <span className="text-[9px] font-mono text-gray-500">
+                          <span className="text-[12px] font-mono text-[#7F8A96]">
                             {event.timestamp
-                              ? new Date(
-                                  event.timestamp
-                                ).toLocaleTimeString()
-                              : '—'}
+                              ? new Date(event.timestamp).toLocaleTimeString()
+                              : "—"}
                           </span>
                         </div>
 
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-[10px] font-mono text-gray-500">
-                            {event.userName ||
-                              'Unknown user'}
+                          <span className="text-[12px] font-mono text-[#7F8A96]">
+                            {event.userName || "Unknown user"}
                             {event.userDepartment
                               ? ` · ${event.userDepartment}`
-                              : ''}
+                              : ""}
                           </span>
 
-                          <span className="text-[10px] font-mono text-[#D4AF37]">
-                            Risk{' '}
-                            {event.riskContribution ??
-                              '—'}
+                          <span className="text-[12px] font-mono text-[#67E8F9]">
+                            Risk {event.riskContribution ?? "—"}
                           </span>
                         </div>
                       </div>
@@ -1699,11 +1581,11 @@ export const DashboardPage = ({
                 onClick={onSelectIncident}
                 className="
                   inline-flex items-center gap-1
-                  text-[9px]
+                  text-[12px]
                   font-mono
                   uppercase
                   tracking-wider
-                  text-[#D4AF37]
+                  text-[#67E8F9]
                   hover:underline
                 "
               >
@@ -1719,21 +1601,19 @@ export const DashboardPage = ({
                 <button
                   key={incident.id}
                   onClick={() =>
-                    onSelectIncident &&
-                    onSelectIncident(
-                      incident.id
-                    )
+                    onSelectIncident && onSelectIncident(incident.id)
                   }
                   className={`
                     w-full
                     text-left
+                    rounded-xl
                     border
                     p-4
                     transition-all
                     ${
                       isDark
-                        ? 'border-white/10 hover:border-[#D4AF37]/40'
-                        : 'border-black/10 hover:border-[#D4AF37]/50'
+                        ? "border-white/10 hover:border-[#67E8F9]/35"
+                        : "border-black/10 hover:border-[#67E8F9]/45"
                     }
                   `}
                 >
@@ -1744,13 +1624,11 @@ export const DashboardPage = ({
                           className={`
                             block w-2 h-2 rounded-full
                             ${
-                              incident.severity ===
-                              'CRITICAL'
-                                ? 'bg-red-500'
-                                : incident.severity ===
-                                  'HIGH'
-                                ? 'bg-orange-500'
-                                : 'bg-[#D4AF37]'
+                              incident.severity === "CRITICAL"
+                                ? "bg-red-500"
+                                : incident.severity === "HIGH"
+                                  ? "bg-orange-500"
+                                  : "bg-[#67E8F9]"
                             }
                           `}
                         />
@@ -1760,15 +1638,14 @@ export const DashboardPage = ({
                         <h4 className="text-sm font-medium">
                           {incident.title ||
                             incident.eventType ||
-                            'Security Incident'}
+                            "Security Incident"}
                         </h4>
 
-                        <p className="mt-1 text-[10px] font-mono text-gray-500">
-                          {incident.userName ||
-                            'Unknown user'}
+                        <p className="mt-1 text-[12px] font-mono text-[#7F8A96]">
+                          {incident.userName || "Unknown user"}
                           {incident.userDepartment
                             ? ` · ${incident.userDepartment}`
-                            : ''}
+                            : ""}
                         </p>
                       </div>
                     </div>
@@ -1776,23 +1653,20 @@ export const DashboardPage = ({
                     <span
                       className={`
                         shrink-0
-                        text-[9px]
+                        text-[12px]
                         font-mono
                         uppercase
                         tracking-wider
                         ${
-                          incident.severity ===
-                          'CRITICAL'
-                            ? 'text-red-400'
-                            : incident.severity ===
-                              'HIGH'
-                            ? 'text-orange-400'
-                            : 'text-[#D4AF37]'
+                          incident.severity === "CRITICAL"
+                            ? "text-red-400"
+                            : incident.severity === "HIGH"
+                              ? "text-orange-400"
+                              : "text-[#67E8F9]"
                         }
                       `}
                     >
-                      {incident.severity ||
-                        'UNKNOWN'}
+                      {incident.severity || "UNKNOWN"}
                     </span>
                   </div>
 
@@ -1801,20 +1675,15 @@ export const DashboardPage = ({
                       mt-4 pt-3
                       border-t
                       flex items-center justify-between
-                      ${
-                        isDark
-                          ? 'border-white/5'
-                          : 'border-black/5'
-                      }
+                      ${isDark ? "border-white/5" : "border-black/5"}
                     `}
                   >
-                    <span className="text-[9px] font-mono uppercase text-gray-500">
+                    <span className="text-[12px] font-mono uppercase text-[#7F8A96]">
                       Status
                     </span>
 
-                    <span className="text-[9px] font-mono uppercase text-gray-400">
-                      {incident.status ||
-                        'OPEN'}
+                    <span className="text-[12px] font-mono uppercase text-[#A7B0BA]">
+                      {incident.status || "OPEN"}
                     </span>
                   </div>
                 </button>
@@ -1841,19 +1710,15 @@ export const DashboardPage = ({
           justify-between
           gap-4
           border-t
-          pt-5
-          ${
-            isDark
-              ? 'border-white/10'
-              : 'border-black/10'
-          }
+          pt-6
+          ${isDark ? "border-white/10" : "border-black/10"}
         `}
       >
         <div className="flex items-center gap-3">
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
 
           <div>
-            <span className="block text-[9px] font-mono uppercase tracking-wider text-gray-500">
+            <span className="block text-[12px] font-mono uppercase tracking-wider text-[#7F8A96]">
               CyberOrbit Monitoring Status
             </span>
 
@@ -1863,14 +1728,14 @@ export const DashboardPage = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-5 text-[9px] font-mono uppercase tracking-wider text-gray-500">
+        <div className="flex items-center gap-5 text-[12px] font-mono uppercase tracking-wider text-[#7F8A96]">
           <span className="flex items-center gap-1.5">
-            <Zap className="w-3 h-3 text-[#D4AF37]" />
+            <Zap className="w-3 h-3 text-[#67E8F9]" />
             Continuous Evaluation
           </span>
 
           <span className="flex items-center gap-1.5">
-            <Shield className="w-3 h-3 text-[#D4AF37]" />
+            <Shield className="w-3 h-3 text-[#67E8F9]" />
             Identity Monitoring
           </span>
         </div>

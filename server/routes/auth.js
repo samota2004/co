@@ -1,5 +1,9 @@
 import { Router } from "express";
 import crypto from "crypto";
+import {requireAuth,requireSecurityAdmin} from '../middleware/auth.js';
+import {issueSession,rotateSession,logout} from '../services/session-service.js';
+import {api,SecurityError,audit,securityErrorHandler} from '../services/security-common.js';
+import bcrypt from 'bcryptjs';
 import { prisma } from "../models/prisma.js";
 
 import {
@@ -13,6 +17,7 @@ import {
   sanitizeUser,
   isAdminUser
 } from "../services/auth-service.js";
+import {startChallenge} from '../services/auth-service.js';
 
 import {
   sendPasswordResetEmail
@@ -20,13 +25,15 @@ import {
 
 const router = Router();
 
-router.get("/admins", async (req, res) => {
+router.get("/admins", requireSecurityAdmin, async (req, res) => {
   try {
     const admins = await prisma.user.findMany({
       where: {
         roleCode: {
           in: ["SECURITY_ADMIN", "SYSTEM_ADMIN"]
         },
+        companyId: req.user.companyId,
+        deletedAt: null,
         status: "ACTIVE"
       },
       select: {
@@ -48,15 +55,7 @@ router.get("/admins", async (req, res) => {
       admins
     });
   } catch (error) {
-    console.error("Admin list error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "ADMIN_LIST_ERROR",
-        message: "Unable to load administrator accounts."
-      }
-    });
+    return securityErrorHandler(error,req,res,()=>{});
   }
 });
 
@@ -79,18 +78,11 @@ router.post("/login", async (req, res) => {
       password,
       req
     );
+    if(result.success&&!result.requiresMfa)Object.assign(result,await issueSession(result.user,req,res,false,result.deviceId));
 
     return res.status(result.status).json(result);
   } catch (error) {
-    console.error("Login error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "LOGIN_ERROR",
-        message: "Unable to process login."
-      }
-    });
+    return securityErrorHandler(error,req,res,()=>{});
   }
 });
 
@@ -124,17 +116,11 @@ router.post("/mfa/verify", async (req, res) => {
       req
     );
 
+    if(result.success)Object.assign(result,await issueSession(result.user,req,res,true));
+
     return res.status(result.status).json(result);
   } catch (error) {
-    console.error("MFA error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "MFA_ERROR",
-        message: "Unable to verify OTP."
-      }
-    });
+    return securityErrorHandler(error,req,res,()=>{});
   }
 });
 
@@ -152,19 +138,11 @@ router.post("/mfa/resend", async (req, res) => {
       });
     }
 
-    const result = await resendOtp(challengeId);
+    const result = await resendOtp(challengeId,req);
 
     return res.status(result.status).json(result);
   } catch (error) {
-    console.error("OTP resend error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "OTP_RESEND_ERROR",
-        message: "Unable to resend OTP."
-      }
-    });
+    return securityErrorHandler(error,req,res,()=>{});
   }
 });
 
@@ -194,13 +172,13 @@ router.post("/forgot-password", async (req, res) => {
 
     if (
       !user ||
-      user.status !== "ACTIVE" ||
-      !isAdminUser(user)
+      !isAdminUser(user) ||
+      user.status !== "ACTIVE"
     ) {
       return res.json({
         success: true,
         message:
-          "If this admin email exists, password reset instructions have been sent."
+          "If this email exists, password reset instructions have been sent."
       });
     }
 
@@ -237,14 +215,9 @@ router.post("/forgot-password", async (req, res) => {
         resetToken: token
       });
 
-      console.log(
-        `Password reset email sent to ${user.email}`
-      );
+      await audit(prisma,user,'PASSWORD_RESET_REQUESTED',{delivery:'smtp'});
     } catch (emailError) {
-      console.error(
-        "Password reset email failed:",
-        emailError.message
-      );
+      console.error(JSON.stringify({event:'PASSWORD_RESET_DELIVERY_FAILED',category:emailError.name}));
 
       return res.status(503).json({
         success: false,
@@ -262,15 +235,7 @@ router.post("/forgot-password", async (req, res) => {
         "If this admin email exists, password reset instructions have been sent."
     });
   } catch (error) {
-    console.error("Forgot password error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "FORGOT_PASSWORD_ERROR",
-        message: "Unable to process password reset request."
-      }
-    });
+    return securityErrorHandler(error,req,res,()=>{});
   }
 });
 
@@ -290,12 +255,12 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
-    if (String(finalPassword).length < 8) {
+    if (String(finalPassword).length < 12 || String(finalPassword).length > 128) {
       return res.status(400).json({
         success: false,
         error: {
           code: "WEAK_PASSWORD",
-          message: "Password must contain at least 8 characters."
+          message: "Password must contain 12–128 characters."
         }
       });
     }
@@ -321,8 +286,8 @@ router.post("/reset-password", async (req, res) => {
     if (
       !resetRecord ||
       !resetRecord.user ||
-      resetRecord.user.status !== "ACTIVE" ||
-      !isAdminUser(resetRecord.user)
+      !isAdminUser(resetRecord.user) ||
+      resetRecord.user.status !== "ACTIVE"
     ) {
       return res.status(400).json({
         success: false,
@@ -340,41 +305,27 @@ router.post("/reset-password", async (req, res) => {
       12
     );
 
-    await prisma.$transaction([
-      prisma.user.update({
+    await prisma.$transaction(async tx=>{
+      const consumed=await tx.passwordResetToken.updateMany({where:{id:resetRecord.id,usedAt:null,expiresAt:{gt:new Date()}},data:{usedAt:new Date()}});
+      if(consumed.count!==1)throw new SecurityError(400,'RESET_ALREADY_USED','Password reset link was already used.');
+      await tx.user.update({
         where: {
           id: resetRecord.userId
         },
         data: {
           passwordHash: hashedPassword,
-          passwordChangedAt: new Date()
+          passwordChangedAt: new Date(),authVersion:{increment:1}
         }
-      }),
-
-      prisma.passwordResetToken.update({
-        where: {
-          id: resetRecord.id
-        },
-        data: {
-          usedAt: new Date()
-        }
-      })
-    ]);
+      });
+      await tx.session.updateMany({where:{userId:resetRecord.userId,revokedAt:null},data:{revokedAt:new Date()}});
+    });
 
     return res.json({
       success: true,
       message: "Password reset successfully. You can now log in."
     });
   } catch (error) {
-    console.error("Reset password error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "RESET_PASSWORD_ERROR",
-        message: "Unable to reset password."
-      }
-    });
+    return securityErrorHandler(error,req,res,()=>{});
   }
 });
 
@@ -397,16 +348,21 @@ router.get("/me", async (req, res) => {
       user: sanitizeUser(user)
     });
   } catch (error) {
-    console.error("Auth me error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "AUTH_ME_ERROR",
-        message: "Unable to load authenticated user."
-      }
-    });
+    return securityErrorHandler(error,req,res,()=>{});
   }
 });
 
+router.post('/mfa/challenge',requireAuth,api(req=>startChallenge(req.user,req,'STEP_UP')));
+router.get('/sessions',requireAuth,api(async req=>({sessions:await prisma.session.findMany({where:{userId:req.user.id,revokedAt:null,expiresAt:{gt:new Date()}},select:{id:true,ip:true,userAgent:true,createdAt:true,expiresAt:true,mfaVerifiedAt:true},orderBy:{createdAt:'desc'},take:100})})));
+router.post('/sessions/:id/revoke',requireAuth,api(async req=>{const changed=await prisma.session.updateMany({where:{id:req.params.id,userId:req.user.id,revokedAt:null},data:{revokedAt:new Date()}});if(!changed.count)throw new SecurityError(404,'SESSION_NOT_FOUND','Session not found.');await audit(prisma,req.user,'SESSION_REVOKED');return{message:'Session revoked.'};}));
+router.post('/password/change',requireAuth,api(async req=>{
+ const {currentPassword,newPassword}=req.body;
+ if(typeof currentPassword!=='string'||currentPassword.length>128||typeof newPassword!=='string'||newPassword.length<12||newPassword.length>128)throw new SecurityError(400,'INVALID_PASSWORD','Enter the current password and a new password of 12–128 characters.');
+ if(!req.user.passwordHash||!await bcrypt.compare(currentPassword,req.user.passwordHash))throw new SecurityError(401,'INCORRECT_PASSWORD','Current password is incorrect.');
+ const passwordHash=await bcrypt.hash(newPassword,12);
+ await prisma.$transaction(async tx=>{await tx.user.update({where:{id:req.user.id},data:{passwordHash,passwordChangedAt:new Date(),authVersion:{increment:1}}});await tx.session.updateMany({where:{userId:req.user.id,revokedAt:null},data:{revokedAt:new Date()}});await audit(tx,req.user,'PASSWORD_CHANGED');});
+ return{message:'Password changed. All sessions were invalidated. Sign in again.'};
+}));
+router.post('/refresh',api((req,res)=>rotateSession(req,res)));
+router.post('/logout',requireAuth,api((req,res)=>logout(req,res,req.user)));
 export default router;

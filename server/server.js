@@ -2,10 +2,15 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createServer } from "node:http";
+import {isIP} from 'node:net';
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 
 import apiRouter from "./routes/index.js";
+import {securityHttp,allowedOrigins} from './middleware/security-http.js';
+import {securityErrorHandler} from './services/security-common.js';
+import { endpointRequestContext, endpointPayloadError } from './middleware/endpoint-errors.js';
 import {
   notFoundHandler,
   errorHandler
@@ -19,19 +24,37 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(securityHttp);
+const PORT = Number(process.env.PORT || 3000);
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
+  console.error('[CyberOrbit SOC] PORT must be a number between 0 and 65535.');
+  process.exit(1);
+}
+let ready = false;
+app.use((req, res, next) => {
+  if (ready) return next();
+  res.set('Retry-After', '1').status(503).json({ success: false, error: 'Server is starting. Retry shortly.' });
+});
+// Explicitly trust only a same-host TLS reverse proxy when configured.
+if(process.env.TRUST_PROXY){
+ const proxies=process.env.TRUST_PROXY.split(',').map(x=>x.trim());
+ if(proxies.some(x=>x!=='loopback'&&!isIP(x)))throw new Error('TRUST_PROXY must contain loopback or explicit trusted proxy IP addresses.');
+ app.set('trust proxy',proxies);
+}
 
 // CORS
 app.use(
   cors({
-    origin: true,
+    origin: (origin,callback)=>callback(null,!origin||allowedOrigins().has(origin)),
     credentials: true
   })
 );
 
 // Body parsing
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// Endpoint limits apply before the legacy general body parser.
+app.use('/api/endpoint', endpointRequestContext, express.json({ limit: '256kb' }), endpointPayloadError);
+app.use(express.json({ limit: "256kb" }));
+app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 
 // Health check
 app.get("/health", (req, res) => {
@@ -45,41 +68,66 @@ app.get("/health", (req, res) => {
 // API routes
 app.use("/api", apiRouter);
 
+// Reserve the API port before starting Vite. A duplicate launch must fail
+// before it creates file watchers or a second development WebSocket server.
+const httpServer = createServer(app);
+try {
+  await new Promise((resolve, reject) => {
+    httpServer.once('error', reject);
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      httpServer.removeListener('error', reject);
+      resolve();
+    });
+  });
+} catch (error) {
+  console.error(error.code === 'EADDRINUSE'
+    ? `[CyberOrbit SOC] Port ${PORT} is already in use. Stop the existing backend with Ctrl+C in its terminal before starting another copy.`
+    : `[CyberOrbit SOC] Cannot listen on port ${PORT}: ${error.code || error.message}`);
+  process.exit(1);
+}
+httpServer.on('error', error => {
+  console.error(`[CyberOrbit SOC] HTTP server error: ${error.code || error.message}`);
+  process.exit(1);
+});
+
 // Vite development server / production static files
-if (process.env.NODE_ENV !== "production") {
-  const viteConfigFile = path.resolve(
-    __dirname,
-    "../client/vite.config.js"
-  );
+try {
+  if (process.env.NODE_ENV !== "production") {
+    const viteConfigFile = path.resolve(__dirname, "../client/vite.config.js");
 
-  const vite = await createViteServer({
-    configFile: viteConfigFile,
-    server: {
-      middlewareMode: true
-    },
-    appType: "spa"
-  });
+    const vite = await createViteServer({
+      configFile: viteConfigFile,
+      server: {
+        middlewareMode: true,
+        // Share the HTTP listener instead of opening Vite's default port 24678.
+        hmr: process.env.DISABLE_HMR === 'true' ? false : { server: httpServer }
+      },
+      appType: "spa"
+    });
 
-  app.use(vite.middlewares);
-} else {
-  const distPath = path.resolve(__dirname, "../client/dist");
+    app.use(vite.middlewares);
+  } else {
+    // Frontend build stays inside the client module.
+    const distPath = path.resolve(__dirname, '../client/dist');
 
-  app.use(express.static(distPath));
+    app.use(express.static(distPath));
 
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(distPath, "index.html"));
-  });
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+} catch (error) {
+  console.error(`[CyberOrbit SOC] Frontend startup failed: ${error.message}`);
+  httpServer.close();
+  process.exit(1);
 }
 
 // Error handlers
 app.use(notFoundHandler);
+app.use(securityErrorHandler);
 app.use(errorHandler);
 
 export default app;
 
-// Start server
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(
-    `[CyberOrbit SOC] Server running on http://localhost:${PORT}`
-  );
-});
+ready = true;
+console.log(`[CyberOrbit SOC] Server running on http://localhost:${httpServer.address().port}`);

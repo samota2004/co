@@ -59,7 +59,8 @@ function getUserRole(user) {
 export function generateJwtToken(
   user,
   mfaVerified = false,
-  deviceId = null
+  deviceId = null,
+  sessionId = null
 ) {
   const now = Math.floor(Date.now() / 1000);
 
@@ -73,9 +74,12 @@ export function generateJwtToken(
     email: user.email,
     role: getUserRole(user),
     mfaVerified,
+    authenticated: true,
     deviceId,
+    sid: sessionId,
+    av: user.authVersion ?? 0,
     iat: now,
-    exp: now + 8 * 60 * 60
+    exp: now + 15 * 60
   };
 
   const encodedHeader = base64UrlEncode(
@@ -235,7 +239,7 @@ export async function getRequesterUser(req) {
 
     if (
       !payload.sub ||
-      payload.mfaVerified !== true
+      (payload.mfaVerified !== true && payload.authenticated !== true)
     ) {
       return null;
     }
@@ -251,8 +255,17 @@ export async function getRequesterUser(req) {
       return null;
     }
 
-    if (user.status !== "ACTIVE") {
+    if (user.deletedAt || user.status !== "ACTIVE" || !isAdminRole(getUserRole(user))) {
       return null;
+    }
+    if(isAdminRole(user.roleCode)&&payload.mfaVerified!==true)return null;
+    req.authClaims=payload;
+
+    if ((payload.av ?? 0) !== (user.authVersion ?? 0) || user.passwordChangedAt && payload.iat < Math.floor(user.passwordChangedAt.getTime()/1000)) return null;
+    if (payload.sid) {
+      const session=await prisma.session.findFirst({where:{id:payload.sid,userId:user.id,revokedAt:null,expiresAt:{gt:new Date()}}});
+      if(!session)return null;
+      req.authSession=session;
     }
 
     return user;

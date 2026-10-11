@@ -1,14 +1,29 @@
+import { db } from '../models/db.js';
+import { prisma } from '../models/prisma.js';
 class SseManager {
   constructor() {
     this.clients = new Set();
-    this.heartbeatInterval = setInterval(() => {
+    this.scopes = new WeakMap();
+    this.heartbeatInterval = setInterval(async () => {
+      for (const client of this.clients) {
+        const scope=this.scopes.get(client);
+        try {
+          const user=scope && await prisma.user.findUnique({where:{id:scope.user.id},select:{id:true,status:true,companyId:true,roleCode:true,authVersion:true}});
+          if(!user || !['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(user.roleCode) || user.status!=='ACTIVE' || user.companyId!==scope.user.companyId || user.roleCode!==scope.user.roleCode || user.authVersion!==(scope.user.authVersion??0)) {client.end();this.clients.delete(client);}
+        }catch {client.end();this.clients.delete(client);}
+      }
       this.broadcast('HEARTBEAT', { timestamp: new Date().toISOString() });
     }, 25000);
+    // The HTTP listener owns process lifetime; importing authentication for a
+    // command or isolated test must not keep a finished process alive.
+    this.heartbeatInterval.unref();
   }
 
-  addClient(res) {
+  addClient(res, user, expiresAt = Date.now() + 8*3600000) {
     if (!res) return;
+    if (!user) return;
     this.clients.add(res);
+    this.scopes.set(res, { user, expiresAt });
 
     // Only write headers if they haven't been sent yet
     if (!res.headersSent) {
@@ -17,7 +32,6 @@ class SseManager {
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no',
-        'Access-Control-Allow-Origin': '*'
       });
       if (typeof res.flushHeaders === 'function') {
         res.flushHeaders();
@@ -43,13 +57,45 @@ class SseManager {
     this.clients.delete(res);
   }
 
-  getClientCount() {
-    return this.clients.size;
+  getClientCount(companyId) {
+    return [...this.clients].filter(client => !companyId || this.scopes.get(client)?.user.companyId === companyId).length;
   }
 
   broadcast(type, data) {
     const message = `data: ${JSON.stringify({ type, data, timestamp: new Date().toISOString() })}\n\n`;
     for (const client of this.clients) {
+      const scope = this.scopes.get(client);
+      if (!scope || scope.expiresAt <= Date.now()) { client.end(); this.clients.delete(client); continue; }
+      if (type !== 'HEARTBEAT') {
+        const subject = data?.event || data?.incident || data?.request || data?.user || data?.device || data?.entry || data;
+        const subjectId = subject?.userId || (data?.user ? data.user.id : null);
+        const owner = subjectId ? db.getUserById(subjectId) : null;
+        const companyId = data?.companyId || subject?.companyId || owner?.companyId || (owner ? 'legacy' : null);
+        const admin = ['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(scope.user.roleCode);
+        if(admin && scope.user.isMainAdmin!==true){
+          // Fail closed for broadcasts without an employee subject. Recheck the
+          // database on every delivery so reassignment takes effect immediately.
+          if(subjectId)prisma.user.count({where:{id:subjectId,deletedAt:null,companyId:scope.user.companyId,assignedAdminId:scope.user.id}}).then(count=>{
+            if(count===1&&this.clients.has(client)&&scope.expiresAt>Date.now()&&!client.writableEnded&&!client.destroyed)client.write(message);
+          }).catch(()=>{});
+          continue;
+        }
+        if(type==='AUDIT_LOG_ENTRY'&&!admin)continue;
+        if(['INCIDENT_CREATED','INCIDENT_UPDATED'].includes(type)&&!admin&&scope.user.roleCode!=='MANAGER')continue;
+        if (companyId && companyId !== scope.user.companyId) continue;
+        // Unscoped legacy globals are confined to the original single-company admin portal.
+        if (!companyId && (!admin || scope.user.companyId !== 'legacy')) continue;
+        if (!admin && subjectId !== scope.user.id) {
+          if(scope.user.roleCode==='MANAGER'&&subjectId&&companyId===scope.user.companyId){
+            // Re-check the current reporting relationship for every message.
+            // A cached report list would leak events after reassignment.
+            prisma.user.count({where:{id:subjectId,companyId:scope.user.companyId,managerId:scope.user.id}}).then(count=>{
+              if(count===1&&this.clients.has(client)&&scope.expiresAt>Date.now()&&!client.writableEnded&&!client.destroyed)client.write(message);
+            }).catch(()=>{});
+          }
+          continue;
+        }
+      }
       if (!client || client.writableEnded || client.destroyed) {
         this.clients.delete(client);
         continue;

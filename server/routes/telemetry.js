@@ -9,6 +9,8 @@ import {
   featureState
 } from "../services/ml-feature-aggregator.js";
 import { sseManager } from "../services/sse.js";
+import { requireSecurityAdmin } from '../middleware/auth.js';
+import { prisma } from '../models/prisma.js';
 
 const router = Router();
 
@@ -30,7 +32,7 @@ function getRiskLevel(riskScore) {
   return "CRITICAL";
 }
 
-router.post("/ingest", async (req, res) => {
+router.post("/ingest", requireSecurityAdmin, async (req, res) => {
   try {
     const normalized =
       TelemetryNormalizer.normalize(
@@ -63,6 +65,9 @@ router.post("/ingest", async (req, res) => {
         }
       });
     }
+
+    const scopedUser = await prisma.user.findFirst({ where: { id: targetUser.id, companyId: req.user.companyId } });
+    if (!scopedUser) return res.status(403).json({ error: 'Company access denied' });
 
     const targetResource =
       normalized.resourceId

@@ -2,7 +2,7 @@ import shap
 import numpy as np
 import pandas as pd
 
-from .inference import model, FEATURE_NAMES
+from .inference import model, FEATURE_NAMES, feature_frame
 
 
 explainer = shap.TreeExplainer(model)
@@ -25,10 +25,7 @@ def explain(features: dict, top_n: int = 5) -> list:
         columns=FEATURE_NAMES
     )
 
-    input_data = input_data.apply(
-        pd.to_numeric,
-        errors="coerce"
-    ).fillna(0.0)
+    input_data = feature_frame(features)
 
     shap_values = explainer.shap_values(input_data)
 

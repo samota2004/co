@@ -1,122 +1,371 @@
-import React from 'react';
-import { 
-  Sparkles, 
-  RefreshCw, 
-  Sun, 
-  Moon, 
-  Menu
-} from 'lucide-react';
-import { useTheme } from '../context/ThemeContext';
+import React from "react";
+
+import { Sparkles, RefreshCw, Menu } from "lucide-react";
+
+// CyberOrbit is now dark-only.
+// ThemeContext is intentionally not used here so the TopBar stays
+// consistent with the SettingsPage master visual system.
+
+/* ======================================================
+   CONSTANTS / CONFIGURATION
+   ====================================================== */
+
+const TOPBAR_HEIGHT = 76;
+
+/* ======================================================
+   MAIN COMPONENT
+   ====================================================== */
 
 export const TopBar = ({
   currentUser,
-  currentPageTitle = 'Admin Dashboard',
+  currentPageTitle = "Admin Dashboard",
   onOpenCopilot,
   onRefreshData,
   isRefreshing,
   onLogout,
-  onToggleMobileNav
+  onToggleMobileNav,
 }) => {
-  const { isDark, toggleTheme } = useTheme();
+  const adminName = currentUser?.name || "Account";
 
-  const adminName = currentUser?.name || 'Alex Rivera';
-  const adminRole = currentUser?.role === 'SECURITY_ADMIN' 
-    ? 'SOC Lead' 
-    : currentUser?.role === 'SYSTEM_ADMIN' 
-      ? 'System Admin' 
-      : 'Security Analyst';
+  const adminRole =
+    (currentUser?.role || currentUser?.roleCode) === "SECURITY_ADMIN"
+      ? "SOC Lead"
+      : (currentUser?.role || currentUser?.roleCode) === "SYSTEM_ADMIN"
+        ? "System Admin"
+        : "Security Analyst";
+
+  const adminInitials = adminName
+    .split(" ")
+    .map((name) => name[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  /* ======================================================
+     RENDER
+     ====================================================== */
 
   return (
-    <header 
-      id="cyberorbit-topbar" 
-      className={`h-16 border-b px-4 md:px-6 flex items-center justify-between z-20 backdrop-blur-md shrink-0 transition-colors duration-200 ${
-        isDark 
-          ? 'bg-[#0E0E0E]/95 border-[#2A2A2A] text-white' 
-          : 'bg-[#FFFFFF]/95 border-[#E5E5E5] text-[#0E0E0E]'
-      }`}
+    <header
+      id="cyberorbit-topbar"
+      style={{ height: `${TOPBAR_HEIGHT}px` }}
+      className="
+        relative
+        w-full
+        border-b
+        border-white/10
+        flex
+        items-center
+        justify-between
+        px-4
+        sm:px-6
+        lg:px-8
+        z-30
+        shrink-0
+        bg-[#03070C]/95
+        text-[#F4F7FA]
+        backdrop-blur-xl
+        shadow-[0_8px_35px_rgba(0,0,0,0.12)]
+        transition-all
+        duration-300
+      "
     >
-      {/* Left: Mobile Toggle, Clean Page Title, Data Refresh */}
-      <div className="flex items-center gap-3 md:gap-4 min-w-0">
-        {/* Mobile Hamburger Drawer Trigger */}
+      {/* ==================================================
+          TECHNICAL BACKGROUND
+          ================================================== */}
+
+      <div
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          opacity-[0.045]
+        "
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(103,232,249,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(103,232,249,0.12) 1px, transparent 1px)",
+          backgroundSize: "30px 30px",
+        }}
+      />
+
+      {/* ==================================================
+          LEFT SIDE
+          ================================================== */}
+
+      <div
+        className="
+          relative
+          z-10
+          flex
+          items-center
+          gap-3
+          sm:gap-4
+          min-w-0
+        "
+      >
+        {/* ==================================================
+            MOBILE NAVIGATION
+            ================================================== */}
+
         <button
           id="btn-topbar-mobile-menu"
           onClick={onToggleMobileNav}
           title="Open Navigation"
-          className={`md:hidden p-2 rounded-sm border cursor-pointer transition-colors ${
-            isDark 
-              ? 'border-[#2A2A2A] text-gray-300 hover:text-white hover:border-[#C6A14A]' 
-              : 'border-[#E5E5E5] text-gray-700 hover:text-black hover:border-[#C6A14A]'
-          }`}
+          aria-label="Open Navigation"
+          className="
+            md:hidden
+            w-10
+            h-10
+            shrink-0
+            flex
+            items-center
+            justify-center
+            rounded-xl
+            border
+            border-white/10
+            bg-[#050A10]
+            text-[#67E8F9]
+            cursor-pointer
+            transition-all
+            duration-200
+            hover:border-[#67E8F9]/30
+            hover:bg-[#67E8F9]/[0.05]
+            hover:shadow-[0_0_18px_rgba(103,232,249,0.07)]
+          "
         >
-          <Menu className="w-5 h-5" />
+          <Menu className="w-[18px] h-[18px]" />
         </button>
 
-        {/* Current Page Title */}
+        {/* ==================================================
+            CURRENT PAGE TITLE
+            ================================================== */}
+
         {currentPageTitle && (
           <div className="min-w-0">
-            <h1 className="font-serif-display text-lg md:text-xl font-light tracking-tight truncate">
+            <div
+              className="
+                hidden
+                sm:block
+                mb-1
+                text-[9px]
+                uppercase
+                tracking-[0.20em]
+                text-[#D4AF37]
+              "
+            >
+              CyberOrbit Security Console
+            </div>
+
+            <h1
+              className="
+                truncate
+                text-[18px]
+                sm:text-[20px]
+                lg:text-[21px]
+                font-light
+                tracking-[-0.025em]
+                leading-none
+                text-[#F4F7FA]
+              "
+            >
               {currentPageTitle}
             </h1>
           </div>
         )}
 
-        {/* Data Refresh */}
+        {/* ==================================================
+            DATA REFRESH
+            ================================================== */}
+
         <button
           id="btn-topbar-refresh"
           onClick={onRefreshData}
           disabled={isRefreshing}
           title="Re-sync Telemetry"
-          className={`p-2 border rounded-sm transition-colors cursor-pointer ${
-            isDark
-              ? 'bg-[#141414] border-[#2A2A2A] hover:border-[#C6A14A] text-gray-400 hover:text-[#C6A14A]'
-              : 'bg-[#FFFFFF] border-[#E5E5E5] hover:border-[#C6A14A] text-gray-600 hover:text-[#C6A14A]'
-          }`}
+          aria-label="Re-sync Telemetry"
+          className="
+            group
+            w-9
+            h-9
+            shrink-0
+            flex
+            items-center
+            justify-center
+            rounded-xl
+            border
+            border-white/10
+            bg-[#050A10]
+            text-[#7F8A96]
+            transition-all
+            duration-200
+            cursor-pointer
+            disabled:cursor-not-allowed
+            disabled:opacity-50
+            hover:text-[#67E8F9]
+            hover:border-[#67E8F9]/30
+            hover:bg-[#67E8F9]/[0.05]
+            hover:shadow-[0_0_18px_rgba(103,232,249,0.07)]
+          "
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-[#C6A14A]' : ''}`} />
+          <RefreshCw
+            className={`
+              w-3.5
+              h-3.5
+              transition-all
+              duration-300
+              ${
+                isRefreshing
+                  ? "animate-spin text-[#67E8F9]"
+                  : "group-hover:rotate-90"
+              }
+            `}
+          />
         </button>
       </div>
 
-      {/* Right: AI Copilot, Theme Toggle, User Profile */}
-      <div className="flex items-center gap-2 md:gap-3">
-        {/* AI Copilot Button */}
+      {/* ==================================================
+          RIGHT SIDE
+          ================================================== */}
+
+      <div
+        className="
+          relative
+          z-10
+          flex
+          items-center
+          gap-2
+          sm:gap-3
+          shrink-0
+        "
+      >
+        {/* ==================================================
+            AI COPILOT
+            ================================================== */}
+
         {onOpenCopilot && (
           <button
             id="btn-topbar-copilot"
             onClick={onOpenCopilot}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-[#C6A14A] rounded-sm text-xs font-mono tracking-wider bg-[#C6A14A]/10 text-[#C6A14A] hover:bg-[#C6A14A] hover:text-black transition-all cursor-pointer"
+            title="Open AI Copilot"
+            aria-label="Open AI Copilot"
+            className="
+              inline-flex
+              items-center
+              gap-1.5
+              h-10
+              px-3
+              sm:px-3.5
+              rounded-xl
+              border
+              border-[#D4AF37]/40
+              bg-[#D4AF37]/[0.06]
+              text-[#D4AF37]
+              text-[11px]
+              sm:text-[12px]
+              font-medium
+              uppercase
+              tracking-[0.12em]
+              transition-all
+              duration-200
+              cursor-pointer
+              shadow-[0_8px_25px_rgba(212,175,55,0.04)]
+              hover:bg-[#D4AF37]/10
+              hover:border-[#D4AF37]/70
+              hover:-translate-y-0.5
+              hover:shadow-[0_10px_28px_rgba(212,175,55,0.07)]
+            "
           >
             <Sparkles className="w-3.5 h-3.5" />
+
             <span className="hidden sm:inline">AI COPILOT</span>
           </button>
         )}
 
-        {/* Theme Switcher */}
-        <button
-          id="btn-topbar-theme-toggle"
-          onClick={toggleTheme}
-          title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          className={`p-2 border rounded-sm transition-colors cursor-pointer ${
-            isDark 
-              ? 'border-[#2A2A2A] text-[#C6A14A] hover:bg-white/5' 
-              : 'border-[#E5E5E5] text-[#A98532] hover:bg-black/5'
-          }`}
-        >
-          {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4 text-gray-800" />}
-        </button>
+        {/* ==================================================
+            USER PROFILE
+            ================================================== */}
 
-        {/* User Profile */}
-        <div 
+        <div
           id="topbar-admin-profile"
-          className={`flex items-center gap-2 px-2.5 py-1.5 border rounded-sm ${
-            isDark ? 'bg-[#141414] border-[#2A2A2A]' : 'bg-[#FFFFFF] border-[#E5E5E5]'
-          }`}
+          className="
+            group
+            h-10
+            flex
+            items-center
+            gap-2
+            px-2
+            sm:px-2.5
+            rounded-xl
+            border
+            border-white/10
+            bg-[#050A10]
+            shadow-[0_8px_25px_rgba(0,0,0,0.12)]
+            transition-all
+            duration-200
+            hover:border-[#67E8F9]/25
+            hover:bg-[#070C12]
+          "
         >
-          <div className="w-6 h-6 rounded-xs border border-[#C6A14A] bg-[#C6A14A]/15 text-[#C6A14A] flex items-center justify-center text-[10px] font-mono font-bold shrink-0">
-            {adminName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+          {/* Avatar */}
+
+          <div
+            className="
+              w-7
+              h-7
+              rounded-lg
+              border
+              border-[#D4AF37]/60
+              bg-[#D4AF37]/10
+              flex
+              items-center
+              justify-center
+              text-[10px]
+              font-semibold
+              text-[#D4AF37]
+              shrink-0
+              shadow-[0_0_12px_rgba(212,175,55,0.06)]
+            "
+          >
+            {adminInitials}
           </div>
-          <div className="hidden sm:block text-left">
-            <div className="text-xs font-semibold leading-tight truncate max-w-[120px]">{adminName}</div>
-            <div className="text-[9px] font-mono text-[#C6A14A] tracking-wider uppercase">{adminRole}</div>
+
+          {/* User Details */}
+
+          <div
+            className="
+              hidden
+              sm:block
+              text-left
+              min-w-0
+            "
+          >
+            <div
+              className="
+                text-[12px]
+                font-semibold
+                leading-tight
+                truncate
+                max-w-[120px]
+                text-[#F4F7FA]
+              "
+            >
+              {adminName}
+            </div>
+
+            <div
+              className="
+                mt-0.5
+                text-[10px]
+                font-medium
+                tracking-[0.12em]
+                uppercase
+                truncate
+                max-w-[120px]
+                text-[#67E8F9]
+              "
+            >
+              {adminRole}
+            </div>
           </div>
         </div>
       </div>

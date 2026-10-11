@@ -23,6 +23,8 @@ enum DepartmentType {
   EXECUTIVE
   SECURITY
   IT
+  MARKETING
+  ADMINISTRATION
 }
 
 enum AccountStatus {
@@ -30,6 +32,7 @@ enum AccountStatus {
   FROZEN
   INVESTIGATION
   DISABLED
+  RESTRICTED
 }
 
 enum DeviceStatus {
@@ -54,9 +57,26 @@ enum EventType {
   PRIVILEGE_ELEVATION
   USB_TRANSFER
   POLICY_VIOLATION
+  MODEL_ASSESSMENT
   UNUSUAL_HOURS_ACCESS
   CROSS_DEPT_ACCESS
   MASS_DOWNLOAD
+  LOGIN
+  LOGOUT
+  FAILED_LOGIN
+  FILE_UPLOAD
+  USB_ACTIVITY
+  APPLICATION_ACCESS
+  APPLICATION_USAGE
+  RESOURCE_ACCESS
+  PRIVILEGE_CHANGE
+  PASSWORD_CHANGE
+  MFA_SUCCESS
+  MFA_FAILURE
+  CROSS_DEPARTMENT_ACCESS
+  SUSPICIOUS_DEVICE
+  UNUSUAL_LOCATION
+  SHELL_EXECUTION
 }
 
 enum EventSeverity {
@@ -64,6 +84,7 @@ enum EventSeverity {
   LOW
   MEDIUM
   HIGH
+  VERY_HIGH
   CRITICAL
 }
 
@@ -89,6 +110,10 @@ enum IncidentStatus {
   CONTAINED
   RESOLVED
   FALSE_POSITIVE
+  OPEN
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
 }
 
 enum AccessRequestStatus {
@@ -132,6 +157,7 @@ model Role {
 }
 
 model User {
+  companyId         String         @default("legacy")
   id                String         @id @default(cuid())
   employeeId        String         @unique
   name              String
@@ -144,7 +170,16 @@ model User {
   departmentCode    DepartmentType @default(ENGINEERING)
   department        Department?    @relation(fields: [departmentCode], references: [code])
   status            AccountStatus  @default(ACTIVE)
+  deletedAt         DateTime?
   isMainAdmin       Boolean        @default(false)
+  authVersion       Int            @default(0)
+  assignedAdminId   String?
+  assignedAdmin     User? @relation("AdminAssignments", fields: [assignedAdminId], references: [id], onDelete: SetNull)
+  assignedPeople    User[] @relation("AdminAssignments")
+  managerId         String?
+  manager           User?          @relation("ManagedEmployees", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports     User[]         @relation("ManagedEmployees")
+  trustUpdatedAt    DateTime?
 
   riskScore  Float         @default(10)
   trustScore Float         @default(90)
@@ -166,13 +201,56 @@ model User {
   passwordResetTokens PasswordResetToken[]
   mlPredictions       MlPrediction[]
   auditLogs           AuditLog[]
+  endpointDevices     EndpointDevice[]
 
   @@index([roleCode])
+  @@index([companyId, managerId])
+  @@index([companyId, assignedAdminId])
   @@index([departmentCode])
   @@index([status])
   @@index([riskScore])
   @@index([trustScore])
   @@map("users")
+}
+
+model EndpointDevice {
+  id             String   @id @default(uuid())
+  companyId      String
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  name           String
+  platform       String
+  mappedIdentity String?
+  credentialHash String?  @unique
+  enrollmentHash String?  @unique
+  enrollmentExpiresAt DateTime?
+  enrolledAt     DateTime?
+  revokedAt      DateTime?
+  lastSeen       DateTime?
+  agentVersion   String?
+  health         Json?
+  config         Json
+  createdAt      DateTime @default(now())
+  events         EndpointEvent[]
+  @@index([companyId, userId])
+  @@map("endpoint_devices")
+}
+
+model EndpointEvent {
+  id             String   @id @default(uuid())
+  eventId        String
+  deviceId       String
+  device         EndpointDevice @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  companyId      String
+  userId         String?
+  version        Int
+  type           String
+  occurredAt     DateTime
+  receivedAt     DateTime @default(now())
+  metadata       Json
+  @@unique([deviceId, eventId])
+  @@index([companyId, userId, occurredAt])
+  @@map("endpoint_events")
 }
 
 model BehaviorProfile {
@@ -189,6 +267,9 @@ model BehaviorProfile {
   knownIpSubnets      String[] @default(["10.0.0.0/16", "192.168.1.0/24"])
   offHoursAccessRate  Float    @default(0.02)
   crossDeptAccessRate Float    @default(0.01)
+  sampleDays          Int      @default(0)
+  trainedThrough      DateTime?
+  statistics          Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -227,6 +308,8 @@ model Device {
 }
 
 model Resource {
+  protectedData Json?
+  companyId      String              @default("legacy")
   id             String              @id @default(cuid())
   resourceId     String              @unique
   name           String
@@ -244,6 +327,7 @@ model Resource {
   accessRequests AccessRequest[]
 
   @@index([departmentCode])
+  @@index([companyId, sensitivity])
   @@index([sensitivity])
   @@map("resources")
 }
@@ -301,6 +385,8 @@ model RiskScore {
   level        EventSeverity
   factors      Json
   anomalyScore Float?
+  sourceEventId String? @unique
+  policyAction String?
   timestamp    DateTime      @default(now())
 
   @@index([userId])
@@ -387,6 +473,7 @@ model AccessRequest {
 }
 
 model AuditLog {
+  companyId String   @default("legacy")
   id        String   @id @default(cuid())
   timestamp DateTime @default(now())
   userId    String?
@@ -401,6 +488,7 @@ model AuditLog {
   metadata Json?
 
   @@index([userId])
+  @@index([companyId, timestamp])
   @@index([category])
   @@index([severity])
   @@index([timestamp])
@@ -408,6 +496,8 @@ model AuditLog {
 }
 
 model ZeroTrustPolicy {
+  companyId String  @unique @default("legacy")
+  config    Json?
   id       String  @id @default(cuid())
   name     String  @default("Default Enterprise Zero Trust Policy")
   isActive Boolean @default(true)
@@ -441,6 +531,9 @@ model ZeroTrustPolicy {
 model Session {
   id           String   @id @default(cuid())
   sessionToken String   @unique
+  refreshHash  String?  @unique
+  revokedAt    DateTime?
+  mfaVerifiedAt DateTime?
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   ip           String

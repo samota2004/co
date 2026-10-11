@@ -1,11 +1,16 @@
 import { db } from '../../server/models/db.js';
 import { sseManager } from '../../server/services/sse.js';
+export function evolveTrust(previous,risk,config={},canRecover=true){
+  const score=Number(previous);if(!Number.isFinite(score)||!Number.isFinite(risk))throw new Error('Finite trust/risk required');
+  const delta=risk>=90?-Math.min(25,risk/4):risk>=75?-15:risk>=60?-8:risk>=40?-3:risk<20&&canRecover?(config.adaptiveTrustRecoveryRate??1):0;
+  return Math.max(0,Math.min(100,Math.round((score+delta)*100)/100));
+}
 
 class TrustEngine {
   updateTrustScore(user, evaluation, eventSummary = 'Access Evaluation') {
     if (!user) return 85;
 
-    let currentTrust = typeof user.currentTrustScore === 'number' ? user.currentTrustScore : 90;
+    let currentTrust = user.currentTrustScore ?? user.trustScore ?? 0;
     const riskScore = evaluation.riskScore || 0;
 
     let trustDelta = 0;
@@ -19,7 +24,7 @@ class TrustEngine {
       trustDelta = 2; // Incremental trust recovery
     }
 
-    const newTrust = Math.min(100, Math.max(5, currentTrust + trustDelta));
+    const newTrust = evolveTrust(currentTrust,riskScore,db.policyConfig);
     user.currentTrustScore = newTrust;
 
     // Persist to in-memory db trust history

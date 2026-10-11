@@ -2,121 +2,467 @@
 
 @layer base {
   :root {
-    --bg-main: #0E0E0E;
-    --bg-surface: #141414;
-    --bg-surface-elevated: #1B1B1B;
-    --border-subtle: #2A2A2A;
-    --border-gold: #C6A14A;
-    --gold: #C6A14A;
+    /* =========================================================
+       CYBERORBIT — PREMIUM SOC DESIGN SYSTEM
+       ========================================================= */
+
+    /* Core backgrounds */
+    --bg-main: #03070C;
+    --bg-surface: #050A10;
+    --bg-surface-elevated: #070C12;
+
+    /* Borders */
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-cyan: rgba(103, 232, 249, 0.45);
+    --border-gold: rgba(212, 175, 55, 0.45);
+
+    /* Primary identity */
+    --cyan: #67E8F9;
+    --cyan-dark: #22B8CC;
+    --cyan-light: #A5F3FC;
+
+    /* Secondary brand accent */
+    --gold: #D4AF37;
     --gold-dark: #A98532;
-    --gold-light: #E5D39A;
-    --text-main: #FFFFFF;
-    --text-muted: #A0A0A0;
-    --text-dim: #6B6B6B;
+    --gold-light: #E6D28A;
+
+    /* Typography */
+    --text-main: #F4F7FA;
+    --text-muted: #A7B0BA;
+    --text-dim: #7F8A96;
+
+    /* Semantic colors */
+    --success: #4ADE80;
+    --warning: #FBBF24;
+    --danger: #F87171;
+
+    /* AI / ML accent */
+    --ai: #A78BFA;
+
+    /* Shadows */
+    --shadow-subtle: 0 8px 30px rgba(0, 0, 0, 0.18);
+    --shadow-card: 0 18px 60px rgba(0, 0, 0, 0.18);
+    --shadow-cyan: 0 12px 40px rgba(103, 232, 249, 0.08);
+    --shadow-gold: 0 12px 40px rgba(212, 175, 55, 0.07);
   }
 
-  .light-theme {
-    --bg-main: #F7F4EC;
-    --bg-surface: #FFFFFF;
-    --bg-surface-elevated: #EFECE3;
-    --border-subtle: #E5E5E5;
-    --border-gold: #C6A14A;
-    --gold: #C6A14A;
-    --gold-dark: #A98532;
-    --gold-light: #E5D39A;
-    --text-main: #0E0E0E;
-    --text-muted: #6B6B6B;
-    --text-dim: #8E8E8E;
+  /* =========================================================
+     BASE
+     ========================================================= */
+
+  html {
+    background: var(--bg-main);
+    color-scheme: dark;
   }
 
   body {
     background-color: var(--bg-main);
     color: var(--text-main);
-    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    transition: background-color 0.25s ease, color 0.25s ease;
+
+    font-family:
+      "Plus Jakarta Sans",
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
+
+    transition:
+      background-color 0.25s ease,
+      color 0.25s ease;
+
     letter-spacing: -0.01em;
+    margin: 0;
+
+    min-height: 100vh;
+
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
+  #root {
+    min-height: 100%;
+  }
+
+  /*
+   * Keep the existing class available so components using it
+   * continue to work, but use the CyberOrbit typography system.
+   */
   .font-serif-display {
-    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-family:
+      "Plus Jakarta Sans",
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
   }
 
-  /* Universal Interactive & Accent Helpers */
+  /* =========================================================
+     UNIVERSAL INTERACTIVE & ACCENT HELPERS
+     ========================================================= */
+
   .border-gold {
-    border-color: #C6A14A;
+    border-color: var(--gold);
   }
 
   .border-gold-subtle {
-    border-color: rgba(198, 161, 74, 0.25);
+    border-color: rgba(212, 175, 55, 0.22);
   }
 
   .border-gold-accent {
-    border-color: rgba(198, 161, 74, 0.6);
+    border-color: rgba(212, 175, 55, 0.55);
+  }
+
+  .border-cyan {
+    border-color: var(--cyan);
+  }
+
+  .border-cyan-subtle {
+    border-color: rgba(103, 232, 249, 0.18);
+  }
+
+  .border-cyan-accent {
+    border-color: rgba(103, 232, 249, 0.5);
   }
 
   .text-gold {
-    color: #C6A14A;
+    color: var(--gold);
+  }
+
+  .text-cyan {
+    color: var(--cyan);
+  }
+
+  .text-success {
+    color: var(--success);
+  }
+
+  .text-warning {
+    color: var(--warning);
+  }
+
+  .text-danger {
+    color: var(--danger);
   }
 
   .bg-gold {
-    background-color: #C6A14A;
+    background-color: var(--gold);
   }
 
-  /* Sleek Minimalist Shadows */
+  .bg-cyan {
+    background-color: var(--cyan);
+  }
+
+  .bg-surface {
+    background-color: var(--bg-surface);
+  }
+
+  .bg-surface-elevated {
+    background-color: var(--bg-surface-elevated);
+  }
+
+  /* =========================================================
+     PREMIUM SOC SURFACES
+     ========================================================= */
+
+  .cyber-surface {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-card);
+  }
+
+  .cyber-surface-elevated {
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* =========================================================
+     SLEEK MINIMALIST SHADOWS
+     ========================================================= */
+
   .shadow-subtle {
-    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow-subtle);
   }
 
-  .dark .shadow-subtle {
-    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.4);
+  .shadow-cyber {
+    box-shadow: var(--shadow-card);
   }
 
-  /* Card hover */
+  .shadow-cyan {
+    box-shadow: var(--shadow-cyan);
+  }
+
+  .shadow-gold {
+    box-shadow: var(--shadow-gold);
+  }
+
+  /* =========================================================
+     CARD HOVER
+     ========================================================= */
+
   .card-hover-gold {
-    transition: all 200ms ease;
-  }
-  .card-hover-gold:hover {
-    border-color: #C6A14A !important;
+    transition:
+      transform 300ms ease,
+      border-color 300ms ease,
+      box-shadow 300ms ease,
+      background-color 300ms ease;
   }
 
-  /* Sleek Custom Scrollbars */
+  .card-hover-gold:hover {
+    transform: translateY(-2px);
+    border-color: rgba(212, 175, 55, 0.55) !important;
+    box-shadow:
+      0 18px 50px rgba(0, 0, 0, 0.2),
+      0 0 24px rgba(212, 175, 55, 0.05);
+  }
+
+  .card-hover-cyan {
+    transition:
+      transform 300ms ease,
+      border-color 300ms ease,
+      box-shadow 300ms ease,
+      background-color 300ms ease;
+  }
+
+  .card-hover-cyan:hover {
+    transform: translateY(-2px);
+    border-color: rgba(103, 232, 249, 0.45) !important;
+    box-shadow:
+      0 18px 50px rgba(0, 0, 0, 0.2),
+      0 0 24px rgba(103, 232, 249, 0.05);
+  }
+
+  /* =========================================================
+     BUTTON / INTERACTIVE HELPERS
+     ========================================================= */
+
+  .cyber-button-primary {
+    background-color: var(--cyan);
+    color: var(--bg-main);
+    border: 1px solid var(--cyan);
+
+    transition:
+      transform 200ms ease,
+      box-shadow 200ms ease,
+      background-color 200ms ease;
+  }
+
+  .cyber-button-primary:hover {
+    background-color: var(--cyan-light);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 30px rgba(103, 232, 249, 0.12);
+  }
+
+  .cyber-button-secondary {
+    background-color: var(--bg-surface-elevated);
+    color: var(--text-main);
+    border: 1px solid var(--border-subtle);
+
+    transition:
+      transform 200ms ease,
+      border-color 200ms ease,
+      background-color 200ms ease;
+  }
+
+  .cyber-button-secondary:hover {
+    background-color: #0A1017;
+    border-color: rgba(103, 232, 249, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .cyber-button-gold {
+    background-color: var(--gold);
+    color: var(--bg-main);
+    border: 1px solid var(--gold);
+
+    transition:
+      transform 200ms ease,
+      box-shadow 200ms ease,
+      background-color 200ms ease;
+  }
+
+  .cyber-button-gold:hover {
+    background-color: var(--gold-light);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 30px rgba(212, 175, 55, 0.1);
+  }
+
+  /* =========================================================
+     INPUT / FORM HELPERS
+     ========================================================= */
+
+  .cyber-input {
+    background-color: var(--bg-surface);
+    color: var(--text-main);
+    border: 1px solid var(--border-subtle);
+
+    transition:
+      border-color 200ms ease,
+      box-shadow 200ms ease,
+      background-color 200ms ease;
+  }
+
+  .cyber-input::placeholder {
+    color: var(--text-dim);
+  }
+
+  .cyber-input:focus {
+    outline: none;
+    border-color: rgba(103, 232, 249, 0.5);
+    box-shadow: 0 0 0 1px rgba(103, 232, 249, 0.12);
+    background-color: var(--bg-surface-elevated);
+  }
+
+  /* =========================================================
+     FOCUS ACCESSIBILITY
+     ========================================================= */
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+    border-color: rgba(103, 232, 249, 0.55);
+    box-shadow: 0 0 0 2px rgba(103, 232, 249, 0.12);
+  }
+
+  /* =========================================================
+     SELECTION
+     ========================================================= */
+
+  ::selection {
+    background: var(--cyan);
+    color: var(--bg-main);
+  }
+
+  ::-moz-selection {
+    background: var(--cyan);
+    color: var(--bg-main);
+  }
+
+  /* =========================================================
+     SLEEK CUSTOM SCROLLBARS
+     ========================================================= */
+
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
   }
 
   ::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--bg-main);
   }
 
-  .dark ::-webkit-scrollbar-thumb {
-    background: rgba(198, 161, 74, 0.25);
+  ::-webkit-scrollbar-thumb {
+    background: rgba(103, 232, 249, 0.18);
     border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
   }
 
-  .dark ::-webkit-scrollbar-thumb:hover {
-    background: #C6A14A;
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(103, 232, 249, 0.55);
   }
 
-  .light-theme ::-webkit-scrollbar-thumb {
-    background: rgba(198, 161, 74, 0.35);
-    border-radius: 9999px;
+  ::-webkit-scrollbar-corner {
+    background: var(--bg-main);
   }
 
-  .light-theme ::-webkit-scrollbar-thumb:hover {
-    background: #A98532;
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(103, 232, 249, 0.25) var(--bg-main);
+  }
+
+  /* =========================================================
+     TABLE / DIVIDER HELPERS
+     ========================================================= */
+
+  .cyber-divider {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .cyber-table-row {
+    transition:
+      background-color 200ms ease,
+      border-color 200ms ease;
+  }
+
+  .cyber-table-row:hover {
+    background-color: rgba(103, 232, 249, 0.025);
+    border-color: rgba(103, 232, 249, 0.12);
+  }
+
+  /* =========================================================
+     SUBTLE CYBER GRID / ATMOSPHERE
+     ========================================================= */
+
+  .cyber-grid {
+    background-image:
+      linear-gradient(
+        rgba(103, 232, 249, 0.025) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        rgba(103, 232, 249, 0.025) 1px,
+        transparent 1px
+      );
+    background-size: 40px 40px;
+  }
+
+  .cyber-glow-cyan {
+    background:
+      radial-gradient(
+        circle at center,
+        rgba(103, 232, 249, 0.06),
+        transparent 65%
+      );
+  }
+
+  .cyber-glow-gold {
+    background:
+      radial-gradient(
+        circle at center,
+        rgba(212, 175, 55, 0.045),
+        transparent 65%
+      );
+  }
+
+  /* =========================================================
+     STATUS HELPERS
+     ========================================================= */
+
+  .status-success {
+    color: var(--success);
+    border-color: rgba(74, 222, 128, 0.25);
+    background-color: rgba(74, 222, 128, 0.06);
+  }
+
+  .status-warning {
+    color: var(--warning);
+    border-color: rgba(251, 191, 36, 0.25);
+    background-color: rgba(251, 191, 36, 0.06);
+  }
+
+  .status-danger {
+    color: var(--danger);
+    border-color: rgba(248, 113, 113, 0.25);
+    background-color: rgba(248, 113, 113, 0.06);
+  }
+
+  .status-cyan {
+    color: var(--cyan);
+    border-color: rgba(103, 232, 249, 0.25);
+    background-color: rgba(103, 232, 249, 0.06);
   }
 }
 
-::selection {
-  background: #C6A14A;
-  color: #111111;
-}
-
-::-moz-selection {
-  background: #C6A14A;
-  color: #111111;
-}
+/* =========================================================
+   GLOBAL DOCUMENT SIZING
+   ========================================================= */
 
 html,
 body,
@@ -126,4 +472,71 @@ body,
 
 body {
   margin: 0;
+}
+
+
+/* =========================================================
+   CYBERORBIT — GLOBAL POLISH
+   Safe global rules only; component styling remains intact.
+   ========================================================= */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+
+  ::placeholder {
+    opacity: 1;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: var(--text-main);
+    -webkit-box-shadow: 0 0 0 1000px var(--bg-surface) inset;
+    transition: background-color 9999s ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* =========================================================
+   PASSWORD INPUT — HIDE BROWSER REVEAL ICON
+   ========================================================= */
+
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
 }

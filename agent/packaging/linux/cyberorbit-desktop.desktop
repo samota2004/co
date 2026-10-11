@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=CYBERORBIT Desktop Monitor
+Comment=Visible approved application usage monitoring (X11)
+Exec=/opt/cyberorbit/runtime/node /opt/cyberorbit/src/cli.js helper /etc/cyberorbit/config.json
+Terminal=true
+X-GNOME-Autostart-enabled=true

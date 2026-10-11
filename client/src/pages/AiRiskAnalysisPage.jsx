@@ -1,4 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+// ======================================================
+// IMPORTS
+// ======================================================
+
+import React, { useState, useEffect, useMemo } from "react";
+
+import {
+  Layers,
+  BrainCircuit,
+  ShieldCheck,
+  AlertTriangle,
+  Sparkles,
+  UserCheck,
+} from "lucide-react";
+
 import {
   AreaChart,
   Area,
@@ -10,766 +24,687 @@ import {
   PolarGrid,
   PolarAngleAxis,
   PolarRadiusAxis,
-  Radar
-} from 'recharts';
-import { useTheme } from '../context/ThemeContext';
+  Radar,
+} from "recharts";
+
+
+// ======================================================
+// MAIN COMPONENT
+// ======================================================
 
 export const AiRiskAnalysisPage = ({
   users = [],
   events = [],
-  selectedUserId
 }) => {
-  const { isDark } = useTheme();
 
-  const [targetUserId, setTargetUserId] = useState(
-    selectedUserId && users.some(user => user.id === selectedUserId)
-      ? selectedUserId
-      : ''
-  );
+  // ======================================================
+  // THEME TOKENS
+  // ======================================================
+
+  const pageBackground = "#03070C";
+  const primaryText = "#F4F7FA";
+  const panelClass = "bg-[#050A10]";
+
+  // ======================================================
+  // TARGET USER
+  // ======================================================
+
+  // Manual selection only. The page always opens with no employee selected.
+  const [targetUserId, setTargetUserId] = useState("");
 
   useEffect(() => {
-    if (
-      selectedUserId &&
-      users.some(user => user.id === selectedUserId)
-    ) {
-      setTargetUserId(selectedUserId);
-    }
-  }, [selectedUserId, users]);
-
-  useEffect(() => {
-    if (
-      targetUserId &&
-      !users.some(user => user.id === targetUserId)
-    ) {
-      setTargetUserId('');
+    if (targetUserId && !users.some((user) => user.id === targetUserId)) {
+      setTargetUserId("");
     }
   }, [users, targetUserId]);
 
   const targetUser = useMemo(() => {
-    if (!targetUserId) {
-      return null;
-    }
-
-    return users.find(user => user.id === targetUserId) || null;
+    if (!targetUserId) return null;
+    return (
+      users.find((user) => String(user.id) === String(targetUserId)) || null
+    );
   }, [users, targetUserId]);
 
+  // ======================================================
+  // ACTUAL TELEMETRY
+  // ======================================================
+
   const userEvents = useMemo(() => {
-    if (!targetUser) {
-      return [];
-    }
+    if (!targetUser) return [];
 
     return events
-      .filter(event => {
-        return (
-          event.userId === targetUser.id ||
-          event.employeeId === targetUser.employeeId ||
-          event.user?.id === targetUser.id ||
-          event.user?.employeeId === targetUser.employeeId
-        );
-      })
+      .filter((event) =>
+        String(event.userId ?? "") === String(targetUser.id) ||
+        String(event.employeeId ?? "") === String(targetUser.employeeId ?? "") ||
+        String(event.user?.id ?? "") === String(targetUser.id) ||
+        String(event.user?.employeeId ?? "") === String(targetUser.employeeId ?? "")
+      )
       .sort((a, b) => {
-        const dateA = new Date(
-          a.timestamp ||
-          a.createdAt ||
-          a.time ||
-          0
-        ).getTime();
-
-        const dateB = new Date(
-          b.timestamp ||
-          b.createdAt ||
-          b.time ||
-          0
-        ).getTime();
-
+        const dateA = new Date(a.timestamp || a.createdAt || a.time || 0).getTime();
+        const dateB = new Date(b.timestamp || b.createdAt || b.time || 0).getTime();
         return dateB - dateA;
       });
   }, [events, targetUser]);
 
-  const hasTelemetry = userEvents.length > 0;
+  // Generic application events are not automatically AI telemetry.
+  // The analysis branch opens only when at least one selected-user event
+  // contains an actual AI/risk signal.
+  const isAiTelemetryEvent = (event) => {
+    if (!event) return false;
 
-  const latestEvent = userEvents[0] || null;
+    const sources = [
+      event,
+      event.metadata,
+      event.ml,
+      event.evaluation,
+      event.decision?.evaluation,
+    ].filter(Boolean);
+
+    const aiKeys = [
+      "riskScore",
+      "riskContribution",
+      "trustScore",
+      "supervisedProbability",
+      "rfProbability",
+      "isolationForestScore",
+      "iforestScore",
+      "authenticationRisk",
+      "authRisk",
+      "deviceRisk",
+      "networkRisk",
+      "dataTransferRisk",
+    ];
+
+    return sources.some((source) =>
+      aiKeys.some((key) => {
+        const value = source?.[key];
+        return (
+          typeof value === "number" && Number.isFinite(value)
+        ) || (
+          typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))
+        );
+      })
+    );
+  };
+
+  const aiTelemetryEvents = userEvents.filter(isAiTelemetryEvent);
+  const hasTelemetry = aiTelemetryEvents.length > 0;
+  const latestEvent = aiTelemetryEvents[0] || null;
 
   const getNumber = (...values) => {
     for (const value of values) {
-      if (
-        typeof value === 'number' &&
-        Number.isFinite(value)
-      ) {
-        return value;
-      }
-
-      if (
-        typeof value === 'string' &&
-        value.trim() !== ''
-      ) {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim() !== "") {
         const parsed = Number(value);
-
-        if (Number.isFinite(parsed)) {
-          return parsed;
-        }
+        if (Number.isFinite(parsed)) return parsed;
       }
     }
-
     return null;
   };
 
-  const normalizeScore = value => {
-    if (value === null || value === undefined) {
-      return null;
-    }
-
-    const number = Number(value);
-
-    if (!Number.isFinite(number)) {
-      return null;
-    }
-
-    if (number >= 0 && number <= 1) {
-      return number * 100;
-    }
-
-    return Math.min(100, Math.max(0, number));
+  const normalizeScore = (...values) => {
+    const value = getNumber(...values);
+    return value === null ? null : Math.min(100, Math.max(0, value));
   };
-
-  const riskScore = normalizeScore(
-    latestEvent?.metadata?.riskScore,
-    latestEvent?.riskScore,
-    latestEvent?.riskContribution,
-    latestEvent?.metadata?.riskContribution,
-    latestEvent?.evaluation?.riskScore,
-    latestEvent?.decision?.evaluation?.riskScore
-  );
-
-  const trustScore = normalizeScore(
-    latestEvent?.metadata?.trustScore,
-    latestEvent?.trustScore,
-    latestEvent?.evaluation?.trustScore,
-    latestEvent?.decision?.evaluation?.trustScore
-  );
-
-  const rfProbability = getNumber(
-    latestEvent?.metadata?.supervisedProbability,
-    latestEvent?.metadata?.rfProbability,
-    latestEvent?.supervisedProbability,
-    latestEvent?.rfProbability,
-    latestEvent?.ml?.supervisedProbability
-  );
-
-  const isolationForestScore = getNumber(
-    latestEvent?.metadata?.isolationForestScore,
-    latestEvent?.metadata?.iforestScore,
-    latestEvent?.isolationForestScore,
-    latestEvent?.iforestScore,
-    latestEvent?.ml?.isolationForestScore
-  );
-
-  const authRisk = normalizeScore(
-    latestEvent?.metadata?.authenticationRisk,
-    latestEvent?.authenticationRisk,
-    latestEvent?.metadata?.authRisk,
-    latestEvent?.authRisk
-  );
-
-  const deviceRisk = normalizeScore(
-    latestEvent?.metadata?.deviceRisk,
-    latestEvent?.deviceRisk
-  );
-
-  const networkRisk = normalizeScore(
-    latestEvent?.metadata?.networkRisk,
-    latestEvent?.networkRisk
-  );
-
-  const dataTransferRisk = normalizeScore(
-    latestEvent?.metadata?.dataTransferRisk,
-    latestEvent?.dataTransferRisk
-  );
-
-  const behaviorRisk =
-    isolationForestScore !== null
-      ? normalizeScore(isolationForestScore)
-      : null;
-
-  const mlRisk =
-    rfProbability !== null
-      ? normalizeScore(rfProbability)
-      : null;
-
-  const riskFactors = [
-    {
-      name: 'Authentication Risk',
-      score: authRisk,
-      weight: '15%',
-      description:
-        'Off-hours access, unusual login geolocation, and MFA challenges'
-    },
-    {
-      name: 'Device Risk',
-      score: deviceRisk,
-      weight: '15%',
-      description:
-        'Hardware posture, OS patch version, and endpoint certificate trust'
-    },
-    {
-      name: 'Behavior Risk',
-      score: behaviorRisk,
-      weight: '25%',
-      description:
-        'Unsupervised isolation tree variance from user historical baseline'
-    },
-    {
-      name: 'Network Risk',
-      score: networkRisk,
-      weight: '10%',
-      description:
-        'Subnet anomalies, cross-department segment access, and DNS egress'
-    },
-    {
-      name: 'Data Transfer Risk',
-      score: dataTransferRisk,
-      weight: '15%',
-      description:
-        'Volume of file downloads, USB transfers, and external sync bandwidth'
-    },
-    {
-      name: 'ML Risk',
-      score: mlRisk,
-      weight: '20%',
-      description:
-        'Supervised Random Forest classification probability across 25 decision trees'
-    }
-  ];
+  const evaluation = latestEvent?.metadata?.evaluation || latestEvent?.evaluation || latestEvent;
+  const riskScore = normalizeScore(evaluation?.riskScore, latestEvent?.riskContribution);
+  const trustScore = normalizeScore(evaluation?.trustScore);
+  const rfProbability = getNumber(latestEvent?.metadata?.ml?.threat_probability, latestEvent?.mlThreatProbability);
+  const riskFactors = (evaluation?.contributingFactors || []).map(factor => ({
+    name: factor.factor, score: factor.scoreImpact, description: factor.description
+  }));
 
   const radarData = riskFactors
-    .filter(factor => factor.score !== null)
-    .map(factor => ({
-      subject: factor.name.replace(' Risk', ''),
-      value: factor.score,
-      fullMark: 100
-    }));
+    .filter((factor) => factor.score !== null)
+    .map((factor) => ({ subject: factor.name.replace(" Risk", ""), value: factor.score, fullMark: 100 }));
 
-  const riskHistory = userEvents
+  // Historical chart is built only from real recorded events.
+  const riskHistory = aiTelemetryEvents
     .map((event, index) => {
       const eventRisk = normalizeScore(
-        event?.metadata?.riskScore,
-        event?.riskScore,
-        event?.riskContribution,
-        event?.metadata?.riskContribution,
-        event?.evaluation?.riskScore,
+        event?.metadata?.evaluation?.riskScore, event?.riskScore, event?.riskContribution,
+        event?.metadata?.riskContribution, event?.evaluation?.riskScore,
         event?.decision?.evaluation?.riskScore
       );
-
-      const eventMlProbability = getNumber(
-        event?.metadata?.supervisedProbability,
-        event?.metadata?.rfProbability,
-        event?.supervisedProbability,
-        event?.rfProbability,
-        event?.ml?.supervisedProbability
-      );
-
-      if (
-        eventRisk === null &&
-        eventMlProbability === null
-      ) {
-        return null;
-      }
-
+      const eventMlProbability = getNumber(event?.metadata?.ml?.threat_probability, event?.mlThreatProbability);
+      if (eventRisk === null && eventMlProbability === null) return null;
       return {
-        time:
-          event.timestamp ||
-          event.createdAt ||
-          event.time ||
-          `Event ${index + 1}`,
+        time: event.timestamp || event.createdAt || event.time || `Event ${index + 1}`,
         score: eventRisk,
-        mlProb:
-          eventMlProbability !== null
-            ? Math.min(
-                100,
-                Math.max(0, eventMlProbability <= 1
-                  ? eventMlProbability * 100
-                  : eventMlProbability)
-              )
-            : null
+        mlProb: eventMlProbability === null ? null : Math.min(100, Math.max(0, eventMlProbability <= 1 ? eventMlProbability * 100 : eventMlProbability)),
       };
     })
     .filter(Boolean)
     .reverse()
     .slice(-20);
 
-  const formatScore = value => {
-    if (
-      value === null ||
-      value === undefined ||
-      !Number.isFinite(Number(value))
-    ) {
-      return 'N/A';
-    }
-
-    return Number(value).toFixed(
-      Number.isInteger(Number(value)) ? 0 : 1
-    );
+  const formatScore = (value) => {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return "N/A";
+    return Number(value).toFixed(Number.isInteger(Number(value)) ? 0 : 1);
   };
 
-  const formatProbability = value => {
-    if (
-      value === null ||
-      value === undefined ||
-      !Number.isFinite(Number(value))
-    ) {
-      return 'N/A';
-    }
-
-    const normalized =
-      Number(value) <= 1
-        ? Number(value) * 100
-        : Number(value);
-
+  const formatProbability = (value) => {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return "N/A";
+    const normalized = Number(value) <= 1 ? Number(value) * 100 : Number(value);
     return `${Math.min(100, Math.max(0, normalized)).toFixed(1)}%`;
   };
 
+  // ======================================================
+  // MAIN PAGE
+  // ======================================================
+
   return (
-    <div className="space-y-10">
-      <div
-        className={`p-8 sm:p-10 border border-[#D4AF37]/25 relative transition-colors ${
-          isDark ? 'bg-black' : 'bg-white'
-        }`}
-      >
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 relative z-10">
-          <div>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-[10px] font-mono tracking-[0.25em] uppercase text-[#D4AF37] border border-[#D4AF37]/40 px-2.5 py-0.5">
-                MATHEMATICAL EVALUATION
-              </span>
+    <div
+      className="min-h-full overflow-x-hidden"
+      style={{
+        backgroundColor: pageBackground,
+        color: primaryText,
+      }}
+    >
+      <div className="mx-auto w-full max-w-[1500px] space-y-5 px-5 pb-10 sm:px-8 lg:px-12">
+        {/* ==================================================
+            TOP BANNER
+            ================================================== */}
 
-              <span className="text-[11px] font-mono text-gray-500">
-                RF (25 TREES) + IF (100 TREES)
-              </span>
-            </div>
+        <section className="console-hero group relative min-h-[255px] overflow-hidden rounded-2xl border border-[#67E8F9]/55 bg-[#050A10] shadow-[0_18px_60px_rgba(0,0,0,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/85 hover:shadow-[0_22px_70px_rgba(103,232,249,0.12)]">
+          {/* Master SettingsPage corner accents */}
+          <div className="pointer-events-none absolute left-0 top-0 z-20 h-16 w-[1.5px] rounded-full bg-[#D4AF37] shadow-[0_0_12px_rgba(212,175,55,0.35)]" />
+          <div className="pointer-events-none absolute bottom-0 right-0 z-20 h-16 w-[1.5px] rounded-full bg-[#67E8F9] shadow-[0_0_12px_rgba(103,232,249,0.35)]" />
 
-            <h1 className="font-serif-display text-4xl sm:text-5xl lg:text-6xl font-light tracking-tight">
-              RISK ANALYSIS
-            </h1>
-
-            <p className="text-xs text-gray-400 max-w-2xl mt-3 font-sans leading-relaxed">
-              Multi-dimensional decomposition of composite behavioral risk
-              scores across cryptographic, statistical, and ensemble machine
-              learning inference pipelines.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs font-mono">
-            <span className="text-gray-400">
-              TARGET:
-            </span>
-
-            <select
-              value={targetUserId}
-              onChange={event =>
-                setTargetUserId(event.target.value)
-              }
-              disabled={users.length === 0}
-              className={`border text-xs px-3 py-2 outline-none font-mono cursor-pointer ${
-                isDark
-                  ? 'bg-black border-[#D4AF37]/30 text-white'
-                  : 'bg-white border-gray-300 text-black'
-              }`}
-            >
-              <option value="">
-                Select Employee
-              </option>
-
-              {users.map(user => (
-                <option
-                  key={user.id}
-                  value={user.id}
-                >
-                  {user.name} ({user.employeeId})
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {!targetUser ? (
-        <div
-          className={`p-12 border border-[#D4AF37]/25 text-center ${
-            isDark ? 'bg-black' : 'bg-white'
-          }`}
-        >
-          <div className="text-[#D4AF37] font-mono text-sm tracking-wider">
-            NO EMPLOYEE SELECTED
-          </div>
-
-          <p className="text-xs text-gray-500 mt-3">
-            Select an employee to inspect recorded security telemetry.
-          </p>
-        </div>
-      ) : !hasTelemetry ? (
-        <div
-          className={`p-12 border border-[#D4AF37]/25 text-center ${
-            isDark ? 'bg-black' : 'bg-white'
-          }`}
-        >
-          <div className="text-[#D4AF37] font-mono text-sm tracking-wider">
-            NO TELEMETRY AVAILABLE
-          </div>
-
-          <p className="text-xs text-gray-400 mt-3">
-            {targetUser.name} ({targetUser.employeeId}) has no recorded
-            telemetry.
-          </p>
-
-          <p className="text-[10px] text-gray-600 font-mono mt-2">
-            RISK ANALYSIS WILL APPEAR AFTER ACTUAL ACTIVITY IS RECORDED.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Integrated AI / Risk Visualization */}
+          <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[52%] overflow-hidden lg:block">
             <div
-              className={`p-6 border border-[#D4AF37]/25 ${
-                isDark ? 'bg-[#0A0C10]' : 'bg-white'
-              }`}
-            >
-              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] block mb-2">
+              className="absolute inset-0 opacity-70"
+              style={{
+                backgroundImage:
+                  "linear-gradient(rgba(103,232,249,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(103,232,249,0.07) 1px, transparent 1px)",
+                backgroundSize: "78px 78px",
+              }}
+            />
+            <div className="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-[#050A10] to-transparent" />
+            <div className="absolute right-[12%] top-1/2 h-[250px] w-[250px] -translate-y-1/2 rounded-full border border-[#67E8F9]/10" />
+            <div className="absolute right-[18%] top-1/2 h-[190px] w-[190px] -translate-y-1/2 rounded-full border border-[#D4AF37]/20" />
+            <div className="absolute right-[24%] top-1/2 h-[132px] w-[132px] -translate-y-1/2 rounded-full border border-[#67E8F9]/20" />
+            <div className="absolute right-[30%] top-1/2 flex h-[82px] w-[82px] -translate-y-1/2 items-center justify-center rounded-2xl border border-[#67E8F9]/35 bg-[#050A10]/90 shadow-[0_0_35px_rgba(103,232,249,0.08)]">
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-[#D4AF37]/25 bg-[#070C12] text-[#67E8F9]">
+                <BrainCircuit className="h-7 w-7" strokeWidth={1.4} />
+              </div>
+            </div>
+            <div className="absolute right-[14%] top-[18%] h-2 w-2 rounded-full bg-[#D4AF37] shadow-[0_0_14px_rgba(212,175,55,0.55)]" />
+            <div className="absolute right-[8%] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-[#67E8F9] shadow-[0_0_14px_rgba(103,232,249,0.55)]" />
+            <div className="absolute bottom-[17%] right-[31%] h-2 w-2 rounded-full bg-[#67E8F9] shadow-[0_0_14px_rgba(103,232,249,0.55)]" />
+            <div className="absolute right-[7%] top-[25%] rounded-lg border border-[#67E8F9]/15 bg-[#050A10]/80 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[#7F8A96]">
+              <span className="mr-2 text-[#67E8F9]">◈</span> AI ENGINE
+            </div>
+            <div className="absolute bottom-[18%] right-[10%] rounded-lg border border-[#D4AF37]/20 bg-[#050A10]/80 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[#7F8A96]">
+              <span className="mr-2 text-[#D4AF37]">◆</span> RISK MATRIX
+            </div>
+          </div>
+
+          <div className="relative z-10 flex min-h-[255px] items-center px-6 py-7 sm:px-8 lg:px-9">
+            <div className="w-full max-w-[74%]">
+              <div>
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <span className="text-[12px] uppercase tracking-[0.22em] text-[#D4AF37]">
+                    ● MATHEMATICAL EVALUATION
+                  </span>
+
+                  <span className="text-[13px] uppercase tracking-wider text-[#7F8A96]">
+                    STORED CONTEXT · APPROVED MODEL INPUTS
+                  </span>
+                </div>
+
+                <h1 className="text-4xl font-light leading-[0.95] tracking-tight text-[#F4F7FA] sm:text-5xl lg:text-6xl">
+                  AI <span className="text-[#67E8F9]">Risk Analysis</span>
+                </h1>
+
+                <p className="mt-4 max-w-2xl text-[14px] leading-6 text-[#A7B0BA]">
+                  Recorded contextual risk factors and real supervised model predictions, when complete model inputs are available.
+                </p>
+              </div>
+
+              {/* Manual Employee Selector */}
+              <div className="absolute bottom-7 right-8 z-20 flex items-center gap-3 sm:right-9">
+                <span className="text-[12px] uppercase tracking-[0.14em] text-[#7F8A96]">
+                  TARGET
+                </span>
+
+                <select
+                  value={targetUserId}
+                  onChange={(e) => {
+                    setTargetUserId(e.target.value);
+                  }}
+                  disabled={users.length === 0}
+                  className="h-10 min-w-[240px] rounded-xl border border-white/10 bg-[#03070C] px-3 text-[13px] text-[#F4F7FA] outline-none transition-all duration-200 hover:border-[#67E8F9]/30 hover:bg-[#070C12] focus:border-[#67E8F9] focus:ring-2 focus:ring-[#67E8F9]/10"
+                >
+                  <option value="">
+                    Select Employee
+                  </option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {!targetUser ? (
+          <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center shadow-[0_18px_60px_rgba(0,0,0,0.18)] sm:p-12">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/[0.04] text-[#D4AF37]">
+              <UserCheck className="h-6 w-6" strokeWidth={1.5} />
+            </div>
+            <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO EMPLOYEE SELECTED</div>
+            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">Select an employee from the TARGET list above to inspect recorded security telemetry.</p>
+          </section>
+        ) : !hasTelemetry ? (
+          <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center shadow-[0_18px_60px_rgba(0,0,0,0.18)] sm:p-12">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/[0.04] text-[#D4AF37]">
+              <ShieldCheck className="h-6 w-6" strokeWidth={1.5} />
+            </div>
+            <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO TELEMETRY AVAILABLE</div>
+            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">{targetUser.name} has no recorded security telemetry yet.</p>
+          </section>
+        ) : (
+          <>
+        {/* ==================================================
+            TOP 4 REQUIRED METRICS
+            ================================================== */}
+
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/* 1. Risk Score */}
+
+          <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
+            <div className="flex items-start justify-between">
+              <span className="text-[12px] font-medium tracking-[0.12em] text-[#A7B0BA]">
                 RISK SCORE
               </span>
 
-              <div className="font-serif-display text-4xl font-light text-[#D4AF37]">
-                {formatScore(riskScore)}
-                <span className="text-sm font-mono text-gray-400">
-                  {' '}
-                  / 100
-                </span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#D4AF37]/20 bg-[#D4AF37]/[0.05] text-[#D4AF37]">
+                <AlertTriangle className="h-4 w-4" strokeWidth={1.7} />
               </div>
-
-              <span className="text-[10px] font-mono text-gray-500 mt-2 block">
-                Derived from recorded telemetry
-              </span>
             </div>
 
-            <div
-              className={`p-6 border border-[#D4AF37]/25 ${
-                isDark ? 'bg-[#0A0C10]' : 'bg-white'
-              }`}
-            >
-              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] block mb-2">
+            <div className="mt-5 text-4xl font-light tracking-[-0.04em] text-[#D4AF37]">
+              {formatScore(riskScore)} <span className="text-sm text-[#7F8A96]">/ 100</span>
+            </div>
+
+            <span className="mt-2 block text-[12px] text-[#7F8A96]">
+              Stored contextual risk, 0–100
+            </span>
+          </div>
+
+          {/* 2. Trust Score */}
+
+          <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
+            <div className="flex items-start justify-between">
+              <span className="text-[12px] font-medium tracking-[0.12em] text-[#A7B0BA]">
                 TRUST SCORE
               </span>
 
-              <div className="font-serif-display text-4xl font-light">
-                {formatScore(trustScore)}
-                <span className="text-sm font-mono text-gray-400">
-                  {' '}
-                  / 100
-                </span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
+                <ShieldCheck className="h-4 w-4" strokeWidth={1.7} />
               </div>
-
-              <span className="text-[10px] font-mono text-gray-500 mt-2 block">
-                Derived from recorded telemetry
-              </span>
             </div>
 
-            <div
-              className={`p-6 border border-[#D4AF37]/25 ${
-                isDark ? 'bg-[#0A0C10]' : 'bg-white'
-              }`}
-            >
-              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] block mb-2">
+            <div className="mt-5 text-4xl font-light tracking-[-0.04em]">
+              {formatScore(trustScore)} <span className="text-sm text-[#7F8A96]">/ 100</span>
+            </div>
+
+            <span className="mt-2 block text-[12px] text-[#7F8A96]">
+              Recorded adaptive trust
+            </span>
+          </div>
+
+          {/* 3. ML Anomaly Probability */}
+
+          <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
+            <div className="flex items-start justify-between">
+              <span className="max-w-[180px] text-[12px] font-medium leading-4 tracking-[0.12em] text-[#A7B0BA]">
                 ML ANOMALY PROBABILITY
               </span>
 
-              <div className="font-serif-display text-4xl font-light">
-                {formatProbability(rfProbability)}
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
+                <BrainCircuit className="h-4 w-4" strokeWidth={1.7} />
               </div>
-
-              <span className="text-[10px] font-mono text-gray-500 mt-2 block">
-                Actual Random Forest telemetry
-              </span>
             </div>
 
-            <div
-              className={`p-6 border border-[#D4AF37]/25 ${
-                isDark ? 'bg-[#0A0C10]' : 'bg-white'
-              }`}
-            >
-              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] block mb-2">
-                ISOLATION FOREST SCORE
-              </span>
-
-              <div className="font-serif-display text-4xl font-light">
-                {formatProbability(isolationForestScore)}
-              </div>
-
-              <span className="text-[10px] font-mono text-gray-500 mt-2 block">
-                Actual Isolation Forest telemetry
-              </span>
+            <div className="mt-5 text-4xl font-light tracking-[-0.04em]">
+              {formatProbability(rfProbability)}
             </div>
+
+            <span className="mt-2 block text-[12px] text-[#7F8A96]">
+              Random Forest supervised tree probability
+            </span>
           </div>
+
+          <div className="rounded-xl border border-cyan-900 p-5"><p>Assessment sources</p><p className="mt-4">Contextual rules and historical baseline. Random Forest inference is available only for complete approved user-day inputs. No Isolation Forest is deployed.</p></div>
+        </section>
+
+        {/* ==================================================
+            COMPONENT ANALYSIS
+            ================================================== */}
+
+        <section
+          className={`
+            rounded-2xl
+            border
+            ${panelClass}
+            p-5
+            sm:p-6
+            lg:p-7
+            shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)]
+          `}
+        >
+          <div className="flex flex-col gap-3 border-b border-white/[0.07] pb-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <span className="text-[12px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                COMPONENT ANALYSIS
+              </span>
+
+              <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
+                Risk Vectors &amp; Mathematical Bars
+              </h3>
+            </div>
+
+            <span className="text-[12px] text-[#7F8A96]">
+              NORMALIZED SCALE (0-100)
+            </span>
+          </div>
+
+          <div className="mt-7 space-y-7">
+            {riskFactors.length === 0 && <p>No elevated factors were recorded for this assessment.</p>}
+            {riskFactors.map((factor, idx) => (
+              <div key={idx} className="space-y-2.5">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[14px] font-medium text-[#F4F7FA]">
+                      {factor.name}
+                    </span>
+
+                    <span className="rounded-md border border-[#D4AF37]/20 bg-[#D4AF37]/[0.035] px-1.5 py-0.5 text-[12px] text-[#D4AF37]">
+                      Observed contribution: +{factor.score}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className="hidden max-w-[600px] truncate text-[12px] text-[#7F8A96] xl:inline">
+                      {factor.description}
+                    </span>
+
+                    <span className="text-sm font-semibold text-[#67E8F9]">
+                      {factor.score !== null ? `${formatScore(factor.score)} / 100` : "N/A"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Elegant Visual Bar */}
+
+                <div className="relative h-2 overflow-hidden rounded-full bg-white/[0.045]">
+                  <div
+                    className="h-full rounded-full bg-[#67E8F9] shadow-[0_0_14px_rgba(103,232,249,0.25)] transition-all duration-700 ease-out"
+                    style={{
+                      width: `${factor.score !== null ? factor.score : 0}%`,
+                    }}
+                  />
+
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full bg-[#D4AF37]/20"
+                    style={{
+                      width: `${Math.min(factor.score, 20)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ==================================================
+            RADAR ANALYSIS & HISTORICAL TIME-SERIES
+            ================================================== */}
+
+        <section className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-12">
+          {/* ==================================================
+              RISK & ML EVOLUTION
+              ================================================== */}
 
           <div
-            className={`p-8 sm:p-10 border border-[#D4AF37]/25 ${
-              isDark ? 'bg-black' : 'bg-white'
-            }`}
+            className={`
+              rounded-2xl
+              border
+              ${panelClass}
+              p-6
+              sm:p-8
+              lg:col-span-7
+              shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)]
+            `}
           >
-            <div className="flex items-center justify-between mb-8 pb-4 border-b border-[#D4AF37]/20">
+            <div className="mb-5 flex items-start justify-between">
               <div>
-                <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] block">
-                  COMPONENT ANALYSIS
+                <span className="text-[12px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                  CHRONOLOGY
                 </span>
 
-                <h3 className="font-serif-display text-2xl sm:text-3xl font-light tracking-tight mt-1">
-                  Risk Vectors &amp; Mathematical Bars
+                <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
+                  Risk &amp; ML Evolution
                 </h3>
               </div>
 
-              <span className="text-[10px] font-mono text-gray-400">
-                NORMALIZED SCALE (0-100)
-              </span>
+              <div className="flex items-center gap-2 text-[12px] text-[#7F8A96]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#67E8F9]" />
+                Risk
+                <span className="ml-2 h-1.5 w-1.5 rounded-full bg-[#D4AF37]" />
+                ML
+              </div>
             </div>
 
-            <div className="space-y-6">
-              {riskFactors.map((factor, index) => (
-                <div
-                  key={index}
-                  className="space-y-2"
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={riskHistory}
+                  margin={{
+                    top: 8,
+                    right: 8,
+                    left: -18,
+                    bottom: 0,
+                  }}
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="font-serif-display text-base font-medium">
-                        {factor.name}
-                      </span>
-
-                      <span className="text-[9px] font-mono text-[#D4AF37] border border-[#D4AF37]/30 px-1.5 py-0.2">
-                        Weight: {factor.weight}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 font-mono text-xs">
-                      <span className="text-gray-400 hidden md:inline">
-                        {factor.description}
-                      </span>
-
-                      <span className="text-[#D4AF37] font-bold text-sm">
-                        {factor.score !== null
-                          ? `${formatScore(factor.score)} / 100`
-                          : 'N/A'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="w-full h-2.5 bg-gray-500/10 border border-[#D4AF37]/20 relative overflow-hidden">
-                    {factor.score !== null && (
-                      <div
-                        className="h-full bg-[#D4AF37] transition-all duration-700 ease-out"
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            Math.max(0, factor.score)
-                          )}%`
-                        }}
+                  <defs>
+                    <linearGradient id="aiCyanArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop
+                        offset="5%"
+                        stopColor="#67E8F9"
+                        stopOpacity={0.24}
                       />
-                    )}
-                  </div>
-                </div>
-              ))}
+
+                      <stop offset="95%" stopColor="#67E8F9" stopOpacity={0} />
+                    </linearGradient>
+
+                    <linearGradient id="aiGoldArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop
+                        offset="5%"
+                        stopColor="#D4AF37"
+                        stopOpacity={0.14}
+                      />
+
+                      <stop offset="95%" stopColor="#D4AF37" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+
+                  <XAxis
+                    dataKey="time"
+                    stroke="#596570"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={{
+                      stroke: "rgba(255,255,255,0.07)",
+                    }}
+                  />
+
+                  <YAxis
+                    stroke="#596570"
+                    fontSize={10}
+                    domain={[0, 100]}
+                    tickLine={false}
+                    axisLine={{
+                      stroke: "rgba(255,255,255,0.07)",
+                    }}
+                  />
+
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#050A10",
+                      borderColor: "rgba(103,232,249,0.25)",
+                      borderWidth: "1px",
+                      borderRadius: "10px",
+                      color: "#F4F7FA",
+                      fontSize: "0.75rem",
+                    }}
+                    labelStyle={{
+                      color: "#67E8F9",
+                      marginBottom: "4px",
+                    }}
+                    itemStyle={{
+                      color: "#A7B0BA",
+                    }}
+                  />
+
+                  <Area
+                    type="monotone"
+                    dataKey="score"
+                    stroke="#67E8F9"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#aiCyanArea)"
+                    name="Composite Risk"
+                  />
+
+                  <Area
+                    type="monotone"
+                    dataKey="mlProb"
+                    stroke="#D4AF37"
+                    strokeWidth={1.5}
+                    fillOpacity={1}
+                    fill="url(#aiGoldArea)"
+                    name="ML Prob %"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div
-              className={`lg:col-span-7 p-6 sm:p-8 border border-[#D4AF37]/25 ${
-                isDark ? 'bg-black' : 'bg-white'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] block">
-                    CHRONOLOGY
-                  </span>
+          {/* ==================================================
+              MULTI-VECTOR RADAR
+              ================================================== */}
 
-                  <h3 className="font-serif-display text-2xl font-light tracking-tight mt-1">
-                    Risk &amp; ML Evolution
-                  </h3>
-                </div>
-              </div>
+          <div
+            className={`
+              flex
+              flex-col
+              justify-between
+              rounded-2xl
+              border
+              ${panelClass}
+              p-6
+              sm:p-8
+              lg:col-span-5
+              shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)]
+            `}
+          >
+            <div>
+              <span className="text-[12px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                GEOMETRIC SURFACE
+              </span>
 
-              <div className="h-64 w-full">
-                {riskHistory.length > 0 ? (
-                  <ResponsiveContainer
-                    width="100%"
-                    height="100%"
-                  >
-                    <AreaChart data={riskHistory}>
-                      <defs>
-                        <linearGradient
-                          id="aiGoldArea"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="5%"
-                            stopColor="#D4AF37"
-                            stopOpacity={0.3}
-                          />
-
-                          <stop
-                            offset="95%"
-                            stopColor="#D4AF37"
-                            stopOpacity={0}
-                          />
-                        </linearGradient>
-                      </defs>
-
-                      <XAxis
-                        dataKey="time"
-                        stroke={
-                          isDark
-                            ? '#4B5563'
-                            : '#9CA3AF'
-                        }
-                        fontSize={10}
-                        tickLine={false}
-                        axisLine={{
-                          stroke:
-                            'rgba(212,175,55,0.2)'
-                        }}
-                      />
-
-                      <YAxis
-                        stroke={
-                          isDark
-                            ? '#4B5563'
-                            : '#9CA3AF'
-                        }
-                        fontSize={10}
-                        domain={[0, 100]}
-                        tickLine={false}
-                        axisLine={{
-                          stroke:
-                            'rgba(212,175,55,0.2)'
-                        }}
-                      />
-
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: isDark
-                            ? '#000000'
-                            : '#FFFFFF',
-                          borderColor: '#D4AF37',
-                          borderWidth: '1px',
-                          borderRadius: '0px',
-                          fontSize: '0.75rem',
-                          fontFamily: 'monospace'
-                        }}
-                      />
-
-                      <Area
-                        type="monotone"
-                        dataKey="score"
-                        stroke="#D4AF37"
-                        strokeWidth={1.75}
-                        fillOpacity={1}
-                        fill="url(#aiGoldArea)"
-                        name="Composite Risk"
-                      />
-
-                      <Area
-                        type="monotone"
-                        dataKey="mlProb"
-                        stroke={
-                          isDark
-                            ? '#FFF'
-                            : '#333'
-                        }
-                        strokeWidth={1.25}
-                        fillOpacity={0}
-                        name="ML Prob %"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-xs font-mono text-gray-500">
-                    NO HISTORICAL TELEMETRY
-                  </div>
-                )}
-              </div>
+              <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
+                Multi-Vector Radar
+              </h3>
             </div>
 
-            <div
-              className={`lg:col-span-5 p-6 sm:p-8 border border-[#D4AF37]/25 flex flex-col justify-between ${
-                isDark ? 'bg-black' : 'bg-white'
-              }`}
-            >
-              <div>
-                <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4AF37] block">
-                  GEOMETRIC SURFACE
-                </span>
+            <div className="my-2 h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={radarData}>
+                  <PolarGrid
+                    stroke="rgba(103,232,249,0.12)"
+                  />
 
-                <h3 className="font-serif-display text-2xl font-light tracking-tight mt-1">
-                  Multi-Vector Radar
-                </h3>
-              </div>
+                  <PolarAngleAxis
+                    dataKey="subject"
+                    stroke="#A7B0BA"
+                    fontSize={9}
+                  />
 
-              <div className="h-64 my-2">
-                {radarData.length > 0 ? (
-                  <ResponsiveContainer
-                    width="100%"
-                    height="100%"
-                  >
-                    <RadarChart data={radarData}>
-                      <PolarGrid
-                        stroke={
-                          isDark
-                            ? 'rgba(212,175,55,0.2)'
-                            : 'rgba(197,160,89,0.3)'
-                        }
-                      />
+                  <PolarRadiusAxis
+                    angle={30}
+                    domain={[0, 100]}
+                    stroke="#596570"
+                    fontSize={8}
+                  />
 
-                      <PolarAngleAxis
-                        dataKey="subject"
-                        stroke={
-                          isDark
-                            ? '#9CA3AF'
-                            : '#4B5563'
-                        }
-                        fontSize={9}
-                      />
+                  <Tooltip
+                    shared={false}
+                    cursor={false}
+                    contentStyle={{
+                      backgroundColor: "#050A10",
+                      borderColor: "rgba(103,232,249,0.35)",
+                      borderWidth: "1px",
+                      borderRadius: "10px",
+                      color: "#F4F7FA",
+                      fontSize: "12px",
+                      padding: "10px 12px",
+                    }}
+                    labelStyle={{
+                      color: "#67E8F9",
+                      marginBottom: "4px",
+                      fontSize: "12px",
+                    }}
+                    itemStyle={{
+                      color: "#D4AF37",
+                      fontSize: "12px",
+                    }}
+                    formatter={(value) => [`${value} / 100`, "Risk Level"]}
+                  />
 
-                      <PolarRadiusAxis
-                        angle={30}
-                        domain={[0, 100]}
-                        stroke="#6B7280"
-                        fontSize={8}
-                      />
+                  <Radar
+                    name="Risk Level"
+                    dataKey="value"
+                    stroke="#67E8F9"
+                    fill="#67E8F9"
+                    fillOpacity={0.14}
+                    strokeWidth={2}
+                    strokeDasharray="0"
+                    dot={{
+                      r: 0,
+                      fill: "transparent",
+                      stroke: "transparent",
+                      strokeWidth: 0,
+                    }}
+                    activeDot={{
+                      r: 5,
+                      fill: "#F4F7FA",
+                      stroke: "#67E8F9",
+                      strokeWidth: 2,
+                    }}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
 
-                      <Radar
-                        name="Risk Level"
-                        dataKey="value"
-                        stroke="#D4AF37"
-                        fill="#D4AF37"
-                        fillOpacity={0.25}
-                      />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-xs font-mono text-gray-500">
-                    NO RISK VECTOR TELEMETRY
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-3 border-t border-[#D4AF37]/20 text-[10px] font-mono text-gray-500 text-center">
-                User: {targetUser.name} • ID: {targetUser.employeeId}
-              </div>
+            <div className="border-t border-white/[0.07] pt-4 text-center text-[12px] text-[#7F8A96]">
+              User: <span className="text-[#A7B0BA]">{targetUser?.name}</span> •
+              ID:{" "}
+              <span className="text-[#67E8F9]">{targetUser?.employeeId}</span>
             </div>
           </div>
-        </>
-      )}
+        </section>
+          </>
+        )}
+      </div>
     </div>
   );
 };
+
+export default AiRiskAnalysisPage;

@@ -1,40 +1,57 @@
-import React, { useState } from 'react';
-import { 
-  LayoutDashboard, 
-  UserCheck,
-  Users, 
-  Building2, 
-  Laptop, 
-  Activity, 
-  Sparkles, 
-  ShieldAlert, 
-  Shield, 
-  BrainCircuit, 
-  FileText, 
-  FlaskConical, 
-  Settings, 
-  ChevronRight, 
-  LogOut,
-  X,
-  UserCog
-} from 'lucide-react';
-import { useTheme } from '../context/ThemeContext';
+import React, { useEffect } from "react";
 
-export const Sidebar = ({ 
-  activeTab, 
-  onTabChange, 
-  incidentCount = 0, 
-  currentUser, 
+import {
+  LayoutDashboard,
+  UserCheck,
+  Users,
+  Building2,
+  Laptop,
+  Activity,
+  Sparkles,
+  ShieldAlert,
+  Bell,
+  Shield,
+  BrainCircuit,
+  FileText,
+  FlaskConical,
+  Settings,
+  LogOut,
+  Menu,
+  X,
+  UserCog,
+} from "lucide-react";
+
+// ======================================================
+// CONSTANTS / CONFIGURATION
+// ======================================================
+
+const SIDEBAR_EXPANDED_WIDTH = 280;
+const SIDEBAR_COLLAPSED_WIDTH = 72;
+
+// ======================================================
+// MAIN COMPONENT
+// ======================================================
+
+export const Sidebar = ({
+  isSidebarOpen,
+  setIsSidebarOpen,
+  activeTab,
+  onTabChange,
+  incidentCount = 0,
+  currentUser,
   onLogout,
   mobileOpen = false,
-  onCloseMobile
+  onCloseMobile,
 }) => {
-  const { isDark } = useTheme();
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  useEffect(() => {
+    if (mobileOpen) {
+      setIsSidebarOpen(true);
+    }
+  }, [mobileOpen]);
 
-  const toggleCollapsed = () => {
-    setIsCollapsed(!isCollapsed);
-  };
+  // ======================================================
+  // HELPER FUNCTIONS
+  // ======================================================
 
   const handleTabSelect = (tabId) => {
     if (onTabChange) {
@@ -46,307 +63,354 @@ export const Sidebar = ({
     }
   };
 
+  const getInitials = (name) =>
+    name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+
+  // ======================================================
+  // USER / ROLE DATA
+  // ======================================================
+
   const isCurrentUserAdmin =
-    currentUser?.role === 'SECURITY_ADMIN' ||
-    currentUser?.role === 'SYSTEM_ADMIN' ||
-    currentUser?.roleCode === 'SECURITY_ADMIN' ||
-    currentUser?.roleCode === 'SYSTEM_ADMIN';
+    currentUser?.role === "SECURITY_ADMIN" ||
+    currentUser?.role === "SYSTEM_ADMIN" ||
+    currentUser?.roleCode === "SECURITY_ADMIN" ||
+    currentUser?.roleCode === "SYSTEM_ADMIN";
+
+  const adminName = currentUser?.name || "Account";
+
+  const adminRole =
+    currentUser?.role === "SECURITY_ADMIN" ||
+    currentUser?.roleCode === "SECURITY_ADMIN"
+      ? "SOC Lead"
+      : currentUser?.role === "SYSTEM_ADMIN" ||
+          currentUser?.roleCode === "SYSTEM_ADMIN"
+        ? "System Admin"
+        : "Security Analyst";
+
+  // ======================================================
+  // NAVIGATION DATA
+  // ======================================================
 
   const navSections = [
+    {title:'Access and security',items:[
+      {id:'security-profile',label:'Security Profile',icon:UserCheck},
+      {id:'resources',label:'Protected Resources',icon:Shield},
+      {id:'access-requests',label:'Access Requests',icon:Shield}
+    ]},
     {
-      title: 'Dashboard',
+      title: "Dashboard",
       items: [
         {
-          id: 'dashboard',
-          label: 'Admin Dashboard',
+          id: "dashboard",
+          label: "Admin Dashboard",
           icon: LayoutDashboard,
-          badge: null
+          badge: null,
         },
         {
-          id: 'employee-dashboard',
-          label: 'Employee Dashboard',
+          id: "employee-dashboard",
+          label: "Employee monitoring",
           icon: UserCheck,
-          badge: null
-        }
-      ]
+          badge: null,
+        },
+      ],
     },
     {
-      title: 'Security',
+      title: "Security",
       items: [
         {
-          id: 'risk-analysis',
-          label: 'Risk Analysis',
+          id: "risk-analysis",
+          label: "Risk Analysis",
           icon: Activity,
-          badge: null
+          badge: null,
         },
         {
-          id: 'xai',
-          label: 'Explainable AI',
+          id: "xai",
+          label: "Explainable AI",
           icon: Sparkles,
-          badge: 'XAI'
+          badge: "XAI",
         },
         {
-          id: 'devices',
-          label: 'Device Trust',
+          id: "devices",
+          label: "Device Trust",
           icon: Laptop,
-          badge: null
+          badge: null,
         },
+        { id: "alerts", label: "Detection alerts", icon: Bell },
         {
-          id: 'incidents',
-          label: 'Alerts / Incidents',
+          id: "incidents",
+          label: "Incidents",
           icon: ShieldAlert,
-          badge: incidentCount > 0 ? incidentCount : null
+          badge: incidentCount > 0 ? incidentCount : null,
         },
         {
-          id: 'policies',
-          label: 'Policy Engine',
+          id: "policies",
+          label: "Policy Engine",
           icon: Shield,
-          badge: null
-        }
-      ]
+          badge: null,
+        },
+      ],
     },
     {
-      title: 'Monitoring',
+      title: "Monitoring",
       items: [
         {
-          id: 'audit-logs',
-          label: 'Audit Logs',
+          id: "audit-logs",
+          label: "Audit Logs",
           icon: FileText,
-          badge: null
+          badge: null,
         },
         ...(isCurrentUserAdmin
           ? [
               {
-                id: 'admin-management',
-                label: 'Admin Management',
+                id: "admin-management",
+                label: "Admin Management",
                 icon: UserCog,
-                badge: null
-              }
+                badge: null,
+              },
             ]
           : []),
         {
-          id: 'employees',
-          label: 'Employee Management',
+          id: "employees",
+          label: "Employee Management",
           icon: Users,
-          badge: null
+          badge: null,
         },
         {
-          id: 'departments',
-          label: 'Departments',
+          id: "departments",
+          label: "Departments",
           icon: Building2,
-          badge: null
+          badge: null,
         },
         {
-          id: 'ml-analytics',
-          label: 'ML Analytics',
+          id: "ml-analytics",
+          label: "ML Analytics",
           icon: BrainCircuit,
-          badge: null
+          badge: null,
         },
         {
-          id: 'simulator',
-          label: 'Threat Simulator',
+          id: "simulator",
+          label: "Threat Simulator",
           icon: FlaskConical,
-          badge: 'SIM'
-        }
-      ]
+          badge: "SIM",
+        },
+      ],
     },
     {
-      title: 'System',
+      title: "System",
       items: [
         {
-          id: 'settings',
-          label: 'Settings',
+          id: "settings",
+          label: "Settings",
           icon: Settings,
-          badge: null
-        }
-      ]
-    }
-  ];
+          badge: null,
+        },
+      ],
+    },
+  ].sort((a,b)=>(a.title === "Dashboard" ? -1 : b.title === "Dashboard" ? 1 : 0)).map(section=>({...section,items:section.items.filter(item=>isCurrentUserAdmin||['employee-dashboard','security-profile','resources','access-requests','settings'].includes(item.id))})).filter(section=>section.items.length);
 
-  const adminName = currentUser?.name || 'Alex Rivera';
-
-  const adminRole =
-    currentUser?.role === 'SECURITY_ADMIN' ||
-    currentUser?.roleCode === 'SECURITY_ADMIN'
-      ? 'SOC Lead'
-      : currentUser?.role === 'SYSTEM_ADMIN' ||
-        currentUser?.roleCode === 'SYSTEM_ADMIN'
-        ? 'System Admin'
-        : 'Security Analyst';
+  // ======================================================
+  // SIDEBAR UI
+  // ======================================================
 
   const sidebarContent = (
-    <aside 
-      id="cyberorbit-sidebar" 
-      className={`h-full border-r transition-all duration-300 flex flex-col z-30 shrink-0 select-none ${
-        isDark
-          ? 'bg-[#0E0E0E] border-[#2A2A2A] text-white'
-          : 'bg-[#FFFFFF] border-[#E5E5E5] text-[#0E0E0E]'
-      } ${isCollapsed ? 'w-20' : 'w-64'}`}
+    <aside
+      id="cyberorbit-sidebar"
+      style={{
+        width: `${
+          isSidebarOpen ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH
+        }px`,
+      }}
+      className="fixed left-0 top-0 z-40 flex h-screen shrink-0 select-none flex-col overflow-hidden border-r border-white/10 bg-[#03070C] text-[#F4F7FA] shadow-[12px_0_50px_rgba(0,0,0,0.18)] transition-[width] duration-300 ease-in-out"
     >
+      {/* Technical background */}
       <div
-        className={`p-4 border-b flex items-center justify-between ${
-          isDark ? 'border-[#2A2A2A]' : 'border-[#E5E5E5]'
+        className="pointer-events-none absolute inset-0 opacity-[0.08]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(103,232,249,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(103,232,249,0.10) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+        }}
+      />
+
+      {/* ==================================================
+          SIDEBAR HEADER
+          ================================================== */}
+      <div
+        className={`relative z-10 shrink-0 border-b border-white/10 transition-all duration-300 ${
+          isSidebarOpen
+            ? "flex h-[76px] items-center justify-between px-4"
+            : "flex h-[76px] items-center justify-center px-2"
         }`}
       >
-        {!isCollapsed ? (
-          <button 
-            id="btn-sidebar-dashboard"
-            onClick={() => handleTabSelect('dashboard')}
-            className="flex items-center gap-3 text-left group cursor-pointer"
-            title="CyberOrbit Platform"
-          >
-            <div className="w-8 h-8 rounded-sm border border-[#C6A14A] bg-[#C6A14A]/10 flex items-center justify-center shrink-0 group-hover:border-[#C6A14A] transition-colors">
-              <div className="w-2.5 h-2.5 rounded-full bg-[#C6A14A]" />
-            </div>
-
-            <div className="min-w-0">
-              <div className="font-serif-display text-xl tracking-wider font-semibold leading-none text-current">
-                CyberOrbit
+        {isSidebarOpen ? (
+          <>
+            {/* CyberOrbit brand — kept exactly as the original logo UI */}
+            <button
+              id="btn-sidebar-dashboard"
+              onClick={() => handleTabSelect("dashboard")}
+              title="CyberOrbit Platform"
+              className="flex items-center gap-3 min-w-0 text-left cursor-pointer"
+            >
+              <div className="relative w-10 h-10 flex items-center justify-center shrink-0">
+                <div className="absolute inset-0 rounded-full border border-[#D4AF37] rotate-45" />
+                <div className="absolute inset-[5px] rounded-full border border-cyan-300/70" />
+                <div className="w-2.5 h-2.5 rounded-full bg-[#D4AF37]" />
               </div>
 
-              <div className="text-[9px] font-mono text-[#C6A14A] tracking-wider uppercase mt-1">
-                Zero Trust Security Platform
+              <div className="min-w-0">
+                <div className="text-[20px] tracking-[0.16em] text-white font-semibold leading-none whitespace-nowrap">
+                  CYBERORBIT
+                </div>
+
+                <div className="mt-1 text-[7px] uppercase tracking-[0.27em] text-cyan-300 whitespace-nowrap">
+                  Insider Threat Defense
+                </div>
               </div>
-            </div>
-          </button>
+            </button>
+
+            <button
+              id="btn-sidebar-toggle"
+              onClick={() => setIsSidebarOpen(false)}
+              title="Collapse Sidebar"
+              aria-label="Collapse Sidebar"
+              className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-[#050A10] text-[#7F8A96] transition-all duration-200 hover:border-[#67E8F9]/30 hover:bg-[#67E8F9]/[0.05] hover:text-[#67E8F9] hover:shadow-[0_0_16px_rgba(103,232,249,0.06)]"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+          </>
         ) : (
-          <button 
-            onClick={() => handleTabSelect('dashboard')}
-            className="w-8 h-8 rounded-sm border border-[#C6A14A] bg-[#C6A14A]/10 flex items-center justify-center mx-auto cursor-pointer"
-            title="CyberOrbit Platform"
+          <button
+            id="btn-sidebar-toggle"
+            onClick={() => setIsSidebarOpen(true)}
+            title="Expand Sidebar"
+            aria-label="Expand Sidebar"
+            className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-[#050A10] text-[#67E8F9] transition-all duration-200 hover:border-[#67E8F9]/35 hover:bg-[#67E8F9]/[0.06] hover:shadow-[0_0_20px_rgba(103,232,249,0.08)]"
           >
-            <div className="w-2.5 h-2.5 rounded-full bg-[#C6A14A]" />
+            <Menu className="h-5 w-5" />
           </button>
         )}
 
         {mobileOpen && (
-          <button 
+          <button
             onClick={onCloseMobile}
-            className="md:hidden p-1 text-gray-400 hover:text-white cursor-pointer"
+            title="Close Sidebar"
+            aria-label="Close Sidebar"
+            className="ml-2 flex h-8 w-8 items-center justify-center rounded-lg text-[#7F8A96] transition-colors hover:bg-white/5 hover:text-[#F4F7FA] md:hidden"
           >
-            <X className="w-5 h-5" />
+            <X className="h-5 w-5" />
           </button>
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar">
-        {navSections.map((section, sIdx) => (
-          <div key={sIdx} className="space-y-1">
-            {!isCollapsed ? (
-              <div
-                className={`text-[10px] font-mono px-3 pt-2 pb-1 uppercase tracking-[0.15em] font-medium ${
-                  isDark ? 'text-[#6B6B6B]' : 'text-[#6B6B6B]'
-                }`}
-              >
-                {section.title}
-              </div>
-            ) : (
-              <div className="text-center text-[9px] text-[#6B6B6B] my-1">
-                •••
-              </div>
-            )}
-
-            {section.items.map((item) => {
-              const Icon = item.icon;
-
-              const isActive =
-                activeTab === item.id ||
-                (
-                  item.id === 'employees' &&
-                  (
-                    activeTab === 'users' ||
-                    activeTab === 'employee-mgmt'
-                  )
-                ) ||
-                (
-                  item.id === 'risk-analysis' &&
-                  activeTab === 'ai-risk'
-                );
-
-              return (
-                <button
-                  key={item.id}
-                  id={`nav-tab-${item.id}`}
-                  onClick={() => handleTabSelect(item.id)}
-                  title={isCollapsed ? item.label : undefined}
-                  className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-mono rounded-sm transition-all duration-150 cursor-pointer ${
-                    isActive
-                      ? isDark
-                        ? 'bg-[#C6A14A]/15 text-[#C6A14A] border-l-2 border-[#C6A14A] font-semibold'
-                        : 'bg-[#C6A14A]/15 text-[#A98532] border-l-2 border-[#C6A14A] font-semibold'
-                      : isDark
-                        ? 'text-gray-300 hover:text-white hover:bg-white/5'
-                        : 'text-gray-700 hover:text-black hover:bg-black/5'
-                  } ${
-                    isCollapsed
-                      ? 'justify-center px-0'
-                      : ''
-                  }`}
-                >
-                  <Icon
-                    className={`w-4 h-4 shrink-0 ${
-                      isActive
-                        ? 'text-[#C6A14A]'
-                        : 'opacity-70'
-                    }`}
-                  />
-
-                  {!isCollapsed && (
-                    <span className="flex-1 text-left truncate tracking-wide">
-                      {item.label}
-                    </span>
-                  )}
-
-                  {!isCollapsed && item.badge !== null && (
-                    <span
-                      className={`text-[8px] font-mono px-1.5 py-0.5 uppercase tracking-wider font-semibold border rounded-xs ${
-                        isActive
-                          ? 'border-[#C6A14A] text-[#C6A14A]'
-                          : typeof item.badge === 'number'
-                            ? 'border-red-500/40 text-red-500 bg-red-500/10'
-                            : 'border-[#C6A14A]/40 text-[#C6A14A]'
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </nav>
-
-      <div
-        className={`p-3 border-t space-y-2 ${
-          isDark
-            ? 'border-[#2A2A2A]'
-            : 'border-[#E5E5E5]'
+      {/* ==================================================
+          NAVIGATION
+          ================================================== */}
+      <nav
+        className={`relative z-10 min-h-0 flex-1 overflow-y-auto custom-scrollbar transition-all duration-300 ${
+          isSidebarOpen ? "px-3 py-5" : "px-2 py-5"
         }`}
       >
-        {!isCollapsed && (
-          <div
-            className={`p-2.5 border rounded-sm flex items-center justify-between text-xs ${
-              isDark
-                ? 'bg-[#141414] border-[#2A2A2A]'
-                : 'bg-[#F7F4EC] border-[#E5E5E5]'
-            }`}
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-sm border border-[#C6A14A] bg-[#C6A14A]/20 text-[#C6A14A] flex items-center justify-center font-mono font-bold text-[10px] shrink-0">
-                {adminName
-                  .split(' ')
-                  .map(n => n[0])
-                  .join('')
-                  .slice(0, 2)}
+        <div className={isSidebarOpen ? "space-y-6" : "space-y-3"}>
+          {navSections.map((section, sectionIndex) => (
+            <div key={sectionIndex}>
+              {isSidebarOpen && (
+                <div className="mb-2 px-3 text-[10px] font-medium uppercase tracking-[0.2em] text-[#7F8A96]">
+                  {section.title}
+                </div>
+              )}
+
+              <div className={isSidebarOpen ? "space-y-1" : "space-y-2"}>
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+
+                  const isActive =
+                    activeTab === item.id ||
+                    (item.id === "employees" &&
+                      (activeTab === "users" ||
+                        activeTab === "employee-mgmt")) ||
+                    (item.id === "risk-analysis" && activeTab === "ai-risk");
+
+                  return (
+                    <button
+                      key={item.id}
+                      id={`nav-tab-${item.id}`}
+                      onClick={() => handleTabSelect(item.id)}
+                      aria-current={isActive ? "page" : undefined}
+                      title={!isSidebarOpen ? item.label : undefined}
+                      aria-label={!isSidebarOpen ? item.label : undefined}
+                      className={`group relative flex cursor-pointer items-center border transition-all duration-200 ${
+                        isSidebarOpen
+                          ? "h-11 w-full gap-3 rounded-xl px-3"
+                          : "mx-auto h-11 w-11 justify-center rounded-xl"
+                      } ${
+                        isActive
+                          ? "border-[#67E8F9]/25 bg-[#67E8F9]/10 text-[#F4F7FA] shadow-[inset_3px_0_0_#67E8F9,0_8px_24px_rgba(103,232,249,0.07)]"
+                          : "border-transparent text-[#7F8A96] hover:-translate-y-0.5 hover:border-white/10 hover:bg-[#070C12] hover:text-[#F4F7FA] hover:shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+                      }`}
+                    >
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 h-6 w-[2px] -translate-y-1/2 rounded-full bg-[#67E8F9] shadow-[0_0_10px_rgba(103,232,249,0.65)]" />
+                      )}
+
+                      <Icon
+                        className={`h-[18px] w-[18px] shrink-0 transition-colors duration-200 ${
+                          isActive
+                            ? "text-[#67E8F9]"
+                            : "text-[#7F8A96] group-hover:text-[#67E8F9]"
+                        }`}
+                      />
+
+                      {isSidebarOpen && (
+                        <>
+                          <span className="min-w-0 flex-1 truncate text-left text-[12px] font-medium tracking-[-0.01em]">
+                            {item.label}
+                          </span>
+
+                          {item.badge != null && (
+                            <span
+                              className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                                isActive
+                                  ? "border-[#67E8F9]/30 bg-[#67E8F9]/[0.06] text-[#67E8F9]"
+                                  : typeof item.badge === "number"
+                                    ? "border-red-400/30 bg-red-400/10 text-red-300"
+                                    : "border-[#D4AF37]/30 bg-[#D4AF37]/[0.07] text-[#D4AF37]"
+                              }`}
+                            >
+                              {item.badge}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </nav>
+
+      {/* ==================================================
+          USER / ADMIN FOOTER
+          ================================================== */}
+      <div className="relative z-10 shrink-0 border-t border-white/10 p-3">
+        {isSidebarOpen ? (
+          <div className="group flex items-center justify-between rounded-2xl border border-white/10 bg-[#050A10] p-3 shadow-[0_12px_35px_rgba(0,0,0,0.16)] transition-all duration-200 hover:border-[#67E8F9]/25 hover:bg-[#070C12]">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#67E8F9]/25 bg-[#67E8F9]/10 text-[10px] font-semibold text-[#67E8F9] shadow-[0_0_16px_rgba(103,232,249,0.05)]">
+                {getInitials(adminName)}
               </div>
 
-              <div className="min-w-0 truncate">
-                <div className="font-semibold text-[11px] truncate leading-tight">
+              <div className="min-w-0">
+                <div className="truncate text-[11px] font-semibold leading-tight text-[#F4F7FA]">
                   {adminName}
                 </div>
-
-                <div className="text-[9px] font-mono text-[#C6A14A] tracking-wider uppercase">
+                <div className="mt-0.5 truncate text-[9px] font-medium uppercase tracking-[0.13em] text-[#D4AF37]">
                   {adminRole}
                 </div>
               </div>
@@ -357,53 +421,38 @@ export const Sidebar = ({
                 id="btn-sidebar-logout"
                 onClick={onLogout}
                 title="Logout"
-                className="text-gray-400 hover:text-red-500 p-1 cursor-pointer transition-colors"
+                aria-label="Logout"
+                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[#7F8A96] transition-all duration-200 hover:bg-red-400/10 hover:text-red-300"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <LogOut className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
+        ) : (
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl border border-[#67E8F9]/25 bg-[#67E8F9]/10 text-[10px] font-semibold text-[#67E8F9]">
+            {getInitials(adminName)}
+          </div>
         )}
-
-        <button
-          id="btn-sidebar-collapse"
-          onClick={toggleCollapsed}
-          className={`hidden md:flex w-full items-center justify-center gap-2 p-1.5 text-xs transition-colors cursor-pointer ${
-            isDark
-              ? 'text-gray-400 hover:text-[#C6A14A]'
-              : 'text-gray-600 hover:text-[#C6A14A]'
-          }`}
-        >
-          <ChevronRight
-            className={`w-3.5 h-3.5 transition-transform duration-200 ${
-              isCollapsed ? '' : 'rotate-180'
-            }`}
-          />
-
-          {!isCollapsed && (
-            <span className="text-[11px] font-mono uppercase tracking-wider">
-              Collapse Sidebar
-            </span>
-          )}
-        </button>
       </div>
     </aside>
   );
 
+  // ======================================================
+  // RESPONSIVE / MOBILE
+  // ======================================================
+
   return (
     <>
-      <div className="hidden md:block h-full">
-        {sidebarContent}
-      </div>
+      <div className="hidden md:block">{sidebarContent}</div>
 
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
-          <div 
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
+          <div
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm"
             onClick={onCloseMobile}
           />
 
-          <div className="relative w-72 max-w-[80vw] h-full shadow-2xl">
+          <div className="relative w-[280px] max-w-[86vw] h-full shadow-[20px_0_70px_rgba(0,0,0,0.35)]">
             {sidebarContent}
           </div>
         </div>

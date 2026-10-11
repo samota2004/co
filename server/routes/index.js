@@ -1,63 +1,40 @@
-import { db } from "../models/db.js";
-import { Router } from "express";
-import eventsRoutes from "./events.js";
-import authRoutes from "./auth.js";
-import usersRoutes from "./users.js";
-import devicesRoutes from "./devices.js";
-import resourcesRoutes from "./resources.js";
-import activityRoutes from "./activity.js";
-import simulationRoutes from "./simulation.js";
-import incidentsRoutes from "./incidents.js";
-import accessRequestRoutes from "./access-requests.js";
-import policiesRoutes from "./policies.js";
-import auditLogsRoutes from "./audit-logs.js";
-import mlRoutes from "./ml.js";
-import telemetryRoutes from "./telemetry.js";
-import copilotRoutes from "./copilot.js";
-import systemRoutes from "./system.js";
-import adminsRoutes from "./admins.js";
-const router = Router();
-router.use("/admins", adminsRoutes);
-router.use("/events", eventsRoutes);
-router.use("/auth", authRoutes);
-router.use("/users", usersRoutes);
-router.use("/devices", devicesRoutes);
-router.use("/resources", resourcesRoutes);
-router.use("/activity", activityRoutes);
-router.use("/simulation", simulationRoutes);
-router.use("/incidents", incidentsRoutes);
-router.use("/access-requests", accessRequestRoutes);
-router.use("/policies", policiesRoutes);
-router.use("/audit-logs", auditLogsRoutes);
-router.use("/ml", mlRoutes);
-router.use("/telemetry", telemetryRoutes);
-router.use("/copilot", copilotRoutes);
-router.use("/system", systemRoutes);
-router.get("/stats", (req, res) => {
-  try {
-    return res.json({
-      success: true,
-      stats: {
-        users: db.users.length,
-        devices: db.devices.length,
-        resources: db.resources.length,
-        events: db.activityEvents.length,
-        incidents: db.incidents.length,
-        accessRequests: db.accessRequests.length,
-        auditLogs: db.auditLogs.length,
-        databaseConnected: db.isPostgresConnected
-      }
-    });
-  } catch (error) {
-    console.error("Stats fetch error:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "STATS_ERROR",
-        message: error.message || "Unable to fetch statistics."
-      }
-    });
-  }
-});
+import {Router} from 'express';
+import {prisma} from '../models/prisma.js';
+import {requireAuth,requireSecurityAdmin} from '../middleware/auth.js';
+import {api,userScope,securityErrorHandler,SecurityError} from '../services/security-common.js';
+import endpointRoutes from './endpoint.js';
+import authRoutes from './auth.js';
+import securityRoutes from './security.js';
+import eventsRoutes from './events.js';
+import devicesRoutes from './devices.js';
+import simulationRoutes from './simulation.js';
+import mlRoutes from './ml.js';
+import copilotRoutes from './copilot.js';
+import systemRoutes from './system.js';
+import adminsRoutes from './admins.js';
+const router=Router();
+// Enrollment authenticates its own one-use/device credentials; login is public.
+router.use('/endpoint',endpointRoutes);
+router.use('/auth',authRoutes);
+router.use('/events',eventsRoutes);
+router.use(requireAuth);
+router.use(securityRoutes);
+router.use('/devices',devicesRoutes);
+router.use('/simulation',requireSecurityAdmin,simulationRoutes);
+router.use('/ml',mlRoutes);
+router.use('/copilot',requireSecurityAdmin,copilotRoutes);
+router.use('/system',requireSecurityAdmin,systemRoutes);
+router.use('/admins',requireSecurityAdmin,adminsRoutes);
+router.get('/stats',api(async req=>{
+ const scope=userScope(req.user),subject={user:scope};
+ const [users,devices,resources,events,incidents,accessRequests,auditLogs]=await Promise.all([
+ prisma.user.count({where:scope}),prisma.device.count({where:subject}),
+ prisma.resource.count({where:{companyId:req.user.companyId}}),
+ prisma.activityEvent.count({where:subject}),prisma.incident.count({where:subject}),
+ prisma.accessRequest.count({where:subject}),
+ ['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(req.user.roleCode)?prisma.auditLog.count({where:{companyId:req.user.companyId,...(req.user.isMainAdmin?{}:{user:scope})}}):0]);
+ return{stats:{users,devices,resources,events,incidents,accessRequests,auditLogs,databaseConnected:true}};
+}));
+router.use((req,res,next)=>next(new SecurityError(404,'API_NOT_FOUND','API endpoint not found.')));
+router.use(securityErrorHandler);
 export default router;

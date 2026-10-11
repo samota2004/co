@@ -1,14 +1,17 @@
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
-import { PrismaClient } from "@prisma/client";
+import {createRequire} from 'node:module';
+import {projectRoot} from '../services/project-paths.js';
+const {PrismaClient,Prisma}=createRequire(path.join(projectRoot,'package.json'))('@prisma/client');
+export {Prisma, PrismaClient};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Load the root capstone/.env before Prisma is initialized
 dotenv.config({
-  path: path.resolve(__dirname, "../../.env")
+  path: path.join(projectRoot, '.env'),quiet:true
 });
 export function isValidPostgresUrl(url) {
   if (!url || typeof url !== 'string') return false;
@@ -28,9 +31,7 @@ function createSafePrismaProxy() {
         get(mTarget, mProp) {
           if (mProp === 'findMany') return () => Promise.resolve([]);
           if (mProp === 'findFirst' || mProp === 'findUnique') return () => Promise.resolve(null);
-          if (mProp === 'create') return (args) => Promise.resolve(args?.data || {});
-          if (mProp === 'update' || mProp === 'updateMany') return (args) => Promise.resolve(args?.data || null);
-          if (mProp === 'delete' || mProp === 'deleteMany') return () => Promise.resolve(null);
+          if (['create','createMany','update','updateMany','delete','deleteMany','upsert','$transaction'].includes(String(mProp))) return () => Promise.reject(new Error('Durable PostgreSQL storage is unavailable'));
           if (mProp === 'count') return () => Promise.resolve(0);
           return () => Promise.resolve(null);
         }

@@ -1,70 +1,54 @@
-import React, {
-  useState,
-  useEffect,
-  useCallback
-} from 'react';
+import { PageErrorBoundary } from "./components/PageErrorBoundary";
+import React, { useState, useEffect, useCallback } from "react";
+import {refreshSession} from './services/session.js';
+import {requestApi} from './services/api.js';
+import {ResourcesPage} from './pages/ResourcesPage.jsx';
+import {AccessRequestsPage} from './pages/AccessRequestsPage.jsx';
+import {SecurityProfilePage} from './pages/SecurityProfilePage.jsx';
 
-import { Sidebar } from './components/Sidebar';
-import { TopBar } from './components/TopBar';
-import { CopilotModal } from './components/CopilotModal';
+import { Sidebar } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
+import { CopilotModal } from "./components/CopilotModal";
 
-import {
-  ShieldAlert,
-  CheckCircle2,
-  AlertTriangle,
-  X
-} from 'lucide-react';
+import { ShieldAlert, CheckCircle2, AlertTriangle, X } from "lucide-react";
 
-import { useTheme } from './context/ThemeContext';
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
-import ResetPasswordPage from './pages/ResetPasswordPage';
+import { LandingPage } from "./pages/LandingPage";
+import { LoginPage } from "./pages/LoginPage";
 
-import { LandingPage } from './pages/LandingPage';
-import { LoginPage } from './pages/LoginPage';
+import { DashboardPage } from "./pages/DashboardPage";
+import { AdminManagementPage } from "./pages/AdminManagementPage";
 
-import { DashboardPage } from './pages/DashboardPage';
-import { AdminManagementPage } from './pages/AdminManagementPage';
+import { EmployeeDashboard } from "./pages/EmployeeDashboard";
+import { EmployeeManagementPage } from "./pages/EmployeeManagementPage";
+import { DepartmentsPage } from "./pages/DepartmentsPage";
+import { DevicesPage } from "./pages/DevicesPage";
+import { AiRiskAnalysisPage } from "./pages/AiRiskAnalysisPage";
+import { ExplainableAiPage } from "./pages/ExplainableAiPage";
+import { AlertsPage } from "./pages/AlertsPage";
+import { IncidentsPage } from "./pages/IncidentsPage";
+import { PoliciesPage } from "./pages/PoliciesPage";
+import { MlAnalyticsPage } from "./pages/MlAnalyticsPage";
+import { AuditLogsPage } from "./pages/AuditLogsPage";
+import { SimulatorPage } from "./pages/SimulatorPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
-import { EmployeeDashboard } from './pages/EmployeeDashboard';
-import { EmployeeManagementPage } from './pages/EmployeeManagementPage';
-import { DepartmentsPage } from './pages/DepartmentsPage';
-import { DevicesPage } from './pages/DevicesPage';
-import { AiRiskAnalysisPage } from './pages/AiRiskAnalysisPage';
-import { ExplainableAiPage } from './pages/ExplainableAiPage';
-import { AlertsPage } from './pages/AlertsPage';
-import { IncidentsPage } from './pages/IncidentsPage';
-import { PoliciesPage } from './pages/PoliciesPage';
-import { MlAnalyticsPage } from './pages/MlAnalyticsPage';
-import { AuditLogsPage } from './pages/AuditLogsPage';
-import { SimulatorPage } from './pages/SimulatorPage';
-import { SettingsPage } from './pages/SettingsPage';
+const ADMIN_ROLES = ["SECURITY_ADMIN", "SYSTEM_ADMIN"];
 
-const ADMIN_ROLES = [
-  'SECURITY_ADMIN',
-  'SYSTEM_ADMIN'
-];
+const EMPLOYEE_ROLES = ["EMPLOYEE", "MANAGER"];
 
-const EMPLOYEE_ROLES = [
-  'EMPLOYEE',
-  'MANAGER'
-];
+const isAdminRole = (role) => ADMIN_ROLES.includes(role);
 
-const isAdminRole = (role) =>
-  ADMIN_ROLES.includes(role);
-
-const isEmployeeRole = (role) =>
-  EMPLOYEE_ROLES.includes(role);
+const isEmployeeRole = (role) => EMPLOYEE_ROLES.includes(role);
 
 const getStoredUser = () => {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null;
   }
 
   try {
-    const stored =
-      localStorage.getItem(
-        'zero_trust_user'
-      );
+    const stored = localStorage.getItem("zero_trust_user");
 
     if (!stored) {
       return null;
@@ -76,2000 +60,1112 @@ const getStoredUser = () => {
   }
 };
 
-const getUserRole = (user) =>
-  user?.roleCode ||
-  user?.role ||
-  null;
+const getUserRole = (user) => user?.roleCode || user?.role || null;
 
 const pathToTab = (pathname) => {
-  const clean = (pathname || '')
-    .replace(/^\/+|\/+$/g, '')
-    .toLowerCase();
+  const clean = (pathname || "").replace(/^\/+|\/+$/g, "").toLowerCase();
 
   if (!clean) {
-    return 'landing';
+    return "landing";
   }
 
-  if (clean === 'login') {
-    return 'login';
+  if (clean === "login") {
+    return "login";
   }
 
-  if (clean === 'reset-password') {
-    return 'reset-password';
-  }
-
-  if (
-    clean === 'admin-management' ||
-    clean === 'admin-mgmt' ||
-    clean === 'administrators'
-  ) {
-    return 'admin-management';
-  }
-
-  if (clean === 'dashboard') {
-    return 'dashboard';
+  if (clean === "reset-password") {
+    return "reset-password";
   }
 
   if (
-    clean === 'employee-dashboard' ||
-    clean === 'my-trust' ||
-    clean === 'employee-portal' ||
-    clean === 'trust-portal'
+    clean === "admin-management" ||
+    clean === "admin-mgmt" ||
+    clean === "administrators"
   ) {
-    return 'employee-dashboard';
+    return "admin-management";
+  }
+
+  if (clean === "dashboard") {
+    return "dashboard";
   }
 
   if (
-    clean === 'employees' ||
-    clean === 'employee-mgmt' ||
-    clean === 'users'
+    clean === "employee-dashboard" ||
+    clean === "my-trust" ||
+    clean === "employee-portal" ||
+    clean === "trust-portal"
   ) {
-    return 'employees';
+    return "employee-dashboard";
   }
 
-  if (clean === 'departments') {
-    return 'departments';
+  if (clean === "employees" || clean === "employee-mgmt" || clean === "users") {
+    return "employees";
   }
 
-  if (clean === 'devices') {
-    return 'devices';
+  if (clean === "departments") {
+    return "departments";
   }
 
-  if (
-    clean === 'risk-analysis' ||
-    clean === 'ai-risk'
-  ) {
-    return 'risk-analysis';
+  if (clean === "devices") {
+    return "devices";
   }
 
-  if (clean === 'xai') {
-    return 'xai';
+  if (clean === "risk-analysis" || clean === "ai-risk") {
+    return "risk-analysis";
   }
 
-  if (clean === 'alerts') {
-    return 'alerts';
+  if (clean === "xai") {
+    return "xai";
   }
 
-  if (clean === 'incidents') {
-    return 'incidents';
+  if (clean === "alerts") {
+    return "alerts";
   }
 
-  if (clean === 'policies') {
-    return 'policies';
+  if (clean === "incidents") {
+    return "incidents";
   }
 
-  if (clean === 'ml-analytics') {
-    return 'ml-analytics';
+  if (clean === "policies") {
+    return "policies";
   }
 
-  if (clean === 'audit-logs') {
-    return 'audit-logs';
+  if (clean === "ml-analytics") {
+    return "ml-analytics";
   }
 
-  if (clean === 'simulator') {
-    return 'simulator';
+  if (clean === "audit-logs") {
+    return "audit-logs";
   }
 
-  if (clean === 'settings') {
-    return 'settings';
+  if (clean === "simulator") {
+    return "simulator";
   }
 
-  return 'landing';
+  if (clean === "settings") {
+    return "settings";
+  }
+  if(['resources','access-requests','security-profile'].includes(clean))return clean;
+
+  return "landing";
 };
 
 const tabToPath = (tab) => {
-  if (tab === 'landing') {
-    return '/';
+  if (tab === "landing") {
+    return "/";
   }
 
-  if (tab === 'login') {
-    return '/login';
+  if (tab === "login") {
+    return "/login";
   }
 
-  if (tab === 'reset-password') {
-    return '/reset-password';
+  if (tab === "reset-password") {
+    return "/reset-password";
   }
 
   return `/${tab}`;
 };
 
 const pageTitles = {
-  dashboard:
-    'SOC Executive Dashboard',
+  resources: "Enterprise Resources",
+  "access-requests": "Access Requests and Reviews",
+  "security-profile": "Employee Security Profile",
+  dashboard: "SOC Executive Dashboard",
 
-  'admin-management':
-    'Administrator Account Management',
+  "admin-management": "Administrator Account Management",
 
-  'employee-dashboard':
-    'Employee Security & Trust Portal',
+  "employee-dashboard": "Employee Security & Trust Portal",
 
-  employees:
-    'Employee Governance & Identities',
+  employees: "Employee Governance & Identities",
 
-  departments:
-    'Department Risk Intelligence',
+  departments: "Department Risk Intelligence",
 
-  devices:
-    'Managed Endpoint Hardware',
+  devices: "Devices and Endpoint Monitoring",
 
-  'risk-analysis':
-    'AI Behavioral Risk Telemetry',
+  "risk-analysis": "AI Behavioral Risk Telemetry",
 
-  xai:
-    'Explainable AI Attribution',
+  xai: "Explainable AI Attribution",
 
-  alerts:
-    'Real-Time Detections & Alerts',
+  alerts: "Real-Time Detections & Alerts",
 
-  incidents:
-    'Incident Response & Containment',
+  incidents: "Incident Response & Containment",
 
-  policies:
-    'Zero Trust Policy Enforcement',
+  policies: "Zero Trust Policy Enforcement",
 
-  'ml-analytics':
-    'ML Dual-Ensemble Analytics',
+  "ml-analytics": "ML Model Evidence",
 
-  'audit-logs':
-    'Cryptographic Forensic Logs',
+  "audit-logs": "Security Audit Records",
 
-  simulator:
-    'Threat Telemetry Simulator',
+  simulator: "Threat Telemetry Simulator",
 
-  settings:
-    'Administrator Preferences'
+  settings: "Administrator Preferences",
 };
 
 export default function App() {
-  const { isDark } = useTheme();
+  const storedUser = getStoredUser();
 
-  const storedUser =
-    getStoredUser();
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
 
-  const [isAuthenticated, setIsAuthenticated] =
-    useState(() => {
-      if (
-        typeof window === 'undefined'
-      ) {
-        return false;
+    return Boolean(localStorage.getItem("zero_trust_token"));
+  });
+
+  const [syncError, setSyncError] = useState("");
+  const [focusedIncidentId, setFocusedIncidentId] = useState(null);
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === "undefined") {
+      return "landing";
+    }
+
+    const initialPathTab = pathToTab(window.location.pathname);
+
+    const authed = Boolean(localStorage.getItem("zero_trust_token"));
+
+    if (!authed) {
+      if (initialPathTab === "login") {
+        return "login";
       }
 
-      return Boolean(
-        localStorage.getItem(
-          'zero_trust_token'
-        )
-      );
-    });
-
-  const [activeTab, setActiveTab] =
-    useState(() => {
-      if (
-        typeof window === 'undefined'
-      ) {
-        return 'landing';
+      if (initialPathTab === "reset-password") {
+        return "reset-password";
       }
 
-      const initialPathTab =
-        pathToTab(
-          window.location.pathname
-        );
+      return "landing";
+    }
 
-      const authed =
-        Boolean(
-          localStorage.getItem(
-            'zero_trust_token'
-          )
-        );
+    const initialUser = getStoredUser();
 
-      if (!authed) {
-        if (
-          initialPathTab === 'login'
-        ) {
-          return 'login';
-        }
+    const initialRole = getUserRole(initialUser);
 
-        if (
-          initialPathTab ===
-          'reset-password'
-        ) {
-          return 'reset-password';
-        }
+    if (initialPathTab === "login") {
+      return isAdminRole(initialRole) ? "dashboard" : "employee-dashboard";
+    }
 
-        return 'landing';
-      }
+    if (
+      isEmployeeRole(initialRole) &&
+      (initialPathTab === "dashboard" || initialPathTab === "admin-management")
+    ) {
+      return "employee-dashboard";
+    }
 
-      const initialUser =
-        getStoredUser();
+    return initialPathTab;
+  });
 
-      const initialRole =
-        getUserRole(
-          initialUser
-        );
+  const [loading, setLoading] = useState(true);
 
-      if (
-        initialPathTab === 'login'
-      ) {
-        return isAdminRole(
-          initialRole
-        )
-          ? 'dashboard'
-          : 'employee-dashboard';
-      }
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-      if (
-        isEmployeeRole(
-          initialRole
-        ) &&
-        (
-          initialPathTab ===
-            'dashboard' ||
-          initialPathTab ===
-            'admin-management'
-        )
-      ) {
-        return 'employee-dashboard';
-      }
+  const [currentUser, setCurrentUser] = useState(storedUser);
 
-      return initialPathTab;
-    });
+  const [currentUserId, setCurrentUserId] = useState(storedUser?.id || null);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [users, setUsers] = useState([]);
 
-  const [isRefreshing, setIsRefreshing] =
-    useState(false);
+  const [incidents, setIncidents] = useState([]);
 
-  const [currentUser, setCurrentUser] =
-    useState(storedUser);
+  const [resources, setResources] = useState([]);
 
-  const [currentUserId, setCurrentUserId] =
-    useState(
-      storedUser?.id || null
-    );
+  const [devices, setDevices] = useState([]);
 
-  const [users, setUsers] =
-    useState([]);
+  const [accessRequests, setAccessRequests] = useState([]);
 
-  const [incidents, setIncidents] =
-    useState([]);
+  const [recentEvents, setRecentEvents] = useState([]);
 
-  const [resources, setResources] =
-    useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
 
-  const [devices, setDevices] =
-    useState([]);
+  const [stats, setStats] = useState(null);
 
-  const [accessRequests, setAccessRequests] =
-    useState([]);
+  const [sseStatus, setSseStatus] = useState("RECONNECTING");
 
-  const [recentEvents, setRecentEvents] =
-    useState([]);
+  const [sseEventCount, setSseEventCount] = useState(0);
 
-  const [auditLogs, setAuditLogs] =
-    useState([]);
+  const [liveToast, setToast] = useState(null);
+  const setLiveToast=toast=>{let enabled=true;try{enabled=JSON.parse(localStorage.getItem('cyberorbit_preferences')||'{}').inAppAlerts!==false;}catch{}if(!toast||enabled||toast.type==='danger')setToast(toast);};
 
-  const [stats, setStats] =
-    useState(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  const [sseStatus, setSseStatus] =
-    useState('RECONNECTING');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  const [sseEventCount, setSseEventCount] =
-    useState(0);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
-  const [liveToast, setLiveToast] =
-    useState(null);
+  const [copilotContext, setCopilotContext] = useState(undefined);
 
-  const [mobileNavOpen, setMobileNavOpen] =
-    useState(false);
+  const userRole = getUserRole(currentUser);
 
-  const [copilotOpen, setCopilotOpen] =
-    useState(false);
+  const isCurrentUserAdmin = isAdminRole(userRole);
 
-  const [copilotContext, setCopilotContext] =
-    useState(undefined);
-
-  const userRole =
-    getUserRole(currentUser);
-
-  const isCurrentUserAdmin =
-    isAdminRole(userRole);
-
-  const isCurrentUserEmployee =
-    isEmployeeRole(userRole);
+  const isCurrentUserEmployee = isEmployeeRole(userRole);
 
   useEffect(() => {
     if (!liveToast) {
       return;
     }
 
-    const timer =
-      setTimeout(
-        () => setLiveToast(null),
-        6000
-      );
+    const timer = setTimeout(() => setLiveToast(null), 6000);
 
-    return () =>
-      clearTimeout(timer);
+    return () => clearTimeout(timer);
   }, [liveToast]);
 
-  const handleNavigate =
-    useCallback(
-      (tab) => {
-        const authed =
-          Boolean(
-            localStorage.getItem(
-              'zero_trust_token'
-            )
-          );
+  const handleNavigate = useCallback(
+    (tab) => {
+      const authed = Boolean(localStorage.getItem("zero_trust_token"));
 
-        let targetTab =
-          tab;
+      let targetTab = tab;
 
-        if (!authed) {
-          if (
-            tab !== 'landing' &&
-            tab !== 'login' &&
-            tab !== 'reset-password'
-          ) {
-            targetTab =
-              'landing';
-          }
-        } else {
-          if (
-            tab === 'login'
-          ) {
-            targetTab =
-              isCurrentUserAdmin
-                ? 'dashboard'
-                : 'employee-dashboard';
-          }
-
-          if (
-            tab === 'admin-management' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'employees' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'departments' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'devices' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'risk-analysis' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'xai' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'alerts' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'incidents' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'ml-analytics' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'audit-logs' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'simulator' &&
-            !isCurrentUserAdmin
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'dashboard' &&
-            isCurrentUserEmployee
-          ) {
-            targetTab =
-              'employee-dashboard';
-          }
-
-          if (
-            tab === 'reset-password'
-          ) {
-            targetTab =
-              'reset-password';
-          }
+      if (!authed) {
+        if (tab !== "landing" && tab !== "login" && tab !== "reset-password") {
+          targetTab = "landing";
+        }
+      } else {
+        if (tab === "login") {
+          targetTab = isCurrentUserAdmin ? "dashboard" : "employee-dashboard";
         }
 
-        setActiveTab(
-          targetTab
-        );
-
-        const targetPath =
-          tabToPath(
-            targetTab
-          );
-
-        if (
-          typeof window !==
-            'undefined' &&
-          window.location.pathname !==
-            targetPath
-        ) {
-          window.history.pushState(
-            {},
-            '',
-            targetPath
-          );
+        if (tab === "admin-management" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
         }
-      },
-      [
-        isCurrentUserAdmin,
-        isCurrentUserEmployee
-      ]
-    );
+
+        if (tab === "employees" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "departments" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "devices" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "risk-analysis" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "xai" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "alerts" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "incidents" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "ml-analytics" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "audit-logs" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "simulator" && !isCurrentUserAdmin) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "dashboard" && isCurrentUserEmployee) {
+          targetTab = "employee-dashboard";
+        }
+
+        if (tab === "reset-password") {
+          targetTab = "reset-password";
+        }
+      }
+
+      setActiveTab(targetTab);
+
+      const targetPath = tabToPath(targetTab);
+
+      if (
+        typeof window !== "undefined" &&
+        window.location.pathname !== targetPath
+      ) {
+        window.history.pushState({}, "", targetPath);
+      }
+    },
+    [isCurrentUserAdmin, isCurrentUserEmployee],
+  );
 
   useEffect(() => {
-    const handlePopState =
-      () => {
-        const pathTab =
-          pathToTab(
-            window.location.pathname
-          );
+    const handlePopState = () => {
+      const pathTab = pathToTab(window.location.pathname);
 
-        const authed =
-          Boolean(
-            localStorage.getItem(
-              'zero_trust_token'
-            )
-          );
+      const authed = Boolean(localStorage.getItem("zero_trust_token"));
 
-        if (!authed) {
-          if (
-            pathTab === 'login'
-          ) {
-            setActiveTab(
-              'login'
-            );
-          } else if (
-            pathTab ===
-            'reset-password'
-          ) {
-            setActiveTab(
-              'reset-password'
-            );
-          } else {
-            setActiveTab(
-              'landing'
-            );
+      if (!authed) {
+        if (pathTab === "login") {
+          setActiveTab("login");
+        } else if (pathTab === "reset-password") {
+          setActiveTab("reset-password");
+        } else {
+          setActiveTab("landing");
 
-            if (
-              window.location.pathname !==
-              '/'
-            ) {
-              window.history.replaceState(
-                {},
-                '',
-                '/'
-              );
-            }
+          if (window.location.pathname !== "/") {
+            window.history.replaceState({}, "", "/");
           }
-
-          return;
         }
 
-        const role =
-          getUserRole(
-            getStoredUser()
-          );
+        return;
+      }
 
-        if (
-          pathTab === 'login'
-        ) {
-          const destination =
-            isAdminRole(role)
-              ? 'dashboard'
-              : 'employee-dashboard';
+      const role = getUserRole(getStoredUser());
 
-          setActiveTab(
-            destination
-          );
+      if (pathTab === "login") {
+        const destination = isAdminRole(role)
+          ? "dashboard"
+          : "employee-dashboard";
 
-          window.history.replaceState(
-            {},
-            '',
-            tabToPath(
-              destination
-            )
-          );
+        setActiveTab(destination);
 
-          return;
-        }
+        window.history.replaceState({}, "", tabToPath(destination));
 
-        if (
-          pathTab ===
-            'admin-management' &&
-          !isAdminRole(role)
-        ) {
-          setActiveTab(
-            'employee-dashboard'
-          );
+        return;
+      }
 
-          window.history.replaceState(
-            {},
-            '',
-            '/employee-dashboard'
-          );
+      if (pathTab === "admin-management" && !isAdminRole(role)) {
+        setActiveTab("employee-dashboard");
 
-          return;
-        }
+        window.history.replaceState({}, "", "/employee-dashboard");
 
-        if (
-          pathTab ===
-            'dashboard' &&
-          isEmployeeRole(role)
-        ) {
-          setActiveTab(
-            'employee-dashboard'
-          );
+        return;
+      }
 
-          window.history.replaceState(
-            {},
-            '',
-            '/employee-dashboard'
-          );
+      if (pathTab === "dashboard" && isEmployeeRole(role)) {
+        setActiveTab("employee-dashboard");
 
-          return;
-        }
+        window.history.replaceState({}, "", "/employee-dashboard");
 
-        setActiveTab(
-          pathTab
-        );
-      };
+        return;
+      }
 
-    window.addEventListener(
-      'popstate',
-      handlePopState
-    );
+      setActiveTab(pathTab);
+    };
+
+    window.addEventListener("popstate", handlePopState);
 
     return () => {
-      window.removeEventListener(
-        'popstate',
-        handlePopState
-      );
+      window.removeEventListener("popstate", handlePopState);
     };
   }, []);
 
   useEffect(() => {
-    const authed =
-      Boolean(
-        localStorage.getItem(
-          'zero_trust_token'
-        )
-      );
+    const authed = Boolean(localStorage.getItem("zero_trust_token"));
 
-    const currentTab =
-      pathToTab(
-        window.location.pathname
-      );
+    const currentTab = pathToTab(window.location.pathname);
 
     if (
       !authed &&
-      currentTab !==
-        'landing' &&
-      currentTab !==
-        'login' &&
-      currentTab !==
-        'reset-password'
+      currentTab !== "landing" &&
+      currentTab !== "login" &&
+      currentTab !== "reset-password"
     ) {
-      handleNavigate(
-        'landing'
-      );
+      handleNavigate("landing");
 
       return;
     }
 
-    if (
-      authed &&
-      currentTab === 'login'
-    ) {
-      const role =
-        getUserRole(
-          getStoredUser()
-        );
+    if (authed && currentTab === "login") {
+      const role = getUserRole(getStoredUser());
 
-      handleNavigate(
-        isAdminRole(role)
-          ? 'dashboard'
-          : 'employee-dashboard'
-      );
+      handleNavigate(isAdminRole(role) ? "dashboard" : "employee-dashboard");
     }
   }, [handleNavigate]);
 
-  const handleLogout =
-    useCallback(
-      () => {
-        localStorage.removeItem(
-          'zero_trust_token'
-        );
+  const handleLogout = useCallback(async () => {
+    try{await fetch('/api/auth/logout',{method:'POST',signal:AbortSignal.timeout(10000)});}catch{}
+    localStorage.removeItem("zero_trust_token");
 
-        localStorage.removeItem(
-          'zero_trust_user'
-        );
+    localStorage.removeItem("zero_trust_user");
 
-        sessionStorage.clear();
+    sessionStorage.clear();
 
-        setIsAuthenticated(
-          false
-        );
+    setIsAuthenticated(false);
 
-        setCurrentUser(
-          null
-        );
+    setCurrentUser(null);
 
-        setCurrentUserId(
-          null
-        );
+    setCurrentUserId(null);
 
-        setUsers([]);
-        setIncidents([]);
-        setResources([]);
-        setDevices([]);
-        setAccessRequests([]);
-        setRecentEvents([]);
-        setAuditLogs([]);
-        setStats(null);
+    setUsers([]);
+    setIncidents([]);
+    setResources([]);
+    setDevices([]);
+    setAccessRequests([]);
+    setRecentEvents([]);
+    setAuditLogs([]);
+    setStats(null);
 
-        setActiveTab(
-          'landing'
-        );
+    setActiveTab("landing");
 
-        if (
-          typeof window !==
-          'undefined'
-        ) {
-          window.history.replaceState(
-            null,
-            '',
-            '/'
-          );
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", "/");
+    }
+  }, []);
+
+  const handleLoginSuccess = useCallback(
+    (user) => {
+      if (!user?.id) {
+        return;
+      }
+
+      const role = getUserRole(user);
+
+      setCurrentUser(user);
+
+      setCurrentUserId(user.id);
+
+      setIsAuthenticated(true);
+
+      localStorage.setItem("zero_trust_user", JSON.stringify(user));
+
+      if (isAdminRole(role)) {
+        handleNavigate("dashboard");
+      } else {
+        handleNavigate("employee-dashboard");
+      }
+    },
+    [handleNavigate],
+  );
+
+  useEffect(()=>{
+    if(!isAuthenticated)return;
+    const expire=()=>handleLogout();
+    window.addEventListener('cyberorbit-session-expired',expire);
+    const timer=setInterval(()=>refreshSession().catch(expire),12*60000);
+    return()=>{clearInterval(timer);window.removeEventListener('cyberorbit-session-expired',expire);};
+  },[isAuthenticated,handleLogout]);
+
+  const safeFetchJson = useCallback(
+    async (url, options = {}) => {
+      try {
+        const token =
+          typeof window !== "undefined"
+            ? localStorage.getItem("zero_trust_token")
+            : null;
+
+        const headers = new Headers(options.headers || {});
+
+        if (token && !headers.has("Authorization")) {
+          headers.set("Authorization", `Bearer ${token}`);
         }
-      },
-      []
-    );
 
-  const handleLoginSuccess =
-    useCallback(
-      (user) => {
-        if (!user?.id) {
-          return;
+        if (currentUserId && !headers.has("x-user-id")) {
+          headers.set("x-user-id", currentUserId);
         }
 
-        const role =
-          getUserRole(user);
+        const res = await fetch(url, {
+          ...options,
+          headers,
+        });
 
-        setCurrentUser(
-          user
-        );
-
-        setCurrentUserId(
-          user.id
-        );
-
-        setIsAuthenticated(
-          true
-        );
-
-        localStorage.setItem(
-          'zero_trust_user',
-          JSON.stringify(user)
-        );
-
-        if (
-          isAdminRole(role)
-        ) {
-          handleNavigate(
-            'dashboard'
-          );
-        } else {
-          handleNavigate(
-            'employee-dashboard'
-          );
-        }
-      },
-      [handleNavigate]
-    );
-
-  const safeFetchJson =
-    useCallback(
-      async (
-        url,
-        options = {}
-      ) => {
-        try {
-          const token =
-            typeof window !==
-            'undefined'
-              ? localStorage.getItem(
-                  'zero_trust_token'
-                )
-              : null;
-
-          const headers =
-            new Headers(
-              options.headers || {}
-            );
-
-          if (
-            token &&
-            !headers.has(
-              'Authorization'
-            )
-          ) {
-            headers.set(
-              'Authorization',
-              `Bearer ${token}`
-            );
-          }
-
-          if (
-            currentUserId &&
-            !headers.has(
-              'x-user-id'
-            )
-          ) {
-            headers.set(
-              'x-user-id',
-              currentUserId
-            );
-          }
-
-          const res =
-            await fetch(
-              url,
-              {
-                ...options,
-                headers
-              }
-            );
-
-          if (
-            res.status === 401
-          ) {
-            return {
-              success: false,
-              unauthorized: true,
-              error:
-                'Authentication required.'
-            };
-          }
-
-          if (
-            !res.ok
-          ) {
-            return {
-              success: false,
-              error:
-                `HTTP ${res.status}`
-            };
-          }
-
-          const contentType =
-            res.headers.get(
-              'content-type'
-            );
-
-          if (
-            contentType &&
-            contentType.includes(
-              'application/json'
-            )
-          ) {
-            return await res.json();
-          }
-
+        if (res.status === 401) {
           return {
             success: false,
-            error:
-              'Non-JSON response'
+            unauthorized: true,
+            error: "Authentication required.",
           };
-        } catch (error) {
+        }
+
+        if (!res.ok) {
           return {
             success: false,
-            error:
-              String(error)
+            error: `HTTP ${res.status}`,
           };
         }
-      },
-      [currentUserId]
-    );
 
-  const fetchAllData =
-    useCallback(
-      async () => {
-        if (
-          !isAuthenticated
-        ) {
-          setLoading(
-            false
-          );
+        const contentType = res.headers.get("content-type");
 
-          return;
+        if (contentType && contentType.includes("application/json")) {
+          return await res.json();
         }
 
-        setIsRefreshing(
-          true
-        );
+        return {
+          success: false,
+          error: "Non-JSON response",
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: String(error),
+        };
+      }
+    },
+    [currentUserId],
+  );
 
-        try {
-          const userRequests =
-            isCurrentUserAdmin
-              ? [
-                  safeFetchJson(
-                    '/api/users'
-                  )
-                ]
-              : [];
+  const fetchAllData = useCallback(async () => {
+    if (!isAuthenticated) {
+      setLoading(false);
 
-          const [
-            usersRes,
-            incidentsRes,
-            resourcesRes,
-            devicesRes,
-            requestsRes,
-            eventsRes,
-            logsRes,
-            statsRes
-          ] = await Promise.all([
-            ...userRequests,
-            safeFetchJson(
-              '/api/incidents'
-            ),
-            safeFetchJson(
-              '/api/resources'
-            ),
-            safeFetchJson(
-              '/api/devices'
-            ),
-            safeFetchJson(
-              '/api/access-requests'
-            ),
-            safeFetchJson(
-              '/api/events'
-            ),
-            safeFetchJson(
-              '/api/audit-logs'
-            ),
-            safeFetchJson(
-              '/api/stats'
-            )
-          ]);
+      return;
+    }
 
-          if (
-            isCurrentUserAdmin &&
-            usersRes?.success &&
-            usersRes.users
-          ) {
-            setUsers(
-              usersRes.users
-            );
-          }
+    setIsRefreshing(true);
 
-          if (
-            incidentsRes?.success &&
-            incidentsRes.incidents
-          ) {
-            setIncidents(
-              incidentsRes.incidents
-            );
-          }
+    try {
+      const userRequests = isCurrentUserAdmin || getUserRole(currentUser)==='MANAGER'
+        ? [safeFetchJson("/api/users")]
+        : [Promise.resolve(null)];
 
-          if (
-            resourcesRes?.success &&
-            resourcesRes.resources
-          ) {
-            setResources(
-              resourcesRes.resources
-            );
-          }
+      const [
+        usersRes,
+        incidentsRes,
+        resourcesRes,
+        devicesRes,
+        requestsRes,
+        eventsRes,
+        logsRes,
+        statsRes,
+      ] = await Promise.all([
+        ...userRequests,
+        isCurrentUserAdmin || getUserRole(currentUser)==='MANAGER' ? safeFetchJson("/api/incidents") : Promise.resolve(null),
+        safeFetchJson("/api/resources"),
+        safeFetchJson("/api/devices"),
+        safeFetchJson("/api/access-requests"),
+        safeFetchJson("/api/activity"),
+        isCurrentUserAdmin ? safeFetchJson("/api/audit-logs") : Promise.resolve(null),
+        safeFetchJson("/api/stats"),
+      ]);
 
-          if (
-            devicesRes?.success &&
-            devicesRes.devices
-          ) {
-            setDevices(
-              devicesRes.devices
-            );
-          }
+      const unavailable = [["Employees",usersRes],["Incidents",incidentsRes],["Resources",resourcesRes],["Devices",devicesRes],["Access requests",requestsRes],["Activity",eventsRes],["Audit logs",logsRes],["Statistics",statsRes]].filter(([,result])=>result && !result.success).map(([name])=>name);
+      setSyncError(unavailable.length ? `Could not refresh: ${unavailable.join(", ")}. Previously loaded records may be out of date. Use Refresh to retry.` : "");
 
-          if (
-            requestsRes?.success &&
-            requestsRes.requests
-          ) {
-            setAccessRequests(
-              requestsRes.requests
-            );
-          }
+      if (usersRes?.success && usersRes.users) {
+        setUsers(usersRes.users);
+      }
 
-          if (
-            eventsRes?.success &&
-            eventsRes.events
-          ) {
-            setRecentEvents(
-              eventsRes.events
-            );
-          }
+      if (incidentsRes?.success && incidentsRes.incidents) {
+        setIncidents(incidentsRes.incidents);
+      }
 
-          if (
-            logsRes?.success &&
-            logsRes.logs
-          ) {
-            setAuditLogs(
-              logsRes.logs
-            );
-          }
+      if (resourcesRes?.success && resourcesRes.resources) {
+        setResources(resourcesRes.resources);
+      }
 
-          if (
-            statsRes?.success &&
-            statsRes.stats
-          ) {
-            setStats(
-              statsRes.stats
-            );
-          }
-        } catch (error) {
-          console.error(
-            'Failed to sync SOC telemetry state:',
-            error
-          );
-        } finally {
-          setIsRefreshing(
-            false
-          );
+      if (devicesRes?.success && devicesRes.devices) {
+        setDevices(devicesRes.devices);
+      }
 
-          setLoading(
-            false
-          );
-        }
-      },
-      [
-        isAuthenticated,
-        isCurrentUserAdmin,
-        safeFetchJson
-      ]
-    );
+      if (requestsRes?.success && requestsRes.requests) {
+        setAccessRequests(requestsRes.requests);
+      }
+
+      if (eventsRes?.success && eventsRes.events) {
+        setRecentEvents(eventsRes.events);
+      }
+
+      if (logsRes?.success && logsRes.auditLogs) {
+        setAuditLogs(logsRes.auditLogs);
+      }
+
+      if (statsRes?.success && statsRes.stats) {
+        setStats(statsRes.stats);
+      }
+      const me=await safeFetchJson('/api/auth/me');
+      if(me.success&&me.user){setCurrentUser(me.user);localStorage.setItem('zero_trust_user',JSON.stringify(me.user));}
+    } catch (error) {
+      console.error("Failed to sync SOC telemetry state:", error);
+    } finally {
+      setIsRefreshing(false);
+
+      setLoading(false);
+    }
+  }, [isAuthenticated, isCurrentUserAdmin, safeFetchJson, userRole]);
 
   useEffect(() => {
     fetchAllData();
   }, [fetchAllData]);
 
   useEffect(() => {
-    let eventSource =
-      null;
+    let eventSource = null;
 
     let retryCount = 0;
-    let retryTimeout =
-      null;
+    let retryTimeout = null;
 
-    let isUnmounted =
-      false;
+    let isUnmounted = false;
 
-    const connectSSE =
-      () => {
-        if (
-          isUnmounted
-        ) {
-          return;
-        }
+    const connectSSE = async () => {
+      if (isUnmounted) {
+        return;
+      }
 
-        try {
-          eventSource =
-            new EventSource(
-              '/api/events/stream'
-            );
+      try {
+        const streamSession = await fetch('/api/events/stream-session', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('zero_trust_token') || ''}` } });
+        if (!streamSession.ok || isUnmounted) return;
+        eventSource = new EventSource("/api/events/stream");
 
-          eventSource.onopen =
-            () => {
-              if (
-                isUnmounted
-              ) {
-                return;
-              }
+        eventSource.onopen = () => {
+          if (isUnmounted) {
+            return;
+          }
 
-              setSseStatus(
-                'LIVE'
-              );
+          setSseStatus("LIVE");
 
-              retryCount = 0;
-            };
+          retryCount = 0;
+        };
 
-          eventSource.onmessage =
-            (e) => {
-              if (
-                isUnmounted
-              ) {
-                return;
-              }
+        eventSource.onmessage = (e) => {
+          if (isUnmounted) {
+            return;
+          }
 
-              try {
-                const payload =
-                  JSON.parse(
-                    e.data
-                  );
+          try {
+            const payload = JSON.parse(e.data);
 
-                if (
-                  !payload ||
-                  !payload.type
-                ) {
-                  return;
+            if (!payload || !payload.type) {
+              return;
+            }
+
+            if (payload.type === 'ENDPOINT_UPDATED') {
+              window.dispatchEvent(new Event('cyberorbit-endpoint-updated'));
+              return;
+            }
+
+            if (payload.type === "HEARTBEAT") {
+              setSseStatus("LIVE");
+
+              return;
+            }
+
+            setSseEventCount((prev) => prev + 1);
+
+            switch (payload.type) {
+              case "CONNECTED":
+                setSseStatus("LIVE");
+                break;
+
+              case "ACTIVITY_EVENT": {
+                const ev = payload.data?.event || payload.data;
+
+                if (ev && ev.id) {
+                  setRecentEvents((prev) => {
+                    const exists = prev.some((x) => x.id === ev.id);
+
+                    if (exists) {
+                      return prev;
+                    }
+
+                    return [ev, ...prev].slice(0, 50);
+                  });
                 }
 
-                if (
-                  payload.type ===
-                  'HEARTBEAT'
-                ) {
-                  setSseStatus(
-                    'LIVE'
+                break;
+              }
+
+              case "TELEMETRY_INGESTED": {
+                const ev = payload.data?.event;
+
+                if (ev && ev.id) {
+                  setRecentEvents((prev) => {
+                    const filtered = prev.filter((x) => x.id !== ev.id);
+
+                    return [ev, ...filtered].slice(0, 50);
+                  });
+
+                  const risk = Number(
+                    payload.data?.riskScore || ev.riskContribution || 0,
                   );
 
-                  return;
+                  setLiveToast({
+                    id: `toast-${Date.now()}`,
+                    title: `Telemetry: ${ev.eventType || "Event Ingested"}`,
+                    message: `Risk ${risk} (${
+                      payload.data?.riskLevel || "EVALUATED"
+                    }) • Action: ${
+                      payload.data?.decision || ev.policyAction || "ALLOW"
+                    }`,
+                    type:
+                      risk >= 75 ? "danger" : risk >= 50 ? "warning" : "info",
+                    timestamp: new Date().toLocaleTimeString(),
+                  });
                 }
 
-                setSseEventCount(
-                  (prev) =>
-                    prev + 1
-                );
+                break;
+              }
 
-                switch (
-                  payload.type
+              case "POLICY_DECISION": {
+                const dec = payload.data;
+
+                if (
+                  dec &&
+                  (dec.decision === "FREEZE" ||
+                    dec.decision === "RESTRICT" ||
+                    dec.requiresMfa)
                 ) {
-                  case 'CONNECTED':
-                    setSseStatus(
-                      'LIVE'
-                    );
-                    break;
+                  setLiveToast({
+                    id: `toast-${Date.now()}`,
+                    title: `Zero Trust Policy: ${dec.decision}`,
+                    message: dec.reason || `Action enforced for ${dec.userId}`,
+                    type: dec.decision === "FREEZE" ? "danger" : "warning",
+                    timestamp: new Date().toLocaleTimeString(),
+                  });
+                }
 
-                  case 'ACTIVITY_EVENT': {
-                    const ev =
-                      payload.data
-                        ?.event ||
-                      payload.data;
+                break;
+              }
 
-                    if (
-                      ev &&
-                      ev.id
-                    ) {
-                      setRecentEvents(
-                        (prev) => {
-                          const exists =
-                            prev.some(
-                              (x) =>
-                                x.id ===
-                                ev.id
-                            );
+              case "CONTAINMENT_ACTION": {
+                const cont = payload.data;
 
-                          if (
-                            exists
-                          ) {
-                            return prev;
+                if (cont) {
+                  setLiveToast({
+                    id: `toast-${Date.now()}`,
+                    title: `Containment: ${cont.action}`,
+                    message:
+                      cont.reason || "Automated Zero Trust containment active",
+                    type: "danger",
+                    timestamp: new Date().toLocaleTimeString(),
+                  });
+                }
+
+                break;
+              }
+
+              case "INCIDENT_CREATED":
+              case "NEW_INCIDENT": {
+                const inc = payload.data?.incident || payload.data;
+
+                if (inc && inc.id) {
+                  setIncidents((prev) => {
+                    const filtered = prev.filter((x) => x.id !== inc.id);
+
+                    return [inc, ...filtered];
+                  });
+
+                  setLiveToast({
+                    id: `toast-${Date.now()}`,
+                    title: `Security Incident: ${inc.title || inc.eventType}`,
+                    message: `${inc.userName || ""} • Score: ${
+                      inc.riskScore || 0
+                    } • ${inc.severity || ""}`,
+                    type: "danger",
+                    timestamp: new Date().toLocaleTimeString(),
+                  });
+                }
+
+                break;
+              }
+
+              case "INCIDENT_RESOLVED": {
+                const inc = payload.data?.incident || payload.data;
+
+                if (inc && inc.id) {
+                  setIncidents((prev) =>
+                    prev.map((i) =>
+                      i.id === inc.id
+                        ? {
+                            ...i,
+                            ...inc,
+                            status: "RESOLVED",
                           }
-
-                          return [
-                            ev,
-                            ...prev
-                          ].slice(
-                            0,
-                            50
-                          );
-                        }
-                      );
-                    }
-
-                    break;
-                  }
-
-                  case 'TELEMETRY_INGESTED': {
-                    const ev =
-                      payload.data
-                        ?.event;
-
-                    if (
-                      ev &&
-                      ev.id
-                    ) {
-                      setRecentEvents(
-                        (prev) => {
-                          const filtered =
-                            prev.filter(
-                              (x) =>
-                                x.id !==
-                                ev.id
-                            );
-
-                          return [
-                            ev,
-                            ...filtered
-                          ].slice(
-                            0,
-                            50
-                          );
-                        }
-                      );
-
-                      const risk =
-                        Number(
-                          payload.data
-                            ?.riskScore ||
-                          ev.riskContribution ||
-                          0
-                        );
-
-                      setLiveToast({
-                        id:
-                          `toast-${Date.now()}`,
-                        title:
-                          `Telemetry: ${
-                            ev.eventType ||
-                            'Event Ingested'
-                          }`,
-                        message:
-                          `Risk ${risk} (${
-                            payload.data
-                              ?.riskLevel ||
-                            'EVALUATED'
-                          }) • Action: ${
-                            payload.data
-                              ?.decision ||
-                            ev.policyAction ||
-                            'ALLOW'
-                          }`,
-                        type:
-                          risk >= 75
-                            ? 'danger'
-                            : risk >= 50
-                              ? 'warning'
-                              : 'info',
-                        timestamp:
-                          new Date()
-                            .toLocaleTimeString()
-                      });
-                    }
-
-                    break;
-                  }
-
-                  case 'POLICY_DECISION': {
-                    const dec =
-                      payload.data;
-
-                    if (
-                      dec &&
-                      (
-                        dec.decision ===
-                          'FREEZE' ||
-                        dec.decision ===
-                          'RESTRICT' ||
-                        dec.requiresMfa
-                      )
-                    ) {
-                      setLiveToast({
-                        id:
-                          `toast-${Date.now()}`,
-                        title:
-                          `Zero Trust Policy: ${
-                            dec.decision
-                          }`,
-                        message:
-                          dec.reason ||
-                          `Action enforced for ${dec.userId}`,
-                        type:
-                          dec.decision ===
-                          'FREEZE'
-                            ? 'danger'
-                            : 'warning',
-                        timestamp:
-                          new Date()
-                            .toLocaleTimeString()
-                      });
-                    }
-
-                    break;
-                  }
-
-                  case 'CONTAINMENT_ACTION': {
-                    const cont =
-                      payload.data;
-
-                    if (
-                      cont
-                    ) {
-                      setLiveToast({
-                        id:
-                          `toast-${Date.now()}`,
-                        title:
-                          `Containment: ${
-                            cont.action
-                          }`,
-                        message:
-                          cont.reason ||
-                          'Automated Zero Trust containment active',
-                        type:
-                          'danger',
-                        timestamp:
-                          new Date()
-                            .toLocaleTimeString()
-                      });
-                    }
-
-                    break;
-                  }
-
-                  case 'INCIDENT_CREATED':
-                  case 'NEW_INCIDENT': {
-                    const inc =
-                      payload.data
-                        ?.incident ||
-                      payload.data;
-
-                    if (
-                      inc &&
-                      inc.id
-                    ) {
-                      setIncidents(
-                        (prev) => {
-                          const filtered =
-                            prev.filter(
-                              (x) =>
-                                x.id !==
-                                inc.id
-                            );
-
-                          return [
-                            inc,
-                            ...filtered
-                          ];
-                        }
-                      );
-
-                      setLiveToast({
-                        id:
-                          `toast-${Date.now()}`,
-                        title:
-                          `Security Incident: ${
-                            inc.title ||
-                            inc.eventType
-                          }`,
-                        message:
-                          `${inc.userName || ''} • Score: ${
-                            inc.riskScore ||
-                            0
-                          } • ${
-                            inc.severity ||
-                            ''
-                          }`,
-                        type:
-                          'danger',
-                        timestamp:
-                          new Date()
-                            .toLocaleTimeString()
-                      });
-                    }
-
-                    break;
-                  }
-
-                  case 'INCIDENT_RESOLVED': {
-                    const inc =
-                      payload.data
-                        ?.incident ||
-                      payload.data;
-
-                    if (
-                      inc &&
-                      inc.id
-                    ) {
-                      setIncidents(
-                        (prev) =>
-                          prev.map(
-                            (i) =>
-                              i.id ===
-                              inc.id
-                                ? {
-                                    ...i,
-                                    ...inc,
-                                    status:
-                                      'RESOLVED'
-                                  }
-                                : i
-                          )
-                      );
-                    }
-
-                    break;
-                  }
-
-                  case 'RISK_SCORE_CHANGED':
-                    if (
-                      payload.data &&
-                      isCurrentUserAdmin
-                    ) {
-                      setUsers(
-                        (prev) =>
-                          prev.map(
-                            (u) =>
-                              u.id ===
-                              payload.data.userId
-                                ? {
-                                    ...u,
-                                    currentRiskScore:
-                                      payload.data
-                                        .riskScore,
-                                    currentRiskLevel:
-                                      payload.data
-                                        .riskLevel ||
-                                      u.currentRiskLevel
-                                  }
-                                : u
-                          )
-                      );
-                    }
-
-                    break;
-
-                  case 'TRUST_SCORE_CHANGED':
-                    if (
-                      payload.data &&
-                      isCurrentUserAdmin
-                    ) {
-                      setUsers(
-                        (prev) =>
-                          prev.map(
-                            (u) =>
-                              u.id ===
-                              payload.data.userId
-                                ? {
-                                    ...u,
-                                    currentTrustScore:
-                                      payload.data
-                                        .trustScore
-                                  }
-                                : u
-                          )
-                      );
-                    }
-
-                    break;
-
-                  case 'ACCOUNT_STATUS_CHANGED':
-                    if (
-                      payload.data &&
-                      isCurrentUserAdmin
-                    ) {
-                      setUsers(
-                        (prev) =>
-                          prev.map(
-                            (u) =>
-                              u.id ===
-                              payload.data.userId
-                                ? {
-                                    ...u,
-                                    status:
-                                      payload.data
-                                        .status
-                                  }
-                                : u
-                          )
-                      );
-                    }
-
-                    break;
-
-                  case 'USER_UPDATED':
-                    if (
-                      payload.data
-                        ?.user &&
-                      isCurrentUserAdmin
-                    ) {
-                      setUsers(
-                        (prev) =>
-                          prev.map(
-                            (u) =>
-                              u.id ===
-                              payload.data
-                                .user.id
-                                ? {
-                                    ...u,
-                                    ...payload
-                                      .data
-                                      .user
-                                  }
-                                : u
-                          )
-                      );
-                    }
-
-                    break;
-
-                  case 'DEVICE_UPDATED':
-                  case 'DEVICE_REVOKED': {
-                    const dev =
-                      payload.data
-                        ?.device ||
-                      payload.data;
-
-                    if (
-                      dev &&
-                      dev.id
-                    ) {
-                      setDevices(
-                        (prev) =>
-                          prev.map(
-                            (d) =>
-                              d.id ===
-                              dev.id
-                                ? {
-                                    ...d,
-                                    ...dev
-                                  }
-                                : d
-                          )
-                      );
-                    }
-
-                    break;
-                  }
-
-                  case 'AUDIT_LOG_ENTRY':
-                  case 'AUDIT_LOG': {
-                    const log =
-                      payload.data
-                        ?.entry ||
-                      payload.data;
-
-                    if (
-                      log &&
-                      log.id
-                    ) {
-                      setAuditLogs(
-                        (prev) =>
-                          [
-                            log,
-                            ...prev
-                          ].slice(
-                            0,
-                            100
-                          )
-                      );
-                    }
-
-                    break;
-                  }
-
-                  default:
-                    break;
+                        : i,
+                    ),
+                  );
                 }
-              } catch (
-                error
-              ) {
-                console.error(
-                  'Failed to parse SSE message:',
-                  error
-                );
-              }
-            };
 
-          eventSource.onerror =
-            () => {
-              if (
-                isUnmounted
-              ) {
-                return;
+                break;
               }
 
-              eventSource?.close();
-              eventSource =
-                null;
-
-              retryCount++;
-
-              if (
-                retryCount <= 4
-              ) {
-                setSseStatus(
-                  'RECONNECTING'
-                );
-
-                retryTimeout =
-                  setTimeout(
-                    connectSSE,
-                    Math.min(
-                      1000 *
-                        Math.pow(
-                          2,
-                          retryCount
-                        ),
-                      10000
-                    )
+              case "RISK_SCORE_CHANGED":
+                if (payload.data && isCurrentUserAdmin) {
+                  setUsers((prev) =>
+                    prev.map((u) =>
+                      u.id === payload.data.userId
+                        ? {
+                            ...u,
+                            currentRiskScore: payload.data.riskScore,
+                            currentRiskLevel:
+                              payload.data.riskLevel || u.currentRiskLevel,
+                          }
+                        : u,
+                    ),
                   );
-              } else {
-                setSseStatus(
-                  'FALLBACK'
-                );
+                }
 
-                retryTimeout =
-                  setTimeout(
-                    connectSSE,
-                    30000
+                break;
+
+              case "TRUST_SCORE_CHANGED":
+                if (payload.data && isCurrentUserAdmin) {
+                  setUsers((prev) =>
+                    prev.map((u) =>
+                      u.id === payload.data.userId
+                        ? {
+                            ...u,
+                            currentTrustScore: payload.data.trustScore,
+                          }
+                        : u,
+                    ),
                   );
-              }
-            };
-        } catch (
-          error
-        ) {
-          setSseStatus(
-            'FALLBACK'
-          );
-        }
-      };
+                }
 
-    if (
-      isAuthenticated
-    ) {
+                break;
+
+              case "ACCOUNT_STATUS_CHANGED":
+                if (payload.data && isCurrentUserAdmin) {
+                  setUsers((prev) =>
+                    prev.map((u) =>
+                      u.id === payload.data.userId
+                        ? {
+                            ...u,
+                            status: payload.data.status,
+                          }
+                        : u,
+                    ),
+                  );
+                }
+
+                break;
+
+              case "USER_UPDATED":
+                if (payload.data?.user && isCurrentUserAdmin) {
+                  setUsers((prev) =>
+                    prev.map((u) =>
+                      u.id === payload.data.user.id
+                        ? {
+                            ...u,
+                            ...payload.data.user,
+                          }
+                        : u,
+                    ),
+                  );
+                }
+
+                break;
+
+              case "DEVICE_UPDATED":
+              case "DEVICE_REVOKED": {
+                const dev = payload.data?.device || payload.data;
+
+                if (dev && dev.id) {
+                  setDevices((prev) =>
+                    prev.map((d) =>
+                      d.id === dev.id
+                        ? {
+                            ...d,
+                            ...dev,
+                          }
+                        : d,
+                    ),
+                  );
+                }
+
+                break;
+              }
+
+              case "AUDIT_LOG_ENTRY":
+              case "AUDIT_LOG": {
+                const log = payload.data?.entry || payload.data;
+
+                if (log && log.id) {
+                  setAuditLogs((prev) => [log, ...prev].slice(0, 100));
+                }
+
+                break;
+              }
+
+              default:
+                break;
+            }
+          } catch (error) {
+            console.error("Failed to parse SSE message:", error);
+          }
+        };
+
+        eventSource.onerror = () => {
+          if (isUnmounted) {
+            return;
+          }
+
+          eventSource?.close();
+          eventSource = null;
+
+          retryCount++;
+
+          if (retryCount <= 4) {
+            setSseStatus("RECONNECTING");
+
+            retryTimeout = setTimeout(
+              connectSSE,
+              Math.min(1000 * Math.pow(2, retryCount), 10000),
+            );
+          } else {
+            setSseStatus("FALLBACK");
+
+            retryTimeout = setTimeout(connectSSE, 30000);
+          }
+        };
+      } catch (error) {
+        setSseStatus("FALLBACK");
+      }
+    };
+
+    if (isAuthenticated) {
       connectSSE();
     }
 
     return () => {
-      isUnmounted =
-        true;
+      isUnmounted = true;
 
-      if (
-        retryTimeout
-      ) {
-        clearTimeout(
-          retryTimeout
-        );
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
       }
 
-      if (
-        eventSource
-      ) {
+      if (eventSource) {
         eventSource.close();
-        eventSource =
-          null;
+        eventSource = null;
       }
     };
-  }, [
-    isAuthenticated,
-    isCurrentUserAdmin
-  ]);
+  }, [isAuthenticated, isCurrentUserAdmin]);
 
   useEffect(() => {
-    const pollInterval =
-      sseStatus ===
-      'LIVE'
-        ? 45000
-        : 15000;
+    const pollInterval = sseStatus === "LIVE" ? 45000 : 15000;
 
-    const interval =
-      setInterval(
-        () => {
-          if (
-            isAuthenticated
-          ) {
-            fetchAllData();
-          }
-        },
-        pollInterval
-      );
+    const interval = setInterval(() => {
+      if (isAuthenticated) {
+        fetchAllData();
+      }
+    }, pollInterval);
 
-    return () =>
-      clearInterval(
-        interval
-      );
-  }, [
-    fetchAllData,
-    sseStatus,
-    isAuthenticated
-  ]);
+    return () => clearInterval(interval);
+  }, [fetchAllData, sseStatus, isAuthenticated]);
 
   useEffect(() => {
-    if (
-      !currentUserId
-    ) {
+    if (!currentUserId) {
       return;
     }
 
-    if (
-      !isCurrentUserAdmin
-    ) {
+    if (!isCurrentUserAdmin) {
       return;
     }
 
-    const refreshedUser =
-      users.find(
-        (user) =>
-          user.id ===
-          currentUserId
-      );
+    const refreshedUser = users.find((user) => user.id === currentUser?.id);
 
-    if (
-      refreshedUser
-    ) {
-      setCurrentUser(
-        (previous) => ({
-          ...previous,
-          ...refreshedUser
-        })
+    if (refreshedUser) {
+      setCurrentUser((previous) => ({
+        ...previous,
+        ...refreshedUser,
+      }));
+    }
+  }, [users, currentUserId, isCurrentUserAdmin]);
+
+  const handleOpenCopilot = (context) => {
+    setCopilotContext(context);
+
+    setCopilotOpen(true);
+  };
+
+  const accountAction=async(userId,action)=>{
+    try{
+      const result=await requestApi('/api/users/'+userId+'/'+action,{method:'POST',body:{reason:'SOC account review'}});
+      setLiveToast({type:'warning',title:'Account updated',message:result.message,timestamp:new Date().toLocaleTimeString()});
+      await fetchAllData();
+    }catch(error){setLiveToast({type:'danger',title:'Account update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});}
+  };
+  const handleFreezeUser=userId=>accountAction(userId,'freeze');
+  const handleUnfreezeUser=userId=>accountAction(userId,'unfreeze');
+
+  const handleAddUser = (createdUser) => {
+    if (!createdUser?.id) {
+      return;
+    }
+
+    setUsers((previous) => [
+      createdUser,
+      ...previous.filter((user) => user.id !== createdUser.id),
+    ]);
+  };
+
+  const handleUpdateUser = async (userId, updates) => {
+    const token = localStorage.getItem("zero_trust_token");
+
+    if (!token) {
+      throw new Error("Authentication token not found. Please log in again.");
+    }
+
+    const response = await fetch(`/api/users/${userId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(updates),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error?.message || data?.message || "Failed to update employee.",
       );
     }
-  }, [
-    users,
-    currentUserId,
-    isCurrentUserAdmin
-  ]);
 
-  const handleOpenCopilot =
-    (context) => {
-      setCopilotContext(
-        context
+    if (!data?.user) {
+      throw new Error("Updated employee was not returned by the server.");
+    }
+
+    setUsers((previous) =>
+      previous.map((user) => (user.id === userId ? data.user : user)),
+    );
+
+    return data.user;
+  };
+
+  const handleDeleteUser = async (userId) => {
+    const token = localStorage.getItem("zero_trust_token");
+
+    if (!token) {
+      throw new Error("Authentication token not found. Please log in again.");
+    }
+
+    const response = await fetch(`/api/users/${userId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error?.message || data?.message || "Failed to delete employee.",
       );
+    }
 
-      setCopilotOpen(
-        true
-      );
-    };
+    setUsers((previous) => previous.filter((user) => user.id !== userId));
+  };
 
-  const handleFreezeUser =
-    async (
-      userId
-    ) => {
-      try {
-        const token =
-          localStorage.getItem(
-            'zero_trust_token'
-          );
-
-        if (!token) {
-          return;
-        }
-
-        await fetch(
-          `/api/users/${userId}/freeze`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type':
-                'application/json',
-              Authorization:
-                `Bearer ${token}`
-            },
-            body:
-              JSON.stringify({
-                reason:
-                  'SOC manual containment override'
-              })
-          }
-        );
-
-        fetchAllData();
-      } catch (
-        error
-      ) {
-        console.error(
-          'Failed to freeze user',
-          error
-        );
-      }
-    };
-
-  const handleUnfreezeUser =
-    async (
-      userId
-    ) => {
-      try {
-        const token =
-          localStorage.getItem(
-            'zero_trust_token'
-          );
-
-        if (!token) {
-          return;
-        }
-
-        await fetch(
-          `/api/users/${userId}/unfreeze`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization:
-                `Bearer ${token}`
-            }
-          }
-        );
-
-        fetchAllData();
-      } catch (
-        error
-      ) {
-        console.error(
-          'Failed to unfreeze user',
-          error
-        );
-      }
-    };
-
-  const handleAddUser =
-    (createdUser) => {
-      if (
-        !createdUser?.id
-      ) {
-        return;
-      }
-
-      setUsers(
-        (previous) => [
-          createdUser,
-          ...previous.filter(
-            (user) =>
-              user.id !==
-              createdUser.id
-          )
-        ]
-      );
-    };
-
-  const handleUpdateUser =
-    async (
-      userId,
-      updates
-    ) => {
-      const token =
-        localStorage.getItem(
-          'zero_trust_token'
-        );
-
-      if (!token) {
-        throw new Error(
-          'Authentication token not found. Please log in again.'
-        );
-      }
-
-      const response =
-        await fetch(
-          `/api/users/${userId}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Content-Type':
-                'application/json',
-              Authorization:
-                `Bearer ${token}`
-            },
-            body:
-              JSON.stringify(
-                updates
-              )
-          }
-        );
-
-      const data =
-        await response.json();
-
-      if (
-        !response.ok
-      ) {
-        throw new Error(
-          data?.error
-            ?.message ||
-            data?.message ||
-            'Failed to update employee.'
-        );
-      }
-
-      if (
-        !data?.user
-      ) {
-        throw new Error(
-          'Updated employee was not returned by the server.'
-        );
-      }
-
-      setUsers(
-        (previous) =>
-          previous.map(
-            (user) =>
-              user.id ===
-              userId
-                ? data.user
-                : user
-          )
-      );
-
-      return data.user;
-    };
-
-  const handleDeleteUser =
-    async (
-      userId
-    ) => {
-      const token =
-        localStorage.getItem(
-          'zero_trust_token'
-        );
-
-      if (!token) {
-        throw new Error(
-          'Authentication token not found. Please log in again.'
-        );
-      }
-
-      const response =
-        await fetch(
-          `/api/users/${userId}`,
-          {
-            method: 'DELETE',
-            headers: {
-              Authorization:
-                `Bearer ${token}`
-            }
-          }
-        );
-
-      const data =
-        await response.json();
-
-      if (
-        !response.ok
-      ) {
-        throw new Error(
-          data?.error
-            ?.message ||
-            data?.message ||
-            'Failed to delete employee.'
-        );
-      }
-
-      setUsers(
-        (previous) =>
-          previous.filter(
-            (user) =>
-              user.id !==
-              userId
-          )
-      );
-    };
-
-  if (
-    activeTab ===
-    'landing'
-  ) {
+  if (activeTab === "landing") {
     return (
       <LandingPage
-        onLogin={() =>
-          handleNavigate(
-            'login'
-          )
-        }
-        onNavigateToLogin={() =>
-          handleNavigate(
-            'login'
-          )
-        }
+        onLogin={() => handleNavigate("login")}
+        onNavigateToLogin={() => handleNavigate("login")}
       />
     );
   }
 
-  if (
-    activeTab ===
-    'login'
-  ) {
+  if (activeTab === "login") {
     return (
       <LoginPage
         users={users}
-        onLoginSuccess={
-          handleLoginSuccess
-        }
-        onBackToHome={() =>
-          handleNavigate(
-            'landing'
-          )
-        }
+        onLoginSuccess={handleLoginSuccess}
+        onBackToHome={() => handleNavigate("landing")}
       />
     );
   }
 
-  if (
-    activeTab ===
-    'reset-password'
-  ) {
-    return (
-      <ResetPasswordPage />
-    );
+  if (activeTab === "reset-password") {
+    return <ResetPasswordPage />;
   }
 
-  if (
-    !isAuthenticated
-  ) {
+  if (!isAuthenticated) {
     return (
       <LandingPage
-        onLogin={() =>
-          handleNavigate(
-            'login'
-          )
-        }
-        onNavigateToLogin={() =>
-          handleNavigate(
-            'login'
-          )
-        }
+        onLogin={() => handleNavigate("login")}
+        onNavigateToLogin={() => handleNavigate("login")}
       />
     );
   }
@@ -2081,155 +1177,134 @@ export default function App() {
         flex flex-col md:flex-row
         overflow-hidden
         font-['Plus_Jakarta_Sans',sans-serif]
-        ${
-          isDark
-            ? 'bg-[#07080A] text-[#F4F4F6]'
-            : 'bg-[#F9F9F7] text-[#111317]'
-        }
+        bg-[#03070C]
+        text-[#F4F7FA]
+        selection:bg-[#67E8F9]/20
+        selection:text-[#F4F7FA]
       `}
     >
       <Sidebar
-        activeTab={
-          activeTab
-        }
-        onTabChange={
-          (tab) => {
-            if (
-              tab ===
-              'copilot'
-            ) {
-              handleOpenCopilot();
-            } else {
-              handleNavigate(
-                tab
-              );
-            }
+        isSidebarOpen={isSidebarOpen}
+        setIsSidebarOpen={setIsSidebarOpen}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          if (tab === "copilot") {
+            handleOpenCopilot();
+          } else {
+            handleNavigate(tab);
           }
-        }
+        }}
         incidentCount={
-          incidents.filter(
-            (incident) =>
-              incident.status !==
-              'RESOLVED'
-          ).length
+          incidents.filter((incident) => incident.status !== "RESOLVED").length
         }
-        currentUser={
-          currentUser
-        }
-        onLogout={
-          handleLogout
-        }
-        mobileOpen={
-          mobileNavOpen
-        }
-        onCloseMobile={() =>
-          setMobileNavOpen(
-            false
-          )
-        }
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        mobileOpen={mobileNavOpen}
+        onCloseMobile={() => setMobileNavOpen(false)}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+      <div
+        className={`
+          min-h-screen
+          flex flex-col
+          min-w-0
+          w-full
+          overflow-hidden
+          relative
+          bg-[#03070C]
+          transition-[margin-left,width]
+          duration-300
+          ease-in-out
+          ${
+            isSidebarOpen
+              ? "md:ml-[280px] md:w-[calc(100%-280px)]"
+              : "md:ml-[72px] md:w-[calc(100%-72px)]"
+          }
+        `}
+      >
         <TopBar
-          currentUser={
-            currentUser
-          }
-          currentPageTitle={
-            pageTitles[
-              activeTab
-            ] ||
-            'Administrator Portal'
-          }
-          onOpenCopilot={() =>
-            handleOpenCopilot()
-          }
-          onRefreshData={
-            fetchAllData
-          }
-          isRefreshing={
-            isRefreshing
-          }
-          onLogout={
-            handleLogout
-          }
-          onToggleMobileNav={() =>
-            setMobileNavOpen(
-              (previous) =>
-                !previous
-            )
-          }
+          currentUser={currentUser}
+          currentPageTitle={pageTitles[activeTab] || "Administrator Portal"}
+          onOpenCopilot={isCurrentUserAdmin ? handleOpenCopilot : undefined}
+          onRefreshData={fetchAllData}
+          isRefreshing={isRefreshing}
+          onLogout={handleLogout}
+          onToggleMobileNav={() => setMobileNavOpen((previous) => !previous)}
         />
 
         {liveToast && (
-          <div className="absolute bottom-6 right-6 z-50 max-w-md w-full animate-in slide-in-from-bottom-5 fade-in duration-300">
+          <div className="absolute bottom-6 right-6 z-50 w-[calc(100%-2rem)] max-w-md animate-in slide-in-from-bottom-5 fade-in duration-300">
             <div
               className={`
+                rounded-2xl
                 p-4
                 border
-                shadow-2xl
+                backdrop-blur-xl
+                shadow-[0_20px_70px_rgba(0,0,0,0.45)]
                 flex items-start gap-3
+                transition-all
+                duration-300
                 ${
-                  liveToast.type ===
-                  'danger'
-                    ? 'bg-red-950/95 border-red-500/50 text-red-100 shadow-red-950/50'
-                    : liveToast.type ===
-                      'warning'
-                      ? 'bg-amber-950/95 border-amber-500/50 text-amber-100 shadow-amber-950/50'
-                      : 'bg-emerald-950/95 border-emerald-500/50 text-emerald-100 shadow-emerald-950/50'
+                  liveToast.type === "danger"
+                    ? "bg-[#12090B]/95 border-red-500/40 text-[#F4F7FA] shadow-red-950/30"
+                    : liveToast.type === "warning"
+                      ? "bg-[#151108]/95 border-[#D4AF37]/40 text-[#F4F7FA] shadow-black/30"
+                      : "bg-[#071315]/95 border-[#67E8F9]/35 text-[#F4F7FA] shadow-cyan-950/30"
                 }
-                backdrop-blur-md
               `}
             >
-              <div className="mt-0.5">
-                {liveToast.type ===
-                  'danger' && (
-                  <ShieldAlert className="w-5 h-5 text-red-400" />
+              <div className="mt-0.5 shrink-0">
+                {liveToast.type === "danger" && (
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/10 border border-red-500/20">
+                    <ShieldAlert className="w-5 h-5 text-red-400" />
+                  </div>
                 )}
 
-                {liveToast.type ===
-                  'warning' && (
-                  <AlertTriangle className="w-5 h-5 text-amber-400" />
+                {liveToast.type === "warning" && (
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/20">
+                    <AlertTriangle className="w-5 h-5 text-[#D4AF37]" />
+                  </div>
                 )}
 
-                {liveToast.type !==
-                  'danger' &&
-                  liveToast.type !==
-                    'warning' && (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                {liveToast.type !== "danger" &&
+                  liveToast.type !== "warning" && (
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#67E8F9]/10 border border-[#67E8F9]/20">
+                      <CheckCircle2 className="w-5 h-5 text-[#67E8F9]" />
+                    </div>
                   )}
               </div>
 
-              <div className="flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider">
-                    {
-                      liveToast.title
-                    }
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-[13px] font-semibold tracking-wide text-[#F4F7FA]">
+                    {liveToast.title}
                   </h4>
 
-                  <span className="text-[10px] font-mono opacity-60">
-                    {
-                      liveToast.timestamp
-                    }
+                  <span className="text-[11px] font-mono text-[#7F8A96] shrink-0">
+                    {liveToast.timestamp}
                   </span>
                 </div>
 
-                <p className="text-xs mt-1 opacity-90">
-                  {
-                    liveToast.message
-                  }
+                <p className="text-[13px] leading-5 mt-1.5 text-[#A7B0BA]">
+                  {liveToast.message}
                 </p>
               </div>
 
               <button
-                onClick={() =>
-                  setLiveToast(
-                    null
-                  )
-                }
-                className="text-gray-400 hover:text-white p-1 hover:bg-white/10 transition-colors cursor-pointer"
+                onClick={() => setLiveToast(null)}
+                className="
+                  shrink-0
+                  text-[#7F8A96]
+                  hover:text-[#F4F7FA]
+                  p-1.5
+                  rounded-lg
+                  hover:bg-white/5
+                  transition-all
+                  duration-200
+                  cursor-pointer
+                "
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -2237,365 +1312,183 @@ export default function App() {
 
         <main
           id="cyberorbit-main-content"
-          className={`
+          className="
+            relative
             flex-1
+            min-h-0
             overflow-y-auto
-            p-4 md:p-6 lg:p-8
+            pt-10
+            bg-[#03070C]
+            text-[#F4F7FA]
             transition-colors
-            ${
-              isDark
-                ? 'bg-[#07080A]'
-                : 'bg-[#F9F9F7]'
-            }
-          `}
+          "
         >
-          <div className="max-w-7xl mx-auto">
+          <div className="console-workspace w-full max-w-[1500px] mx-auto" data-page={activeTab}>
+            {syncError && <p role="alert" className="mb-5">{syncError}</p>}
+            <PageErrorBoundary key={activeTab}>
+            {activeTab === "dashboard" && isCurrentUserAdmin && (
+              <DashboardPage
+                users={users}
+                incidents={incidents}
+                recentEvents={recentEvents}
+                onSelectUser={(userId) => {
+                  setCurrentUserId(userId);
 
-            {activeTab ===
-              'dashboard' &&
-              isCurrentUserAdmin && (
-                <DashboardPage
-                  users={
-                    users
-                  }
-                  incidents={
-                    incidents
-                  }
-                  recentEvents={
-                    recentEvents
-                  }
-                  onSelectUser={(
-                    userId
-                  ) => {
-                    setCurrentUserId(
-                      userId
-                    );
+                  handleNavigate("security-profile");
+                }}
+                onSelectIncident={(id) => { setFocusedIncidentId(typeof id === "object" ? id?.id || id?.incidentId : id || null); handleNavigate("incidents"); }}
+                onNavigateToSimulator={() => handleNavigate("simulator")}
+                onNavigateToCopilot={() => handleOpenCopilot()}
+                onNavigateToAdminManagement={() =>
+                  handleNavigate("admin-management")
+                }
+                onFreezeUser={handleFreezeUser}
+                onUnfreezeUser={handleUnfreezeUser}
+              />
+            )}
 
-                    handleNavigate(
-                      'employees'
-                    );
-                  }}
-                  onSelectIncident={() =>
-                    handleNavigate(
-                      'incidents'
-                    )
-                  }
-                  onNavigateToSimulator={() =>
-                    handleNavigate(
-                      'simulator'
-                    )
-                  }
-                  onNavigateToCopilot={() =>
-                    handleOpenCopilot()
-                  }
-                  onNavigateToAdminManagement={() =>
-                    handleNavigate(
-                      'admin-management'
-                    )
-                  }
-                  onFreezeUser={
-                    handleFreezeUser
-                  }
-                  onUnfreezeUser={
-                    handleUnfreezeUser
-                  }
-                />
-              )}
+            {activeTab === "admin-management" && isCurrentUserAdmin && (
+              <AdminManagementPage
+                currentUser={currentUser}
+                onBack={() => handleNavigate("dashboard")}
+              />
+            )}
 
-            {activeTab ===
-              'admin-management' &&
-              isCurrentUserAdmin && (
-                <AdminManagementPage
-                  currentUser={
-                    currentUser
-                  }
-                  onBack={() =>
-                    handleNavigate(
-                      'dashboard'
-                    )
-                  }
-                />
-              )}
-
-            {activeTab ===
-              'employee-dashboard' &&
-              (
-                isCurrentUserAdmin ||
-                isCurrentUserEmployee
-              ) && (
+            {activeTab === "employee-dashboard" &&
+              (isCurrentUserAdmin || isCurrentUserEmployee) && (
                 <EmployeeDashboard
-                  currentUser={
-                    currentUser
-                  }
-                  users={
-                    users
-                  }
-                  events={
-                    recentEvents
-                  }
-                  devices={
-                    devices
-                  }
-                  isAdminView={
-                    isCurrentUserAdmin
-                  }
-                  onOpenAccessRequestModal={() =>
-                    handleNavigate(
-                      'policies'
-                    )
-                  }
+                  currentUser={currentUser}
+                  users={users}
+                  events={recentEvents}
+                  devices={devices}
+                  isAdminView={isCurrentUserAdmin}
+                  onOpenAccessRequestModal={() => handleNavigate("access-requests")}
                 />
               )}
 
-            {activeTab ===
-              'employees' &&
-              isCurrentUserAdmin && (
-                <EmployeeManagementPage
-                  users={
-                    users
-                  }
-                  onAddUser={
-                    handleAddUser
-                  }
-                  onUpdateUser={
-                    handleUpdateUser
-                  }
-                  onDeleteUser={
-                    handleDeleteUser
-                  }
-                  onFreezeUser={
-                    handleFreezeUser
-                  }
-                  onUnfreezeUser={
-                    handleUnfreezeUser
-                  }
-                />
-              )}
+            {activeTab === "employees" && isCurrentUserAdmin && (
+              <EmployeeManagementPage
+                users={users}
+                onSelectUser={userId=>{setCurrentUserId(userId);handleNavigate('security-profile');}}
+                onAddUser={handleAddUser}
+                onUpdateUser={handleUpdateUser}
+                onDeleteUser={handleDeleteUser}
+                onFreezeUser={handleFreezeUser}
+                onUnfreezeUser={handleUnfreezeUser}
+              />
+            )}
 
-            {activeTab ===
-              'departments' &&
-              isCurrentUserAdmin && (
-                <DepartmentsPage
-                  users={
-                    users
-                  }
-                  incidents={
-                    incidents
-                  }
-                  onSelectUser={(
-                    userId
-                  ) => {
-                    setCurrentUserId(
-                      userId
-                    );
+            {activeTab === "departments" && isCurrentUserAdmin && (
+              <DepartmentsPage
+                users={users}
+                incidents={incidents}
+                onSelectUser={(userId) => {
+                  setCurrentUserId(userId);
 
-                    handleNavigate(
-                      'employees'
-                    );
-                  }}
-                />
-              )}
+                  handleNavigate("security-profile");
+                }}
+              />
+            )}
 
-            {activeTab ===
-              'devices' &&
-              isCurrentUserAdmin && (
-                <DevicesPage
-                  devices={
-                    devices
-                  }
-                  users={
-                    users
-                  }
-                  onRefreshData={
-                    fetchAllData
-                  }
-                />
-              )}
+            {activeTab === "devices" && isCurrentUserAdmin && (
+              <DevicesPage
+                devices={devices}
+                users={users}
+                onRefreshData={fetchAllData}
+              />
+            )}
 
-            {activeTab ===
-              'risk-analysis' &&
-              isCurrentUserAdmin && (
-                <AiRiskAnalysisPage
-                  users={
-                    users
-                  }
-                  events={
-                    recentEvents
-                  }
-                  selectedUserId={
-                    currentUserId
-                  }
-                  onSelectUser={(
-                    userId
-                  ) =>
-                    setCurrentUserId(
-                      userId
-                    )
-                  }
-                />
-              )}
+            {activeTab === "risk-analysis" && isCurrentUserAdmin && (
+              <AiRiskAnalysisPage
+                users={users}
+                events={recentEvents}
+                selectedUserId={currentUserId}
+                onSelectUser={(userId) => setCurrentUserId(userId)}
+              />
+            )}
 
-            {activeTab ===
-              'xai' &&
-              isCurrentUserAdmin && (
-                <ExplainableAiPage
-                  users={
-                    users
-                  }
-                  events={
-                    recentEvents
-                  }
-                  incidents={
-                    incidents
-                  }
-                  onSelectUser={(
-                    userId
-                  ) => {
-                    setCurrentUserId(
-                      userId
-                    );
+            {activeTab === "xai" && isCurrentUserAdmin && (
+              <ExplainableAiPage
+                users={users}
+                events={recentEvents}
+                incidents={incidents}
+                onSelectUser={(userId) => {
+                  setCurrentUserId(userId);
 
-                    handleNavigate(
-                      'risk-analysis'
-                    );
-                  }}
-                />
-              )}
+                  handleNavigate("risk-analysis");
+                }}
+              />
+            )}
 
-            {activeTab ===
-              'alerts' &&
-              isCurrentUserAdmin && (
-                <AlertsPage
-                  users={
-                    users
-                  }
-                  events={
-                    recentEvents
-                  }
-                  incidents={
-                    incidents
-                  }
-                  onSelectUser={(
-                    userId
-                  ) => {
-                    setCurrentUserId(
-                      userId
-                    );
+            {activeTab === "alerts" && isCurrentUserAdmin && (
+              <AlertsPage
+                currentUser={currentUser}
+                onRefreshData={fetchAllData}
+                users={users}
+                events={recentEvents}
+                incidents={incidents}
+                onSelectUser={(userId) => {
+                  setCurrentUserId(userId);
 
-                    handleNavigate(
-                      'employees'
-                    );
-                  }}
-                  onSelectIncident={() =>
-                    handleNavigate(
-                      'incidents'
-                    )
-                  }
-                />
-              )}
+                  handleNavigate("security-profile");
+                }}
+                onSelectIncident={(id) => { setFocusedIncidentId(typeof id === "object" ? id?.id || id?.incidentId : id || null); handleNavigate("incidents"); }}
+              />
+            )}
 
-            {activeTab ===
-              'incidents' &&
-              isCurrentUserAdmin && (
-                <IncidentsPage
-                  incidents={
-                    incidents
-                  }
-                  users={
-                    users
-                  }
-                  currentUser={
-                    currentUser
-                  }
-                  onRefreshData={
-                    fetchAllData
-                  }
-                  onOpenCopilot={
-                    handleOpenCopilot
-                  }
-                />
-              )}
+            {activeTab === "incidents" && isCurrentUserAdmin && (
+              <IncidentsPage
+                initialIncidentId={focusedIncidentId}
+                incidents={incidents}
+                users={users}
+                currentUser={currentUser}
+                onRefreshData={fetchAllData}
+                onOpenCopilot={handleOpenCopilot}
+              />
+            )}
 
-            {activeTab ===
-              'policies' && (
-                <PoliciesPage
-                  onRefreshData={
-                    fetchAllData
-                  }
-                />
-              )}
+            {activeTab === "policies" && (
+              isCurrentUserAdmin ? <PoliciesPage onRefreshData={fetchAllData} /> : <ResourcesPage resources={resources} currentUser={currentUser} onRefreshData={fetchAllData}/>
+            )}
 
-            {activeTab ===
-              'ml-analytics' &&
-              isCurrentUserAdmin && (
-                <MlAnalyticsPage />
-              )}
+            {activeTab==='resources'&&<ResourcesPage resources={resources} currentUser={currentUser} onRefreshData={fetchAllData}/>}
+            {activeTab==='access-requests'&&<AccessRequestsPage requests={accessRequests} currentUser={currentUser} resources={resources} onRefreshData={fetchAllData}/>}
+            {activeTab==='security-profile'&&<SecurityProfilePage currentUser={currentUser} users={users} selectedEmployeeId={currentUserId}/>}
 
-            {activeTab ===
-              'audit-logs' &&
-              isCurrentUserAdmin && (
-                <AuditLogsPage
-                  auditLogs={
-                    auditLogs
-                  }
-                  currentUser={
-                    currentUser
-                  }
-                  onRefreshData={
-                    fetchAllData
-                  }
-                />
-              )}
+            {activeTab === "ml-analytics" && isCurrentUserAdmin && (
+              <MlAnalyticsPage />
+            )}
 
-            {activeTab ===
-              'simulator' &&
-              isCurrentUserAdmin && (
-                <SimulatorPage
-                  users={
-                    users
-                  }
-                  resources={
-                    resources
-                  }
-                  devices={
-                    devices
-                  }
-                  onRefreshData={
-                    fetchAllData
-                  }
-                  onOpenCopilot={
-                    handleOpenCopilot
-                  }
-                />
-              )}
+            {activeTab === "audit-logs" && isCurrentUserAdmin && (
+              <AuditLogsPage
+                auditLogs={auditLogs}
+                currentUser={currentUser}
+                onRefreshData={fetchAllData}
+              />
+            )}
 
-            {activeTab ===
-              'settings' && (
-                <SettingsPage
-                  currentUser={
-                    currentUser
-                  }
-                  onLogout={
-                    handleLogout
-                  }
-                />
-              )}
+            {activeTab === "simulator" && isCurrentUserAdmin && (
+              <SimulatorPage
+                users={users}
+                resources={resources}
+                devices={devices}
+                onRefreshData={fetchAllData}
+                onOpenCopilot={handleOpenCopilot}
+              />
+            )}
+
+            {activeTab === "settings" && (
+              <SettingsPage currentUser={currentUser} onLogout={handleLogout} />
+            )}
+            </PageErrorBoundary>
           </div>
         </main>
       </div>
 
       <CopilotModal
-        isOpen={
-          copilotOpen
-        }
-        onClose={() =>
-          setCopilotOpen(
-            false
-          )
-        }
-        context={
-          copilotContext
-        }
+        isOpen={copilotOpen}
+        onClose={() => setCopilotOpen(false)}
+        context={copilotContext}
       />
     </div>
   );

@@ -1,177 +1,31 @@
-import { Router } from "express";
-import { db } from "../middleware/auth.js";
-import { requireSecurityAdmin } from "../middleware/auth.js";
-import { trustEngine } from "../../cyber/zero-trust/trust-engine.js";
-
-const router = Router();
-
-router.get("/", (req, res) => {
-  res.json({
-    success: true,
-    users: db.users
-  });
-});
-
-router.get("/:id", (req, res) => {
-  const user = db.getUserById(req.params.id);
-
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      error: {
-        code: "USER_NOT_FOUND",
-        message: "User not found"
-      }
-    });
-  }
-
-  const userDevices = db.devices.filter(
-    d => d.userId === user.id
-  );
-
-  const userEvents = db.activityEvents.filter(
-    e => e.userId === user.id
-  );
-
-  const userIncidents = db.incidents.filter(
-    i => i.userId === user.id
-  );
-
-  const trustHistory = db.getTrustHistory(user.id);
-
-  res.json({
-    success: true,
-    user,
-    devices: userDevices,
-    recentEvents: userEvents.slice(0, 15),
-    incidents: userIncidents,
-    trustHistory
-  });
-});
-
-router.post("/:id/freeze", requireSecurityAdmin, (req, res) => {
-  const user = db.getUserById(req.params.id);
-
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      error: {
-        code: "USER_NOT_FOUND",
-        message: "User not found"
-      }
-    });
-  }
-
-  db.updateUserStatus(user.id, "FROZEN");
-
-  db.appendAuditLog({
-    userId: user.id,
-    userName: user.name,
-    action: "ADMIN_FREEZE_ACCOUNT",
-    category: "ADMIN",
-    severity: "CRITICAL",
-    details: {
-      admin: req.user?.name || "Security Administrator",
-      reason:
-        req.body.reason ||
-        "Manual SOC containment lock"
-    }
-  });
-
-  res.json({
-    success: true,
-    user,
-    message: `Account ${user.employeeId} (${user.name}) frozen.`
-  });
-});
-
-router.post("/:id/unfreeze", requireSecurityAdmin, (req, res) => {
-  const user = db.getUserById(req.params.id);
-
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      error: {
-        code: "USER_NOT_FOUND",
-        message: "User not found"
-      }
-    });
-  }
-
-  db.updateUserStatus(user.id, "ACTIVE");
-  db.updateUserRiskAndTrust(
-    user.id,
-    20,
-    88,
-    "LOW"
-  );
-
-  db.appendAuditLog({
-    userId: user.id,
-    userName: user.name,
-    action: "ADMIN_RESTORE_ACCOUNT",
-    category: "ADMIN",
-    severity: "INFO",
-    details: {
-      admin: req.user?.name || "Security Administrator",
-      note: "Account restored and baseline recalibrated."
-    }
-  });
-
-  trustEngine.updateTrustScore(
-    user,
-    {
-      userId: user.id,
-      riskScore: 20,
-      riskLevel: "LOW",
-      trustScore: 88,
-      contributingFactors: [],
-      recommendedAction: "ALLOW",
-      policyEnforced: "ALLOW",
-      mlAnomalyScore: 0.05,
-      isCrossDepartment: false,
-      isOffHours: false,
-      isUnknownDevice: false,
-      explanationText:
-        "Account access restored by administrator.",
-      timestamp: new Date().toISOString()
-    },
-    "Administrative Account Unfreeze & Baseline Reset"
-  );
-
-  res.json({
-    success: true,
-    user,
-    message:
-      `Account ${user.employeeId} restored to active status.`
-  });
-});
-
-router.post("/:id/reset-risk", requireSecurityAdmin, (req, res) => {
-  const user = db.getUserById(req.params.id);
-
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      error: {
-        code: "USER_NOT_FOUND",
-        message: "User not found"
-      }
-    });
-  }
-
-  db.updateUserRiskAndTrust(
-    user.id,
-    0,
-    100,
-    "LOW"
-  );
-
-  res.json({
-    success: true,
-    user: db.getUserById(user.id),
-    message: "Risk profile reset successfully."
-  });
-});
-
+import {Router} from 'express';
+import {randomUUID} from 'node:crypto';
+import {prisma} from '../models/prisma.js';
+import {requireAuth,requireSecurityAdmin} from '../middleware/auth.js';
+import {api,userScope,scopedUser,audit,SecurityError} from '../services/security-common.js';
+import {setAccount} from './security.js';
+import {learnBaseline} from '../services/ueba-service.js';
+const router=Router();router.use(requireAuth);
+router.get('/',api(async req=>({devices:(await prisma.device.findMany({where:{user:userScope(req.user)},include:{user:{select:{id:true,name:true,employeeId:true}}},orderBy:{lastSeen:'desc'},take:200})).map(d=>{const {fingerprint,...safe}=d;return{...safe,deviceName:d.name,ipAddress:d.ip,lastSeenAt:d.lastSeen};})})));
+router.post('/',requireSecurityAdmin,api(async req=>{
+ const u=await scopedUser(prisma,req.user,req.body.userId);
+ if(typeof req.body.name!=='string'||!req.body.name.trim()||req.body.name.length>100)throw new SecurityError(400,'INVALID_DEVICE','A name of 1–100 characters is required.');
+ const device=await prisma.$transaction(async tx=>{const d=await tx.device.create({data:{deviceId:randomUUID(),userId:u.id,name:req.body.name.trim(),os:String(req.body.os||'Logical device').slice(0,100),browser:'Not browser-verified',ip:'Unknown',location:'Unknown',trustScore:0,isTrusted:false,status:'MONITORED'}});await audit(tx,req.user,'DEVICE_REGISTERED',{id:d.id},u.id);return d;});return{device};
+}));
+router.get('/:id',api(async req=>{
+ const device=await prisma.device.findFirst({where:{OR:[{id:req.params.id},{deviceId:req.params.id}],user:userScope(req.user)}});
+ if(device){const {fingerprint,...safe}=device;return{device:safe};}
+ // Preserve the existing employee-ID lookup used by the original frontend.
+ const u=await scopedUser(prisma,req.user,req.params.id);
+ return{devices:await prisma.device.findMany({where:{userId:u.id},select:{id:true,name:true,trustScore:true,status:true,isTrusted:true,lastSeen:true}})};
+}));
+router.post('/:id/freeze',requireSecurityAdmin,api(req=>setAccount(req,'FROZEN')));
+router.post('/:id/unfreeze',requireSecurityAdmin,api(req=>setAccount(req,'ACTIVE')));
+router.post('/:id/reset-risk',requireSecurityAdmin,api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{baseline:await learnBaseline(prisma,u.id),message:'Historical baseline recomputed. Existing risk and trust evidence retained.'};}));
+router.patch('/:id',requireSecurityAdmin,api(async req=>{
+ const d=await prisma.device.findFirst({where:{id:req.params.id,user:userScope(req.user)}});if(!d)throw new SecurityError(404,'DEVICE_NOT_FOUND','Device not found.');
+ const {trustScore,status}=req.body;if(!Number.isFinite(trustScore)||trustScore<0||trustScore>100||!['TRUSTED','MONITORED','SUSPICIOUS','REVOKED'].includes(status))throw new SecurityError(400,'INVALID_DEVICE_POSTURE','Provide device trust 0–100 and a supported posture.');
+ const device=await prisma.$transaction(async tx=>{const updated=await tx.device.update({where:{id:d.id},data:{trustScore,status,isTrusted:status==='TRUSTED'}});await audit(tx,req.user,'DEVICE_POSTURE_UPDATED',{id:d.id,trustScore,status},d.userId);if(status==='REVOKED'){await tx.user.update({where:{id:d.userId},data:{authVersion:{increment:1}}});await tx.session.updateMany({where:{userId:d.userId,revokedAt:null},data:{revokedAt:new Date()}});}return updated;});
+ return{device:{id:device.id,name:device.name,status:device.status,trustScore:device.trustScore}};
+}));
 export default router;

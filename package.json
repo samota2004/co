@@ -4,14 +4,23 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node server/server.js",
-    "build": "prisma generate && vite build --config client/vite.config.js && esbuild server/server.js --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.js",
-    "start": "node dist/server.js",
+    "dev": "node server/dev.js",
+    "build": "prisma generate && vite build --config client/vite.config.js",
+    "start": "node server/server.js",
     "seed": "node prisma/seed.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "clean": "rm -rf dist",
-    "lint": "node --check server/server.js"
+    "agent:test": "node --test --test-concurrency=1 agent/test/*.test.js",
+    "test:devices": "node --test server/test/device-buttons.test.js server/test/device-buttons.browser.test.js",
+    "test:usage": "node --test server/test/application-usage.test.js server/test/device-buttons.browser.test.js",
+    "test:startup": "node --test server/test/server-startup.test.js",
+    "test:enrollment": "node --test agent/test/enrollment.test.js agent/test/windows-enrollment-input.test.js server/test/enrollment.test.js",
+    "agent:build:windows": "powershell -NoProfile -File agent/packaging/windows/build.ps1",
+    "clean": "node --input-type=module -e \"import {rmSync} from 'node:fs'; rmSync('client/dist',{recursive:true,force:true})\"",
+    "test:security": "node --test --test-concurrency=1 server/test/security-pipeline.test.js server/test/auth-security.test.js server/test/security-abuse.test.js server/test/master-requirements.test.js server/test/model-pipeline.test.js server/test/production-bundle.test.js",
+    "test:research": "python -m unittest discover -s ml/test -v",
+    "test:browser": "node --test --test-concurrency=1 server/test/device-buttons.browser.test.js server/test/security-flow.browser.test.js",
+    "test:api": "node --test --test-concurrency=1 server/test/security-pipeline.test.js server/test/auth-security.test.js server/test/master-requirements.test.js server/test/enrollment.test.js server/test/device-buttons.test.js server/test/application-usage.test.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -19,7 +28,6 @@
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@prisma/client": "^6.4.1",
-    "@rollup/rollup-win32-x64-msvc": "^4.63.1",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "bcrypt": "^6.0.0",
@@ -30,6 +38,7 @@
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "nodemailer": "^10.0.9",
     "prisma": "^6.4.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
@@ -39,5 +48,8 @@
   "devDependencies": {
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.63.1"
   }
 }

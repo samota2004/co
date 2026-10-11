@@ -1,0 +1,2 @@
+-- This pre-existing directory had no migration.sql. Keep it intentionally
+-- non-destructive: endpoint monitoring does not change existing risk defaults.
