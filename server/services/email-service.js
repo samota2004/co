@@ -1,79 +1,220 @@
-/** Mailjet Send API v3.1. Credentials remain on the backend. */
+
+/**
+ * CYBERORBIT Email Service
+ * Provider: Mailjet Send API v3.1
+ *
+ * Environment variables:
+ * MAILJET_API_KEY
+ * MAILJET_SECRET_KEY
+ * MAILJET_FROM_EMAIL
+ * MAILJET_FROM_NAME
+ * APP_URL
+ */
+
 const MAILJET_API_URL = "https://api.mailjet.com/v3.1/send";
 const EMAIL_TIMEOUT_MS = 15000;
-const validEmail = value => typeof value === 'string' && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
+
+const validEmail = (value) =>
+  typeof value === "string" &&
+  /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
 
 function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char]);
 }
 
 export class EmailDeliveryError extends Error {
-  constructor(code) {
-    super('Email delivery is temporarily unavailable. Please try again.');
-    this.name = 'EmailDeliveryError';
+  constructor(code, httpStatus = null) {
+    super("Email delivery is temporarily unavailable. Please try again.");
+    this.name = "EmailDeliveryError";
     this.code = code;
+    this.httpStatus = httpStatus;
   }
+}
+
+/**
+ * Log only safe diagnostic information.
+ * Never log credentials, OTPs, tokens, recipients,
+ * request bodies, or provider response bodies.
+ */
+export function logEmailFailure(error, operation) {
+  const allowedCategories = new Set([
+    "EMAIL_CONFIGURATION",
+    "EMAIL_RECIPIENT",
+    "EMAIL_AUTHENTICATION",
+    "EMAIL_RATE_LIMIT",
+    "EMAIL_REJECTED",
+    "EMAIL_NETWORK_OR_RESPONSE",
+    "EMAIL_MESSAGE_REJECTED",
+  ]);
+
+  const category = allowedCategories.has(error?.code)
+    ? error.code
+    : "EMAIL_UNKNOWN";
+
+  console.error(JSON.stringify({
+    event: "EMAIL_DELIVERY_FAILED",
+    provider: "mailjet",
+    operation: operation === "password-reset"
+      ? "password-reset"
+      : "otp",
+    category,
+    httpStatus: Number.isInteger(error?.httpStatus)
+      ? error.httpStatus
+      : null,
+  }));
 }
 
 function validateEmailConfig() {
-  if (!['MAILJET_API_KEY','MAILJET_SECRET_KEY','MAILJET_FROM_EMAIL'].every(key => process.env[key]?.trim()) ||
-      !validEmail(process.env.MAILJET_FROM_EMAIL) || /[\r\n]/.test(process.env.MAILJET_FROM_NAME || '')) {
-    throw new EmailDeliveryError('EMAIL_CONFIGURATION');
+  const required = [
+    "MAILJET_API_KEY",
+    "MAILJET_SECRET_KEY",
+    "MAILJET_FROM_EMAIL",
+  ];
+
+  const missing = required.some(
+    (key) => !process.env[key]?.trim()
+  );
+
+  if (
+    missing ||
+    !validEmail(process.env.MAILJET_FROM_EMAIL) ||
+    /[\r\n]/.test(process.env.MAILJET_FROM_NAME || "")
+  ) {
+    throw new EmailDeliveryError("EMAIL_CONFIGURATION");
   }
 }
 
-async function sendEmail({to, subject, text, html}) {
+/**
+ * Send an email using Mailjet.
+ *
+ * A successful response means Mailjet accepted the
+ * message for processing. It does not guarantee
+ * delivery to the recipient's inbox.
+ */
+async function sendEmail({ to, subject, text, html }) {
   validateEmailConfig();
-  if (!validEmail(to)) throw new EmailDeliveryError('EMAIL_RECIPIENT');
-  let response, result;
+
+  if (!validEmail(to)) {
+    throw new EmailDeliveryError("EMAIL_RECIPIENT");
+  }
+
+  const apiKey = process.env.MAILJET_API_KEY.trim();
+  const secretKey = process.env.MAILJET_SECRET_KEY.trim();
+
+  const fromEmail = process.env.MAILJET_FROM_EMAIL.trim();
+  const fromName =
+    process.env.MAILJET_FROM_NAME?.trim() ||
+    "CyberOrbit Security";
+
+  const authorization = Buffer.from(
+    `${apiKey}:${secretKey}`
+  ).toString("base64");
+
+  const payload = {
+    Messages: [
+      {
+        From: {
+          Email: fromEmail,
+          Name: fromName,
+        },
+        To: [
+          {
+            Email: to,
+          },
+        ],
+        Subject: subject,
+        TextPart: text,
+        HTMLPart: html,
+      },
+    ],
+  };
+
+  let response;
+  let result;
+
   try {
     response = await fetch(MAILJET_API_URL, {
-      method: 'POST', redirect: 'error',
+      method: "POST",
+      redirect: "error",
       headers: {
-        Authorization: 'Basic ' + Buffer.from(process.env.MAILJET_API_KEY + ':' + process.env.MAILJET_SECRET_KEY).toString('base64'),
-        'Content-Type': 'application/json',
+        Authorization: `Basic ${authorization}`,
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({Messages: [{
-        From: {Email: process.env.MAILJET_FROM_EMAIL, Name: process.env.MAILJET_FROM_NAME || 'CyberOrbit Security'},
-        To: [{Email: to}], Subject: subject, TextPart: text, HTMLPart: html,
-      }]}),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(EMAIL_TIMEOUT_MS),
     });
-    if (!response.ok) {
-      const code = [401,403].includes(response.status) ? 'EMAIL_AUTHENTICATION' : response.status === 429 ? 'EMAIL_RATE_LIMIT' : 'EMAIL_REJECTED';
-      throw new EmailDeliveryError(code);
+  } catch {
+    throw new EmailDeliveryError(
+      "EMAIL_NETWORK_OR_RESPONSE"
+    );
+  }
+
+  if (!response.ok) {
+    let code = "EMAIL_REJECTED";
+
+    if ([401, 403].includes(response.status)) {
+      code = "EMAIL_AUTHENTICATION";
+    } else if (response.status === 429) {
+      code = "EMAIL_RATE_LIMIT";
     }
+
+    throw new EmailDeliveryError(
+      code,
+      response.status
+    );
+  }
+
+  try {
     result = await response.json();
-  } catch (error) {
-    // Never attach raw provider responses or network errors: they can contain secrets.
-    if (error instanceof EmailDeliveryError) throw error;
-    throw new EmailDeliveryError('EMAIL_NETWORK_OR_RESPONSE');
+  } catch {
+    throw new EmailDeliveryError(
+      "EMAIL_NETWORK_OR_RESPONSE",
+      response.status
+    );
   }
-  const message = result?.Messages?.[0];
-  if (result?.Messages?.length !== 1 || message?.Status !== 'success' || message?.Errors?.length ||
-      message?.To?.length !== 1 || message.To[0].Email !== to ||
-      !(message.To[0].MessageUUID || message.To[0].MessageID)) {
-    throw new EmailDeliveryError('EMAIL_MESSAGE_REJECTED');
+
+  const messages = result?.Messages;
+  const message = messages?.[0];
+
+  if (
+    !Array.isArray(messages) ||
+    messages.length !== 1 ||
+    message?.Status !== "success" ||
+    (Array.isArray(message?.Errors) && message.Errors.length > 0) ||
+    !Array.isArray(message?.To) ||
+    message.To.length !== 1 ||
+    message.To[0]?.Email !== to ||
+    !(
+      message.To[0]?.MessageUUID ||
+      message.To[0]?.MessageID
+    )
+  ) {
+    throw new EmailDeliveryError(
+      "EMAIL_MESSAGE_REJECTED",
+      response.status
+    );
   }
-  // Provider acceptance, not confirmation of inbox delivery. Do not retry an
-  // ambiguous timeout automatically, which could send duplicate security emails.
+
   return true;
 }
 
 /**
  * Send login verification OTP.
  *
- * Existing authentication logic controls:
- * - OTP generation
- * - OTP hashing
- * - OTP expiration
- * - Verification attempts
+ * OTP generation, hashing, expiration, attempts,
+ * and verification remain in the authentication service.
  */
 export async function sendOtpEmail({
   to,
   name,
   otp,
-  expiryMinutes = 5
+  expiryMinutes = 5,
 }) {
   if (!/^\d{6}$/.test(String(otp))) {
     throw new Error("Invalid OTP format");
@@ -104,7 +245,6 @@ CyberOrbit Security Team`;
       margin: auto;
       padding: 24px;
     ">
-
       <h2 style="color: #c9a44c;">
         CyberOrbit Login Verification
       </h2>
@@ -124,7 +264,6 @@ CyberOrbit Security Team`;
         text-align: center;
         border-radius: 8px;
       ">
-
         <h1 style="
           letter-spacing: 8px;
           font-size: 32px;
@@ -133,7 +272,6 @@ CyberOrbit Security Team`;
         ">
           ${safeOtp}
         </h1>
-
       </div>
 
       <p>
@@ -160,7 +298,6 @@ CyberOrbit Security Team`;
       <small style="color: #777;">
         CyberOrbit Security Team
       </small>
-
     </div>
   `;
 
@@ -168,20 +305,20 @@ CyberOrbit Security Team`;
     to,
     subject,
     text,
-    html
+    html,
   });
 }
 
 /**
  * Send password reset email.
  *
- * Reset token creation, hashing, expiry,
- * and verification remain in auth.js.
+ * Reset token creation, hashing, expiration,
+ * and verification remain in the auth routes.
  */
 export async function sendPasswordResetEmail({
   to,
   name,
-  resetToken
+  resetToken,
 }) {
   const appUrl = process.env.APP_URL;
 
@@ -197,7 +334,9 @@ export async function sendPasswordResetEmail({
     parsedUrl.protocol !== "https:" &&
     !(
       parsedUrl.protocol === "http:" &&
-      ["localhost", "127.0.0.1"].includes(parsedUrl.hostname)
+      ["localhost", "127.0.0.1"].includes(
+        parsedUrl.hostname
+      )
     )
   ) {
     throw new Error(
@@ -228,7 +367,6 @@ export async function sendPasswordResetEmail({
 A password reset was requested for your CyberOrbit account.
 
 Reset your password using this link:
-
 ${resetLink}
 
 This link will expire in 15 minutes.
@@ -247,7 +385,6 @@ CyberOrbit Security Team`;
       margin: auto;
       padding: 24px;
     ">
-
       <h2 style="color: #c9a44c;">
         CyberOrbit Password Reset
       </h2>
@@ -268,7 +405,6 @@ CyberOrbit Security Team`;
         text-align: center;
         margin: 30px 0;
       ">
-
         <a
           href="${safeResetLink}"
           style="
@@ -283,7 +419,6 @@ CyberOrbit Security Team`;
         >
           Reset Password
         </a>
-
       </div>
 
       <p>
@@ -316,7 +451,6 @@ CyberOrbit Security Team`;
       <small style="color: #777;">
         CyberOrbit Security Team
       </small>
-
     </div>
   `;
 
@@ -324,6 +458,6 @@ CyberOrbit Security Team`;
     to,
     subject,
     text,
-    html
+    html,
   });
 }
