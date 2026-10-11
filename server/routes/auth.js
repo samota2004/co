@@ -215,7 +215,7 @@ router.post("/forgot-password", async (req, res) => {
         resetToken: token
       });
 
-      await audit(prisma,user,'PASSWORD_RESET_REQUESTED',{delivery:'smtp'});
+      await audit(prisma,user,'PASSWORD_RESET_REQUESTED',{delivery:'resend-api'});
     } catch (emailError) {
       console.error(JSON.stringify({event:'PASSWORD_RESET_DELIVERY_FAILED',category:emailError.name}));
 
