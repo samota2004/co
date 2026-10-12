@@ -35,6 +35,7 @@ import {
 export const AiRiskAnalysisPage = ({
   users = [],
   events = [],
+  fetchJson,
 }) => {
 
   // ======================================================
@@ -51,7 +52,55 @@ export const AiRiskAnalysisPage = ({
 
   // Manual selection only. The page always opens with no employee selected.
   const [targetUserId, setTargetUserId] = useState("");
+const [employeeEvents, setEmployeeEvents] = useState([]);
+const [telemetryLoading, setTelemetryLoading] = useState(false);
+const [telemetryError, setTelemetryError] = useState("");
 
+useEffect(() => {
+  let cancelled = false;
+
+  if (!targetUserId || !fetchJson) {
+    setEmployeeEvents([]);
+    setTelemetryError("");
+    setTelemetryLoading(false);
+    return;
+  }
+
+  setEmployeeEvents([]);
+  setTelemetryError("");
+  setTelemetryLoading(true);
+
+  const loadTelemetry = async () => {
+    try {
+      const result = await fetchJson(
+        `/api/users/${encodeURIComponent(targetUserId)}`
+      );
+
+      if (cancelled) return;
+
+      if (!result?.success) {
+        throw new Error(result?.message || "Unable to load employee telemetry");
+      }
+
+      setEmployeeEvents(
+        Array.isArray(result.events) ? result.events : []
+      );
+    } catch (error) {
+      if (!cancelled) {
+        setTelemetryError(error.message);
+        setEmployeeEvents([]);
+      }
+    } finally {
+      if (!cancelled) setTelemetryLoading(false);
+    }
+  };
+
+  loadTelemetry();
+
+  return () => {
+    cancelled = true;
+  };
+}, [targetUserId, fetchJson]);
   useEffect(() => {
     if (targetUserId && !users.some((user) => user.id === targetUserId)) {
       setTargetUserId("");
@@ -70,21 +119,25 @@ export const AiRiskAnalysisPage = ({
   // ======================================================
 
   const userEvents = useMemo(() => {
-    if (!targetUser) return [];
+  if (!targetUser) return [];
 
-    return events
-      .filter((event) =>
-        String(event.userId ?? "") === String(targetUser.id) ||
-        String(event.employeeId ?? "") === String(targetUser.employeeId ?? "") ||
-        String(event.user?.id ?? "") === String(targetUser.id) ||
-        String(event.user?.employeeId ?? "") === String(targetUser.employeeId ?? "")
-      )
-      .sort((a, b) => {
-        const dateA = new Date(a.timestamp || a.createdAt || a.time || 0).getTime();
-        const dateB = new Date(b.timestamp || b.createdAt || b.time || 0).getTime();
-        return dateB - dateA;
-      });
-  }, [events, targetUser]);
+  return employeeEvents
+    .filter(
+      (event) =>
+        String(event.userId ?? "") === String(targetUser.id)
+    )
+    .sort((a, b) => {
+      const dateA = new Date(
+        a.timestamp || a.createdAt || a.time || 0
+      ).getTime();
+
+      const dateB = new Date(
+        b.timestamp || b.createdAt || b.time || 0
+      ).getTime();
+
+      return dateB - dateA;
+    });
+}, [employeeEvents, targetUser]);
 
   // Generic application events are not automatically AI telemetry.
   // The analysis branch opens only when at least one selected-user event
@@ -282,10 +335,10 @@ export const AiRiskAnalysisPage = ({
                     Select Employee
                   </option>
                   {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.name}
-                    </option>
-                  ))}
+  <option key={user.id} value={user.id}>
+    {user.name} — {user.employeeId || user.id}
+  </option>
+))}
                 </select>
               </div>
             </div>
@@ -300,7 +353,25 @@ export const AiRiskAnalysisPage = ({
             <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO EMPLOYEE SELECTED</div>
             <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">Select an employee from the TARGET list above to inspect recorded security telemetry.</p>
           </section>
-        ) : !hasTelemetry ? (
+        ) : telemetryLoading ? (
+  <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center sm:p-12">
+    <div className="text-[13px] font-semibold text-[#67E8F9]">
+      LOADING EMPLOYEE TELEMETRY...
+    </div>
+    <p className="mt-2 text-[13px] text-[#7F8A96]">
+      Fetching recorded security events for {targetUser.name}.
+    </p>
+  </section>
+) : telemetryError ? (
+  <section className="rounded-2xl border border-red-500/20 bg-[#050A10] p-8 text-center sm:p-12">
+    <div className="text-[13px] font-semibold text-red-400">
+      TELEMETRY LOAD FAILED
+    </div>
+    <p className="mt-2 text-[13px] text-[#7F8A96]">
+      {telemetryError}
+    </p>
+  </section>
+) : !hasTelemetry ? (
           <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center shadow-[0_18px_60px_rgba(0,0,0,0.18)] sm:p-12">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/[0.04] text-[#D4AF37]">
               <ShieldCheck className="h-6 w-6" strokeWidth={1.5} />

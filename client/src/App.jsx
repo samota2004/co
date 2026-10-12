@@ -1400,11 +1400,12 @@ export default function App() {
 
             {activeTab === "risk-analysis" && isCurrentUserAdmin && (
               <AiRiskAnalysisPage
-                users={users}
-                events={recentEvents}
-                selectedUserId={currentUserId}
-                onSelectUser={(userId) => setCurrentUserId(userId)}
-              />
+  users={users}
+  events={recentEvents}
+  selectedUserId={currentUserId}
+  onSelectUser={(userId) => setCurrentUserId(userId)}
+  fetchJson={safeFetchJson}
+/>
             )}
 
             {activeTab === "xai" && isCurrentUserAdmin && (
