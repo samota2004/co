@@ -1,6 +1,7 @@
+import {isBrowser, identitySources} from './app-identity.js';
 // The only wire contract used by both agent and API. No user/company identity on the wire.
 export const VERSION = 1;
-export const AGENT_VERSION = '1.0.8';
+export const AGENT_VERSION = '1.1.0';
 export class EnrollmentValidationError extends Error {
   constructor(code, field, reason, message) {
     super(message); this.name = 'EnrollmentValidationError';
@@ -51,8 +52,8 @@ export function validateEvent(e, now = Date.now()) {
     if (!type || typeof v !== type || (type === 'string' && v.length > 1024) || (type === 'number' && (!Number.isFinite(v) || v < 0))) throw new Error(`Invalid metadata field: ${k}`);
   }
   if (e.type === 'APPLICATION_USAGE' && (!Number.isFinite(e.metadata.durationSeconds) || e.metadata.durationSeconds > 120)) throw new Error('Invalid usage duration');
-  if (e.metadata.identitySource!==undefined && !['process','hosted-process','windows-app-id','unresolved-host'].includes(e.metadata.identitySource)) throw new Error('Invalid application identity source');
-  if ('browserTitle' in e.metadata && (!/^(chrome|brave|msedge|firefox)(\.exe)?$/i.test(e.metadata.name) || !e.metadata.browserTitle.trim() || e.metadata.browserTitle.length>256 || /[\x00-\x1f\x7f]/.test(e.metadata.browserTitle))) throw new Error('Invalid browser title');
+  if (e.metadata.identitySource!==undefined && !identitySources.includes(e.metadata.identitySource)) throw new Error('Invalid application identity source');
+  if ('browserTitle' in e.metadata && (!isBrowser(e.metadata) || !e.metadata.browserTitle.trim() || e.metadata.browserTitle.length>256 || /[\x00-\x1f\x7f]/.test(e.metadata.browserTitle))) throw new Error('Invalid browser title');
   return e;
 }
 export function validateConfig(c) {

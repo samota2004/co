@@ -77,3 +77,24 @@ Follow-up screenshot showed the correct usage view with newer Code/Chrome observ
 Actual headless Chrome verification ran against the user's normal `http://localhost:5173/devices` and `/employee-dashboard` pages and existing backend/database (no replacement server). It verified real Notepad 20.32s, eventId `1ec568ef-7083-4e12-84c1-86b0382e9237`, and Brave 10.15s, eventId `1391b445-49b5-48e4-8669-fcf13a507cb0`, with verified employee identity. Clicking each real application's summary displayed only that application's headings and collapsed technical details. Dashboard requests returned HTTP 200 with the application filter, with zero console errors and JavaScript exceptions in both roles. Browser profiles were temporary and removed; the main backend and installed service were not restarted, enrollment/credentials/queue/ACLs were untouched. Sanitized result and dashboard-only screenshots are ignored under `agent/local/`. No OS screenshot collector or synthetic input/events were added.
 
 The updated `npm run test:usage` suite passed both tests without skips, including app headings/duration, dropdown/card selection, restoring all applications, existing device actions, pre-limit filtering and authorization. Frontend production build passed (the existing chunk-size warning remains). CyberOrbitAgent was confirmed Running with Automatic startup after verification.
+
+
+## 2026-10-12: Linux/macOS 1.1.0 source changes
+
+Executed on Windows; these results do not constitute native Linux/macOS acceptance.
+
+- `node --test --test-isolation=none agent/test/account-control.test.js agent/test/unix-account-control.test.js agent/test/unix-desktop.test.js agent/test/core.test.js agent/test/enrollment.test.js`: **36 passed, 0 failed, 0 skipped**.
+- Coverage: all-platform authenticated heartbeat targets/statuses, enrollment/revocation and attribution, offline encrypted queue recovery, app IDs/browser opt-in, host-credential pipe handling, standard-account/recovery safeguards, external/partial disable refusal, password/policy changes, sanitized diagnostics, mapped-user helper privilege drop, restart and administrator stop behavior. OS operations in the new Unix tests use injected adapters, not real account changes.
+- `node agent/test/static-checks.js`: 46 JavaScript files and 14 PowerShell scripts parsed. Windows updater was parsed again after adding the shared-module dependencies to its file list.
+- Git Bash `bash -n`: Unix build script and Linux/macOS install/uninstall scripts passed. Python AST and macOS plist XML parsing passed.
+- `node node_modules/vite/bin/vite.js build --config client/vite.config.js`: passed, 2301 modules. Existing large-bundle warning remains.
+- Full `npm run build` stopped at Prisma generation: Windows EPERM renaming the in-use `query_engine-windows.dll.node`. The standalone Vite build used the existing generated client. Schema/database records were not changed; no claim of a successful full build or live database verification is made.
+
+Not executed: Swift/C++ compilation, System keychain/systemd-creds native roundtrips,
+GNOME/KDE/X11 live observations, macOS Accessibility/lock APIs, service installation,
+five-minute uptime/reboot recovery, real freeze/sign-out/login rejection/unfreeze,
+or dashboard uploads from a Linux/Mac laptop. These require the corresponding OS
+and a disposable two-account acceptance machine; see UNIX.md. Generic Wayland and
+macOS SecureToken/FileVault/mobile-account enforcement remain unsupported. No existing
+agent installation, OS account, enrollment, queue, ACL, production deployment or
+production database was modified by this work.

@@ -8,7 +8,7 @@ if ($LASTEXITCODE -ne 0 -or [int]($runtimeVersion.TrimStart('v').Split('.')[0]) 
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 foreach ($folder in @('src','shared','native','packaging')) { Copy-Item -LiteralPath (Join-Path $agentRoot $folder) -Destination $output -Recurse -Force }
 Copy-Item -LiteralPath (Join-Path $agentRoot 'package.json') -Destination $output -Force
-foreach ($doc in @('README.md','CHANGES.md','VERIFICATION.md')) { Copy-Item -LiteralPath (Join-Path $agentRoot $doc) -Destination $output -Force }
+foreach ($doc in @('README.md','CHANGES.md','VERIFICATION.md','UNIX.md')) { Copy-Item -LiteralPath (Join-Path $agentRoot $doc) -Destination $output -Force }
 New-Item -ItemType Directory -Path (Join-Path $output 'runtime') -Force | Out-Null
 Copy-Item -LiteralPath $NodeExe -Destination (Join-Path $output 'runtime/node.exe') -Force
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'

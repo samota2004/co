@@ -1,0 +1,6 @@
+packaging/**/*.sh text eol=lf
+packaging/**/*.plist text eol=lf
+packaging/**/*.service text eol=lf
+native/*.py text eol=lf
+native/*.swift text eol=lf
+native/linux-idle/* text eol=lf

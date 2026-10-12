@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { nativeInput, exec } from './native.js';
+import { hostCredential } from './linux-credentials.js';
 export class CredentialStore {
   constructor(directory) { this.directory = directory; }
   async save(value) {
@@ -11,20 +12,19 @@ export class CredentialStore {
     } else if (process.platform === 'darwin') {
       await nativeInput('keychain', { action: 'set', account: this.directory, value: JSON.stringify(value) });
     } else {
-      // Requires a Secret Service unlocked for the service identity. No plaintext fallback.
-      const { spawn } = await import('node:child_process');
-      await new Promise((resolve,reject) => {
-        const p = spawn('secret-tool', ['store','--label=CYBERORBIT endpoint','application','cyberorbit','account',this.directory], { stdio: ['pipe','ignore','ignore'] });
-        const timer = setTimeout(() => p.kill(), 15000);
-        p.on('error', () => { clearTimeout(timer); reject(new Error('Secret Service unavailable')); });
-        p.on('close', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error('Secret Service unavailable')); });
-        p.stdin.on('error', () => {}); p.stdin.end(JSON.stringify(value));
-      });
+      const encrypted=await hostCredential('encrypt',JSON.stringify(value));
+      const tmp=path.join(this.directory,'credential.host.tmp');
+      await fs.writeFile(tmp,encrypted,{mode:0o600,flag:'wx'});
+      await fs.rename(tmp,path.join(this.directory,'credential.host'));
     }
   }
   async load() {
     if (process.platform === 'win32') return JSON.parse(await nativeInput('vault.ps1', { action: 'unprotect', value: await fs.readFile(path.join(this.directory,'credential.dpapi'),'utf8') }));
     if (process.platform === 'darwin') return JSON.parse(await nativeInput('keychain', { action: 'get', account: this.directory }));
+    try {return JSON.parse(await hostCredential('decrypt',await fs.readFile(path.join(this.directory,'credential.host'),'utf8')));}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+    // Read legacy enrollments without resetting their identity or queue. An
+    // administrator can migrate with configure-unix.js once keyring is unlocked.
     const { stdout } = await exec('secret-tool', ['lookup','application','cyberorbit','account',this.directory], { timeout: 15000, maxBuffer: 65536 });
     return JSON.parse(stdout);
   }

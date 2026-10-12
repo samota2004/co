@@ -17,10 +17,10 @@
     "test:enrollment": "node --test agent/test/enrollment.test.js agent/test/windows-enrollment-input.test.js server/test/enrollment.test.js",
     "agent:build:windows": "powershell -NoProfile -File agent/packaging/windows/build.ps1",
     "clean": "node --input-type=module -e \"import {rmSync} from 'node:fs'; rmSync('client/dist',{recursive:true,force:true})\"",
-    "test:security": "node --test --test-concurrency=1 server/test/security-pipeline.test.js server/test/auth-security.test.js server/test/security-abuse.test.js server/test/master-requirements.test.js server/test/model-pipeline.test.js server/test/production-bundle.test.js",
+    "test:security": "node --test --test-concurrency=1 server/test/security-pipeline.test.js server/test/admin-only-login.test.js server/test/mailjet-email.test.js server/test/mailjet-auth.test.js server/test/administrator-assignment.test.js server/test/account-deletion.test.js server/test/security-abuse.test.js server/test/master-requirements.test.js server/test/model-pipeline.test.js server/test/production-bundle.test.js",
     "test:research": "python -m unittest discover -s ml/test -v",
     "test:browser": "node --test --test-concurrency=1 server/test/device-buttons.browser.test.js server/test/security-flow.browser.test.js",
-    "test:api": "node --test --test-concurrency=1 server/test/security-pipeline.test.js server/test/auth-security.test.js server/test/master-requirements.test.js server/test/enrollment.test.js server/test/device-buttons.test.js server/test/application-usage.test.js"
+    "test:api": "node --test --test-concurrency=1 server/test/security-pipeline.test.js server/test/admin-only-login.test.js server/test/mailjet-email.test.js server/test/mailjet-auth.test.js server/test/administrator-assignment.test.js server/test/account-deletion.test.js server/test/master-requirements.test.js server/test/enrollment.test.js server/test/device-buttons.test.js server/test/application-usage.test.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

@@ -1,5 +1,16 @@
 # Files changed for endpoint monitoring
 
+## 1.1.0 Linux/macOS source implementation
+
+- Shared application identity/browser recognition now accepts Linux desktop IDs and macOS bundle IDs; backend heartbeat account instructions support all three platforms without changing RBAC or schema.
+- Linux foreground helper supports X11 and GNOME/KDE Wayland integration. KDE uses idle/resume events, not unsupported idle polling.
+- macOS adds browser-title Accessibility checks, app bundle identity, session/lock sampling, and session snapshots.
+- Root services supervise mapped-user helpers. Installers verify root ownership/enrollment, preserve queue/configuration, and require native dependencies. See UNIX.md.
+- Linux credentials use host encryption; macOS uses System keychain. Existing stores remain readable for explicit migration.
+- Locally approved standard-account freeze/unfreeze uses a protected ownership journal and separate recovery administrator checks. External disables and partial changes require review.
+- Native OS acceptance remains pending; no installed agent or production deployment is updated by source edits.
+
+
 Pre-existing frontend, backend and schema edits were preserved. The existing `EndpointDevice`/`EndpointEvent` models and `20261007090000_endpoint_agent` migration are reused and the additive migrations were deployed to the configured local PostgreSQL database.
 
 ## New agent files

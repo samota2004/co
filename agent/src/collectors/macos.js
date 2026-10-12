@@ -14,7 +14,18 @@ export async function snapshot(c) {
     const walk = items => { for (const x of items || []) { if (x.product_id) out.usb.push({hardwareId:`${x.location_id}:${x.vendor_id}:${x.product_id}`,name:x._name}); walk(x._items); } };
     walk(JSON.parse(stdout).SPUSBDataType);
   }
-  // macOS session/lock events are intentionally unsupported here, not synthesized from ps.
+  if (c.sessions) {
+    const {stdout}=await exec('/usr/bin/who',[],{timeout:5000,maxBuffer:131072});
+    out.sessions=[];
+    for(const line of stdout.trim().split('\n').slice(0,100)) {
+      const [name,terminal]=line.trim().split(/\s+/);
+      if(!/^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$/.test(name || '') || !/^(console|ttys\d+)$/.test(terminal || ''))continue;
+      const uid=Number((await exec('/usr/bin/id',['-u',name],{timeout:3000})).stdout.trim());
+      if(!Number.isSafeInteger(uid) || uid<0)continue;
+      out.sessions.push({identity:`uid:${uid}`,sessionId:terminal==='console'?`desktop:${uid}`:`${terminal}:${uid}`,state:'connected'});
+    }
+    // Lock/unlock comes from the authenticated GUI helper, not `who`.
+  }
   if (c.network) {
     const {stdout} = await exec('/usr/sbin/lsof',['-nP','-iTCP','-sTCP:ESTABLISHED','-Fpn'],{timeout:10000,maxBuffer:1048576});
     out.network = []; let pid = 0;

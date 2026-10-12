@@ -37,39 +37,6 @@ export class EmailDeliveryError extends Error {
   }
 }
 
-/**
- * Log only safe diagnostic information.
- * Never log credentials, OTPs, tokens, recipients,
- * request bodies, or provider response bodies.
- */
-export function logEmailFailure(error, operation) {
-  const allowedCategories = new Set([
-    "EMAIL_CONFIGURATION",
-    "EMAIL_RECIPIENT",
-    "EMAIL_AUTHENTICATION",
-    "EMAIL_RATE_LIMIT",
-    "EMAIL_REJECTED",
-    "EMAIL_NETWORK_OR_RESPONSE",
-    "EMAIL_MESSAGE_REJECTED",
-  ]);
-
-  const category = allowedCategories.has(error?.code)
-    ? error.code
-    : "EMAIL_UNKNOWN";
-
-  console.error(JSON.stringify({
-    event: "EMAIL_DELIVERY_FAILED",
-    provider: "mailjet",
-    operation: operation === "password-reset"
-      ? "password-reset"
-      : "otp",
-    category,
-    httpStatus: Number.isInteger(error?.httpStatus)
-      ? error.httpStatus
-      : null,
-  }));
-}
-
 function validateEmailConfig() {
   const required = [
     "MAILJET_API_KEY",

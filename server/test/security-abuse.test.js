@@ -15,8 +15,8 @@ test('HTTP limits, tokens, input errors and SQL-like identifiers fail safely',{t
   server=await new Promise(r=>{const s=app.listen(0,'127.0.0.1',()=>r(s));});const url='http://127.0.0.1:'+server.address().port;
   const call=async(path,body,token=generateJwtToken(f.admin,true))=>{const r=await fetch(url+'/api'+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})});return{status:r.status,data:await r.json(),headers:r.headers};};
   assert.equal((await call('/users',undefined,'invalid-token')).status,401);
-  assert.equal((await call('/users',undefined,generateJwtToken(f.employee,false))).status,200);
-  assert.equal((await call('/policies',undefined,generateJwtToken(f.employee,false))).status,403);
+  assert.equal((await call('/users',undefined,generateJwtToken(f.employee,false))).status,401);
+  assert.equal((await call('/policies',undefined,generateJwtToken(f.employee,false))).status,401);
   const injection="' OR 1=1; DROP TABLE users; --";
   assert.equal((await call('/users/'+encodeURIComponent(injection))).status,404);
   assert.equal(await f.prisma.user.count(),6);

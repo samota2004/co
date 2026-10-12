@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>Label</key><string>com.cyberorbit.desktop</string>
-<key>ProgramArguments</key><array><string>/usr/bin/open</string><string>/Library/CYBERORBIT/packaging/macos/desktop-monitor.command</string></array>
-<key>RunAtLoad</key><true/></dict></plist>
+<key>ProgramArguments</key><array><string>/Library/CYBERORBIT/runtime/node</string><string>/Library/CYBERORBIT/src/cli.js</string><string>helper</string><string>/Library/CYBERORBIT/config.json</string></array>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>ProcessType</key><string>Interactive</string>
+</dict></plist>

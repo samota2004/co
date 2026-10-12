@@ -16,7 +16,7 @@ export async function readConfig(file) {
 }
 export function effectiveConfig(remote, local) {
   const c = validateConfig(remote);
-  c.browserTitles = c.browserTitles && local.browserTitles === true && process.platform === 'win32';
+  c.browserTitles = c.browserTitles && local.browserTitles === true;
   c.approvedDirectories = c.approvedDirectories.filter(p => local.locallyApprovedDirectories.some(a => path.resolve(a) === path.resolve(p)));
   return c;
 }

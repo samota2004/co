@@ -1,3 +1,4 @@
+import {isBrowser} from '../shared/app-identity.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { CredentialStore } from './credential-store.js';
@@ -8,9 +9,10 @@ import { Transport, Uploader } from './uploader.js';
 import { SystemCollectors } from './collectors/index.js';
 import { FileCollector } from './collectors/files.js';
 import { startIpc } from './ipc.js';
-import { desktopSampleStatus, heartbeatMetadata, healthReport } from './health.js';
+import { desktopSampleStatus, desktopDiagnosticStatus, heartbeatMetadata, healthReport } from './health.js';
 import { AGENT_VERSION, DEFAULT_CONFIG } from '../shared/contract.js';
 import { reconcileAccountControl } from './account-control.js';
+import {UnixDesktopSupervisor} from './unix-desktop-supervisor.js';
 export async function runService(local) {
   // Exclusive creation prevents simultaneous services from corrupting queue state.
   const lockPath=path.join(local.dataDirectory,'service.lock');
@@ -29,34 +31,49 @@ async function runEnrolledService(local) {
   let config=effectiveConfig(remote,local), stopping=false, helperLastSeen=null, health={}, helperStates=new Map();
   const emit=async(type,metadata)=> {if(!stopping && !config.paused && !uploader.revoked) await queue.append(normalize(secrets.deviceId,type,metadata));};
   const collectors=new SystemCollectors(emit,health), files=new FileCollector(emit,health);
+  const desktopSupervisor=new UnixDesktopSupervisor(local,secrets.mappedIdentity,health);
   const flush=async state => {
     if(state.duration>0 && state.name) await emit('APPLICATION_USAGE',{identity:secrets.mappedIdentity,sessionId:state.sessionId,pid:state.pid,name:state.name,durationSeconds:Math.round(state.duration*100)/100,...desktopAppMetadata(state),...(config.browserTitles && state.browserTitle?{browserTitle:state.browserTitle}:{})});
     state.duration=0;
   };
   const ipc=await startIpc(secrets,async s=> {
-    if(config.paused || !config.activeApplication || uploader.revoked) return;
+    if(config.paused || (!config.activeApplication && !config.sessions) || uploader.revoked) return;
+    if(s.kind==='desktop-status') {
+      const status=desktopDiagnosticStatus(s.status);if(!status)throw new Error('Invalid desktop diagnostic');
+      helperLastSeen=new Date().toISOString();desktopSupervisor.observedAt=Date.now();health.desktop=status;
+      if(config.browserTitles)health.browserTitles='unavailable: foreground desktop query failed';
+      return;
+    }
     if(typeof s.sessionId!=='string' || s.sessionId.length>30 || typeof s.name!=='string' || s.name.length>256 || !Number.isSafeInteger(s.pid) || s.pid<0 || !Number.isFinite(s.idleMilliseconds) || s.idleMilliseconds<0) throw new Error('Invalid desktop sample');
-    s.browserTitle=config.browserTitles && /^(chrome|brave|msedge|firefox)(\.exe)?$/i.test(s.name) && typeof s.browserTitle==='string' ? s.browserTitle.replace(/[\x00-\x1f\x7f]/g,' ').trim().slice(0,256) : '';
+    s.browserTitle=config.browserTitles && isBrowser(s) && typeof s.browserTitle==='string' ? s.browserTitle.replace(/[\x00-\x1f\x7f]/g,' ').trim().slice(0,256) : '';
     const now=Date.now(), prior=helperStates.get(s.sessionId);
     if(!prior && helperStates.size>100) throw new Error('Session capacity reached');
     helperLastSeen=new Date(now).toISOString();
+    desktopSupervisor.observedAt=now;
     health.desktop=desktopSampleStatus(s);
-    if(foregroundObserved(prior,s,now)) await emit('APPLICATION_FOREGROUND',{identity:secrets.mappedIdentity,sessionId:s.sessionId,pid:s.pid,name:s.name,...desktopAppMetadata(s)});
+    if(config.browserTitles && ['permission-required','available','unavailable','not-browser'].includes(s.browserTitleStatus))health.browserTitles={
+      'permission-required':'unavailable: grant Accessibility to desktop helper',available:'healthy: browser title observed',
+      unavailable:'unavailable: browser did not expose a window title','not-browser':'enabled: no browser in foreground'}[s.browserTitleStatus];
+    if(config.activeApplication && foregroundObserved(prior,s,now)) await emit('APPLICATION_FOREGROUND',{identity:secrets.mappedIdentity,sessionId:s.sessionId,pid:s.pid,name:s.name,...desktopAppMetadata(s)});
+    if(!prior && config.sessions && typeof s.locked==='boolean')await emit('SESSION_STATE',{identity:secrets.mappedIdentity,sessionId:s.sessionId,state:s.locked?'locked':'unlocked'});
     if(prior) {
       // Bound gaps: a crashed/offline helper cannot invent hours of usage.
-      if(now-prior.time<=5000 && prior.locked!==true && prior.idleMilliseconds<60000 && s.locked!==true && s.idleMilliseconds<60000) prior.duration+=(now-prior.time)/1000;
+      if(config.activeApplication && now-prior.time<=5000 && prior.locked!==true && prior.idleMilliseconds<60000 && s.locked!==true && s.idleMilliseconds<60000) prior.duration+=(now-prior.time)/1000;
       if(desktopAppChanged(prior,s) || s.locked===true || prior.duration>=30) await flush(prior);
       if(typeof s.locked==='boolean' && typeof prior.locked==='boolean' && s.locked!==prior.locked && config.sessions) await emit(s.locked?'SESSION_LOCK':'SESSION_UNLOCK',{identity:secrets.mappedIdentity,sessionId:s.sessionId,state:s.locked?'locked':'unlocked'});
     }
     helperStates.set(s.sessionId,{...s,time:now,duration:prior?.duration || 0});
   });
-  const stop=()=>{stopping=true;ipc.close();files.close();};process.once('SIGINT',stop);process.once('SIGTERM',stop);
+  const stop=()=>{stopping=true;ipc.close();files.close();desktopSupervisor.stop();};process.once('SIGINT',stop);process.once('SIGTERM',stop);
   const collect=async()=> {
     while(!stopping) {
-      if(!config.paused && !uploader.revoked) {await collectors.poll(config);await files.configure(config.approvedDirectories);}
+      if(!config.paused && !uploader.revoked) {await desktopSupervisor.tick();await collectors.poll(config);await files.configure(config.approvedDirectories);}
       else {files.close();files.signature='';helperStates.clear();health.desktop='disabled: paused or revoked';}
       if(!helperLastSeen || Date.now()-Date.parse(helperLastSeen)>15000) health.desktop=config.activeApplication?'unavailable: desktop helper not connected':'disabled';
-      health.browserTitles=config.paused || !config.activeApplication?'disabled: desktop monitoring paused':config.browserTitles?'enabled: requires updated desktop helper; titles only':'disabled: requires local and dashboard approval';
+      if(config.paused || !config.activeApplication)health.browserTitles='disabled: desktop monitoring paused';
+      else if(!config.browserTitles)health.browserTitles='disabled: requires local and dashboard approval';
+      else if(!helperLastSeen || Date.now()-Date.parse(helperLastSeen)>15000)health.browserTitles='unavailable: awaiting desktop helper';
+      else if(!health.browserTitles || health.browserTitles.startsWith('disabled:'))health.browserTitles='enabled: requires updated desktop helper; titles only';
       await new Promise(r=>setTimeout(r,config.pollSeconds*1000));
     }
   };
@@ -68,7 +85,8 @@ async function runEnrolledService(local) {
         if(uploader.revoked) {stop();break;}
         await emit('HEARTBEAT',heartbeatMetadata());
         const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen)});
-        health.windowsAccount=await reconcileAccountControl(local,secrets,r.accountControl);
+        health.accountControl=await reconcileAccountControl(local,secrets,r.accountControl);
+        if(process.platform==='win32')health.windowsAccount=health.accountControl;
         config=effectiveConfig(r.config,local);await fs.writeFile(path.join(local.dataDirectory,'collector-config.json.tmp'),JSON.stringify(r.config),{mode:0o600});
         await fs.rename(path.join(local.dataDirectory,'collector-config.json.tmp'),path.join(local.dataDirectory,'collector-config.json'));failures=0;
       }catch(e){if(e.status===401 || e.status===403){uploader.revoked=true;stop();break;}failures++;}

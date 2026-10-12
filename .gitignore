@@ -15,3 +15,5 @@ ml/experiments/
 ml/data/
 __pycache__/
 *.pyc
+
+/CYBERORBIT-mac-source.zip

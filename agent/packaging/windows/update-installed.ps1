@@ -15,7 +15,7 @@ if ([IO.Path]::GetFullPath($config.dataDirectory) -ne $dataRoot) { throw 'Unexpe
 foreach ($root in @($installRoot,$dataRoot,$packageRoot)) {
   if ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point root; refusing update' }
 }
-$relativeFiles = @('src/native.js','src/normalizer.js','src/config.js','src/account-control.js','src/desktop-helper.js','src/service.js','src/health.js','src/windows-service-diagnostic.js','shared/contract.js','native/windows-api.cs','native/windows-desktop.ps1','native/windows-account-control.ps1','packaging/windows/configure-startup.ps1','packaging/windows/desktop-watchdog.ps1','packaging/windows/uninstall.ps1','package.json')
+$relativeFiles = @('src/native.js','src/normalizer.js','src/config.js','src/account-control.js','src/unix-account-control.js','src/unix-desktop-supervisor.js','src/desktop-helper.js','src/service.js','src/health.js','src/windows-service-diagnostic.js','shared/contract.js','shared/app-identity.js','native/windows-api.cs','native/windows-desktop.ps1','native/windows-account-control.ps1','packaging/windows/configure-startup.ps1','packaging/windows/desktop-watchdog.ps1','packaging/windows/uninstall.ps1','package.json')
 foreach ($relative in $relativeFiles) {
   $source = Join-Path $packageRoot $relative
   $target = Join-Path $installRoot $relative

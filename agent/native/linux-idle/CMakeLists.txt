@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(cyberorbit-idle LANGUAGES CXX)
+find_package(Qt6 REQUIRED COMPONENTS Gui)
+find_package(KF6IdleTime REQUIRED)
+add_executable(linux-idle-helper main.cpp)
+target_link_libraries(linux-idle-helper PRIVATE Qt6::Gui KF6::IdleTime)

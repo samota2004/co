@@ -19,6 +19,7 @@ export async function enroll(config, token) {
   try {
     if (!/^[0-9a-f-]{36}$/i.test(r.deviceId) || !/^[A-Za-z0-9_-]{43}$/.test(r.credential) || (r.mappedIdentity !== null && (typeof r.mappedIdentity !== 'string' || !(process.platform === 'win32' ? /^S-1-5-(\d+-)*\d+$/ : /^uid:\d+$/).test(r.mappedIdentity)))) throw new Error();
     validateConfig(r.config);
+    if(process.platform!=='win32' && config.desktopIdentity && r.mappedIdentity!==config.desktopIdentity)throw new Error('Enrollment identity differs from local desktop configuration');
   } catch {
     throw new Error('Backend accepted enrollment but returned an invalid response. Do not reuse the token. Review the device in the dashboard; revoke an enrolled record before a new assignment.');
   }
@@ -36,7 +37,7 @@ export async function enroll(config, token) {
       const blob = await nativeInput('vault.ps1',{action:'protect',value:JSON.stringify({key:secrets.helperKey,identity:secrets.mappedIdentity})});
       await fs.writeFile(path.join(config.dataDirectory,'helper.dpapi'),blob,{mode:0o600});
     } else if (secrets.mappedIdentity) {
-      const grantFile=path.join(config.dataDirectory,'helper-capability.json');
+      const grantFile=config.helperCapabilityFile || path.join(config.dataDirectory,'helper-capability.json');
       await fs.writeFile(grantFile,JSON.stringify({key:secrets.helperKey,identity:secrets.mappedIdentity}),{mode:0o400});
       await fs.chown(grantFile,Number(secrets.mappedIdentity.slice(4)),0);
     }

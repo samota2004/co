@@ -1,3 +1,4 @@
+import {identitySources} from '../shared/app-identity.js';
 import { randomUUID } from 'node:crypto';
 import { VERSION, validateEvent } from '../shared/contract.js';
 export function desktopAppMetadata(sample) {
@@ -8,7 +9,7 @@ export function desktopAppMetadata(sample) {
       if(value)fields[key]=value;
     }
   }
-  if(['process','hosted-process','windows-app-id','unresolved-host'].includes(sample.identitySource))fields.identitySource=sample.identitySource;
+  if(identitySources.includes(sample.identitySource))fields.identitySource=sample.identitySource;
   return fields;
 }
 export function desktopAppChanged(prior,current) {

@@ -5,7 +5,7 @@
 Devices now defaults to **Application activity (start / active / stop)**. The
 same scoped dashboard API combines independent latest-150 application and
 latest-150 process streams, so process churn cannot remove all foreground
-records. Cards group by available Windows app ID, otherwise process name.
+records. Cards group by available OS application ID (Windows app ID, Linux desktop ID or macOS bundle ID), otherwise process name.
 Totals refer only to loaded records, not lifetime usage. Background-only
 processes display no recorded foreground usage instead of claiming active use.
 
@@ -131,7 +131,7 @@ instructions and revocation, JavaScript refusal/identity tests, C# compilation,
 and PowerShell syntax checks. **Real disable/sign-out/reboot/unfreeze and recovery
 must be tested on a disposable Windows machine with two verified accounts before
 production use.** No existing account was disabled during development. AD/Entra
-identity control, Linux and macOS login enforcement are not implemented.
+identity control is not implemented. Linux/macOS local-account enforcement and its restrictions are described in [UNIX.md](UNIX.md).
 
 ## Optional Windows browser titles
 
@@ -161,9 +161,9 @@ terms or private page names. OS title sampling cannot reliably identify private
 browsing windows, so they are included when this option is enabled. Disable local
 approval to stop native title collection; dashboard disabling stops upload after
 the next configuration heartbeat. Previously stored events are retained.
-Other platforms continue reporting application usage without titles.
+Linux/macOS opt-in title collection is available in source version 1.1.0; see [UNIX.md](UNIX.md) for desktop permissions and setup.
 
-Current source package: **1.0.8**, adding opt-in Windows local-account control alongside optional browser titles. The 1.0.4 queue recovery improvements remain included. Source changes do not update an installed agent automatically; use the installed-code updater described above. No live installation or dashboard verification is implied by this source version.
+Current source package: **1.1.0**, adding Linux/macOS desktop integration, supervised startup, encrypted service credentials and opt-in local-account controls. See [Linux/macOS setup and limits](UNIX.md). Native Linux/macOS acceptance is still required. The 1.0.4 queue recovery improvements remain included. Source changes do not update an installed agent automatically; use the installed-code updater described above. No live installation or dashboard verification is implied by this source version.
 
 JavaScript agent, independent of the website. The Windows package includes Node; employees need neither Node nor VS Code. New telemetry is stored in PostgreSQL endpoint tables, not the legacy in-memory activity buffer. Existing risk/trust/policy/incident processing is preserved; the endpoint panel displays its results without inventing an endpoint ML prediction.
 
@@ -279,7 +279,7 @@ Stop-Service CyberOrbitAgent
 & 'C:\Program Files\CYBERORBIT\runtime\node.exe' 'C:\Program Files\CYBERORBIT\src\cli.js' service 'C:\Program Files\CYBERORBIT\agent-config.json'
 ```
 
-The helper's terminal tells the employee monitoring is enabled; closing it stops desktop sampling but keeps the service/device collectors running. Administrator **Pause collectors** stops observations while health/configuration continue. Configuration polling is every 30 seconds online. Collector toggles are also available with `PUT /api/endpoint/:id/config`; the dashboard supports pause, TCP metadata and approved directories. File monitoring requires the exact directory in both server configuration and local `locallyApprovedDirectories`. Configurations persist for offline operation. No directory is monitored by default.
+Manual helper runs print a monitoring notice. Installed startup services supervise session helpers; closing the installation terminal does not stop the background service. Linux/macOS prerequisites and limits are in [UNIX.md](UNIX.md). Administrator **Pause collectors** stops observations while health/configuration continue. Configuration polling is every 30 seconds online. Collector toggles are also available with `PUT /api/endpoint/:id/config`; the dashboard supports pause, TCP metadata and approved directories. File monitoring requires the exact directory in both server configuration and local `locallyApprovedDirectories`. Configurations persist for offline operation. No directory is monitored by default.
 
 Permissions: service administrative access for process owner tokens, WTS/CIM and optional TCP enumeration; desktop helper ordinary interactive rights. Protected processes may withhold owner/start-time data and remain unattributed. Antivirus/application-control policy must allow the included Node binary, C# host and PowerShell helpers. Do not disable security controls; production should sign and explicitly allow reviewed binaries/scripts.
 
@@ -303,8 +303,8 @@ Run elevated. It removes service/task/code, retains protected data by default, a
 |---|---|---|---|---|
 | Health | Node OS APIs, 30s heartbeat | Same | Same | Health reflects reports, not OS enforcement |
 | Processes | Native process enumeration + process token SID, polling | `/proc` UID/start ticks, polling | `ps` UID/start time, polling | `PROCESS_RUNNING` initially/every five minutes; starts/stops are snapshot differences, short processes/PID reuse with unknown start time can be missed |
-| Application usage | Desktop helper: GetForegroundWindow, GetLastInputInfo, WTS lock state, 2s polling | X11 `xprop` PID + `xprintidle`, 2s polling | Native Swift NSWorkspace + idle time, 2s polling | Duration approximates sampled foreground activity while idle <60s; gaps >5s are not counted. Running background processes are never treated as foreground use. No titles/URLs/command lines |
-| Sessions | WTS session snapshots; helper polls actual WTS lock/unlock | loginctl snapshots / LockedHint | Not implemented | Initial state is `SESSION_STATE`, not a fabricated login. Windows disconnect/reconnect uses state events; logouts between samples may be missed. Only assigned SID's helper can report lock changes |
+| Application usage | Desktop helper: GetForegroundWindow, GetLastInputInfo, WTS lock state, 2s polling | X11 `xprop`/`xprintidle`; GNOME/KDE Wayland integration (see UNIX.md) | Swift NSWorkspace app/bundle identity + session/idle state, 2s polling | Duration approximates sampled foreground activity while idle <60s; gaps >5s are not counted. Running background processes are never treated as foreground use. Opt-in active browser titles only; no URLs/command lines |
+| Sessions | WTS session snapshots; helper polls actual WTS lock/unlock | loginctl snapshots / LockedHint | who login/logout snapshots; GUI helper lock/unlock | Initial state is `SESSION_STATE`, not a fabricated login. Windows disconnect/reconnect uses state events; logouts between samples may be missed. Only assigned SID's helper can report lock changes |
 | USB | Present Win32_PnPEntity USB nodes, CIM polling | sysfs USB nodes, polling | system_profiler USB tree, polling | Current devices initially reported; connection/removal observations, not transfers or file reads. Can miss rapid reconnects; composite nodes may yield multiple observations |
 | File change | Node fs.watch OS notifications, per-directory recursion | Same | Same | Approved roots only, no file contents. Symlinks are not followed; up to 2,000 directories. Rename is ambiguous create/delete/rename; not reads. Notifications may coalesce/drop; new directory races/network mounts can miss changes |
 | Network | Get-NetTCPConnection snapshots | `ss` TCP snapshots | lsof established TCP snapshots | Optional, TCP only, no browsing history/DNS/payload/bytes. May miss short connections; visibility depends on privileges |
@@ -343,11 +343,16 @@ Therefore endpoint inference is unavailable, not a fabricated low risk. New even
 
 ## Linux and macOS
 
-These are real collector implementations but **not validated on those OSes**. Build on each target OS/architecture: `sh agent/packaging/build-unix.sh` includes its Node binary. Extract Linux under `/opt/cyberorbit`, macOS under `/Library/CYBERORBIT`, root-owned and not employee-writable. Provide a config with absolute `dataDirectory` and `locallyApprovedDirectories` as above. Linux uses `/etc/cyberorbit/config.json` and `/var/lib/cyberorbit`; macOS uses `/Library/CYBERORBIT/config.json` and a protected data directory. Create private root data directories, with traversal only granted to the mapped UID for its mode-0400 capability. Enroll via token on stdin using the bundled Node and the service identity. Unix helper capability is root-provisioned, readable only by the mapped UID; device/queue secrets are not in that file.
+See [UNIX.md](UNIX.md) for the supported desktop matrix, runtime builds, setup,
+enrollment, existing-credential migration, supervised startup, optional account
+freeze controls, administrator commands and native acceptance checks.
 
-Linux credentials require `secret-tool` and a Secret Service keyring unlocked/available to the service identity. **There is no plaintext fallback.** A default headless root systemd service usually has no such keyring; provision and test a dedicated keyring/D-Bus environment before enabling the provided service. Install requires root: `sh /opt/cyberorbit/packaging/linux/install.sh`; uninstall disables/removes only service startup. For desktop startup, copy the `.desktop` file into the assigned user's `~/.config/autostart`. Requires X11, xprop, xprintidle; Wayland foreground monitoring is explicitly unavailable. loginctl requires systemd; ss requires iproute2. Other distributions report unsupported/error health rather than synthetic activity.
-
-macOS credentials use native Security.framework Keychain APIs (Swift helper, JSON via stdin, no secrets in argv). Build/install needs Xcode command-line tools; unattended system Keychain availability and signing/access control must be verified under the launchd identity. Install daemon as root with `sh /Library/CYBERORBIT/packaging/macos/install.sh`. For desktop startup, make `packaging/macos/desktop-monitor.command` executable and install `com.cyberorbit.desktop.plist` into the assigned user's `~/Library/LaunchAgents`, then `launchctl bootstrap gui/UID PATH_TO_PLIST`; it opens a visible terminal. Remove that LaunchAgent on uninstall as well as running the daemon uninstall script. Login/logout/lock collection is not implemented on macOS. Native desktop/Keychain compilation, privacy prompts, file notifications, permissions, system_profiler/lsof behavior and launchd startup require macOS testing.
+Version 1.1.0 adds X11/GNOME/KDE foreground collection and opt-in browser titles;
+macOS app/bundle identity, Accessibility titles and session/lock observations;
+root-supervised startup; headless credential storage; and protected local-account
+freeze/unfreeze journals. Generic Wayland, network/mobile identities and macOS
+FileVault/SecureToken employee enforcement remain unsupported. These native paths
+must be built and tested on the corresponding OS before deployment.
 
 ## Verification
 

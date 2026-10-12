@@ -46,7 +46,7 @@ test('browser titles are optional, bounded browser-only metadata with two config
   assert.throws(()=>validateConfig({browserTitles:'true'}));
   assert.equal(effectiveConfig({browserTitles:true},{locallyApprovedDirectories:[]}).browserTitles,false);
   assert.equal(effectiveConfig({browserTitles:false},{browserTitles:true,locallyApprovedDirectories:[]}).browserTitles,false);
-  assert.equal(effectiveConfig({browserTitles:true},{browserTitles:true,locallyApprovedDirectories:[]}).browserTitles,process.platform==='win32');
+  assert.equal(effectiveConfig({browserTitles:true},{browserTitles:true,locallyApprovedDirectories:[]}).browserTitles,true);
 });
 test('contract rejects identity injection, contents, timestamps, unsupported types and unsafe URL',()=>{
   const e=event();assert.equal(validateEvent(e),e);
@@ -83,13 +83,13 @@ test('offline retry retains events and deletes only acknowledged events',async t
 // Transaction-aware in-memory adapter only for deterministic security boundary tests.
 // Real PostgreSQL/OS flow is a separate integration suite, never represented by this adapter.
 function memoryStore() {
-  const users=[{id:'admin',companyId:'A',roleCode:'SECURITY_ADMIN',status:'ACTIVE'},{id:'employee',companyId:'A',roleCode:'EMPLOYEE',status:'ACTIVE'},{id:'other',companyId:'B',roleCode:'EMPLOYEE',status:'ACTIVE'}],devices=[],events=[];
-  const matches=(x,w)=>Object.entries(w).every(([k,v])=>v && typeof v==='object' ? v.gt ? new Date(x[k])>v.gt : v.in ? v.in.includes(x[k]) : true : x[k]===v);
+  const users=[{id:'admin',companyId:'A',roleCode:'SECURITY_ADMIN',status:'ACTIVE',deletedAt:null},{id:'employee',companyId:'A',roleCode:'EMPLOYEE',status:'ACTIVE',deletedAt:null,assignedAdminId:'admin'},{id:'other',companyId:'B',roleCode:'EMPLOYEE',status:'ACTIVE',deletedAt:null}],devices=[],events=[];
+  const matches=(x,w)=>Object.entries(w).every(([k,v])=>k==='OR'?v.some(rule=>matches(x,rule)):k==='AND'?v.every(rule=>matches(x,rule)):k==='user'?matches(users.find(u=>u.id===x.userId),v):v && typeof v==='object' ? v.gt ? new Date(x[k])>v.gt : v.in ? v.in.includes(x[k]) : true : x[k]===v);
   const store={user:{findFirst:async({where})=>users.find(u=>matches(u,where))},endpointDevice:{
     create:async({data})=>{const d={id:randomUUID(),enrolledAt:null,revokedAt:null,...data};devices.push(d);return d;},
     findFirst:async({where})=>{const d=devices.find(d=>matches(d,where));return d?{...d,user:users.find(u=>u.id===d.userId)}:null;},
     updateMany:async({where,data})=>{const d=devices.filter(d=>matches(d,where));d.forEach(d=>Object.assign(d,data));return{count:d.length};}
-  },endpointEvent:{createMany:async({data})=>{for(const d of data) if(!events.some(e=>e.deviceId===d.deviceId&&e.eventId===d.eventId)) events.push(d);}},$transaction:async f=>f(store)};
+  },auditLog:{create:async()=>({})},endpointEvent:{createMany:async({data})=>{for(const d of data) if(!events.some(e=>e.deviceId===d.deviceId&&e.eventId===d.eventId)) events.push(d);}},$transaction:async f=>f(store)};
   return{store,users,devices,events};
 }
 test('enrollment expiry/reuse, company boundary, verified attribution, dedupe and revocation',async()=>{
@@ -112,4 +112,24 @@ test('enrollment expiry/reuse, company boundary, verified attribution, dedupe an
   await assert.rejects(s.ingest(r.credential,{events:[event()]}),e=>e.status===403);
   await assert.rejects(s.change({...admin,companyId:'B'},r.deviceId,{},true),e=>e.status===404);
   await s.change(admin,r.deviceId,{},true);await assert.rejects(s.ingest(r.credential,{events:[e]}),e=>e.status===401);
+});
+
+test('all three platforms get fresh account instructions only for their enrolled employee or manager',async()=>{
+  const health={queueEvents:0,queueBytes:0,droppedEvents:0,paused:false,helperLastSeen:null,collectors:{}};
+  for(const platform of ['win32','linux','darwin']) {
+    const m=memoryStore(),s=new EndpointService(m.store),admin=m.users[0];
+    const identity=platform==='win32'?'S-1-5-21-111-222-333-1001':'uid:1001';
+    const a=await s.assign(admin,{userId:'employee',name:'endpoint',platform,mappedIdentity:identity});
+    const enrolled=await s.enroll({token:a.enrollmentToken,platform,agentVersion:'1.1.0'});
+    for(const role of ['EMPLOYEE','MANAGER'])for(const [status,action] of [['ACTIVE','ALLOW'],['FROZEN','BLOCK'],['DISABLED','HOLD']]) {
+      Object.assign(m.users[1],{roleCode:role,status});
+      const r=await s.heartbeat(enrolled.credential,{agentVersion:'1.1.0',health});
+      assert.equal(r.accountControl.action,action);assert.equal(r.accountControl.identity,identity);assert.equal(r.accountControl.deviceId,enrolled.deviceId);
+      assert.ok(Math.abs(Date.now()-Date.parse(r.accountControl.issuedAt))<1000);
+    }
+    Object.assign(m.users[1],{roleCode:'SECURITY_ADMIN',status:'FROZEN'});
+    assert.equal((await s.heartbeat(enrolled.credential,{agentVersion:'1.1.0',health})).accountControl.action,'HOLD');
+    m.devices[0].revokedAt=new Date();
+    await assert.rejects(s.heartbeat(enrolled.credential,{agentVersion:'1.1.0',health}),e=>e.status===401);
+  }
 });

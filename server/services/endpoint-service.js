@@ -79,7 +79,7 @@ export class EndpointService {
       if (device.revokedAt) throw new EndpointError(401, 'Device enrollment has been revoked. An administrator must create a new assignment.', 'ENROLLMENT_DEVICE_REVOKED');
       if (device.enrolledAt) throw new EndpointError(401, 'Enrollment token has already been used. Do not enroll this device again.', 'ENROLLMENT_TOKEN_USED');
       if (!device.enrollmentExpiresAt || new Date(device.enrollmentExpiresAt).getTime() <= Date.now()) throw new EndpointError(401, 'Enrollment token expired. Issue a fresh token and use it within 15 minutes.', 'ENROLLMENT_TOKEN_EXPIRED');
-      if (device.platform !== body.platform) throw new EndpointError(400, 'Enrollment token belongs to a different operating system. Select a Windows assignment for the Windows installer.', 'ENROLLMENT_PLATFORM_MISMATCH', { field: 'platform', reason: 'assignment_mismatch' });
+      if (device.platform !== body.platform) throw new EndpointError(400, 'Enrollment token belongs to a different operating system. Select an assignment matching this agent operating system.', 'ENROLLMENT_PLATFORM_MISMATCH', { field: 'platform', reason: 'assignment_mismatch' });
       if (!device.user || device.user.companyId !== device.companyId || device.user.status !== 'ACTIVE' || !['EMPLOYEE','MANAGER'].includes(device.user.roleCode)) throw new EndpointError(401, 'Device assignment is no longer valid for an active employee. Ask an administrator to review the assignment.', 'ENROLLMENT_ASSIGNMENT_INVALID');
       const where = { enrollmentHash: tokenHash, enrollmentExpiresAt: { gt: new Date() }, enrolledAt: null, revokedAt: null, platform: body.platform,
         userId: device.userId, companyId: device.companyId, user: { companyId: device.companyId, status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } } };
@@ -121,7 +121,7 @@ export class EndpointService {
       if (changed.count !== 1) throw new EndpointError(401, 'Revoked credential');
       // Only the authenticated enrollment's employee determines the OS target.
       // Keep device credentials valid while frozen so an administrator can restore access.
-      const eligible=d.platform==='win32' && d.mappedIdentity && ['EMPLOYEE','MANAGER'].includes(d.user.roleCode);
+      const eligible=['win32','linux','darwin'].includes(d.platform) && d.mappedIdentity && ['EMPLOYEE','MANAGER'].includes(d.user.roleCode);
       const action=eligible ? (d.user.status==='FROZEN'?'BLOCK':d.user.status==='ACTIVE'?'ALLOW':'HOLD') : 'HOLD';
       return { config: d.config, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:new Date().toISOString()}, companyId: d.companyId, userId: d.userId, deviceId: d.id };
     });

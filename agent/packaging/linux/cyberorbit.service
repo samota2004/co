@@ -1,6 +1,7 @@
 [Unit]
 Description=CYBERORBIT Endpoint Monitor
 After=network.target
+StartLimitIntervalSec=0
 [Service]
 Type=simple
 ExecStart=/opt/cyberorbit/runtime/node /opt/cyberorbit/src/cli.js service /etc/cyberorbit/config.json
@@ -10,5 +11,6 @@ UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/cyberorbit
+KillMode=control-group
 [Install]
 WantedBy=multi-user.target

@@ -6,7 +6,6 @@ export class SystemCollectors {
     // Each source runs independently, so unavailable privileges do not suppress other collectors.
     for (const source of ['processes','sessions','usb','network']) {
       if (!config[source]) { this.health[source]='disabled'; delete this.previous[source]; continue; }
-      if (source==='sessions' && process.platform==='darwin') {this.health.sessions='unsupported: macOS session/lock collector';continue;}
       try {
         const data = (await snapshot({[source]:true}))[source] || [];
         const key = x => source==='processes' ? `${x.pid}:${x.startedAt}` : source==='sessions' ? x.sessionId : source==='usb' ? x.hardwareId : JSON.stringify(x);
