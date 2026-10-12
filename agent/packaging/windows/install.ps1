@@ -1,4 +1,9 @@
-param([Parameter(Mandatory=$true)][string]$ServerUrl, [switch]$AllowLoopbackHttp, [string[]]$ApprovedDirectory=@(), [switch]$TokenFromClipboard)
+param(
+    [Parameter(Mandatory=$true)][string]$ServerUrl,
+    [switch]$AllowLoopbackHttp,
+    [string[]]$ApprovedDirectory=@(),
+    [switch]$TokenFromClipboard
+)
 $ErrorActionPreference = 'Stop'
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { throw 'Run in an elevated PowerShell prompt' }
@@ -33,7 +38,7 @@ try {
   Set-PrivateAcl $dataRoot
   foreach ($entry in Get-ChildItem -LiteralPath $packageRoot) { Copy-Item -LiteralPath $entry.FullName -Destination $installRoot -Recurse -Force }
   $configFile = Join-Path $installRoot 'agent-config.json'
-  @{ serverUrl=$ServerUrl; allowLoopbackHttp=[bool]$AllowLoopbackHttp; dataDirectory=$dataRoot; locallyApprovedDirectories=@($ApprovedDirectory) } | ConvertTo-Json | Set-Content -LiteralPath $configFile -Encoding UTF8
+  @{ serverUrl=$ServerUrl; allowLoopbackHttp=[bool]$AllowLoopbackHttp; dataDirectory=$dataRoot; locallyApprovedDirectories=@($ApprovedDirectory); browserTitles=$false }
   # PowerShell 5 writes a UTF8 BOM; Node reads BOM explicitly.
   $resultText = $plainToken | & (Join-Path $installRoot 'runtime/node.exe') (Join-Path $installRoot 'src/cli.js') enroll $configFile
   if ($LASTEXITCODE -ne 0) { throw 'Enrollment failed; no startup entries were installed. Review the sanitized agent error above and the dashboard device state. For an unenrolled device with empty local data, use reset-incomplete.ps1 before retrying.' }

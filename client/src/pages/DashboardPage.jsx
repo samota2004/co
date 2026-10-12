@@ -1237,7 +1237,7 @@ export const DashboardPage = ({
             <SectionHeader
               eyebrow="Identity Governance"
               title="Employee Intelligence"
-              description="Continuous identity, risk, trust and session monitoring."
+              description="Initial baseline: risk 0, trust 100 before assessment. These are not proof of observed activity. Assessed risk and trust are calculated separately."
               isDark={isDark}
               rightContent={
                 <div className="text-right">
@@ -1284,7 +1284,7 @@ export const DashboardPage = ({
 
                     <th className="px-4 py-4">Trust State</th>
 
-                    <th className="px-6 py-4">Session</th>
+                    <th className="px-6 py-4">Console session</th>
                   </tr>
                 </thead>
 
@@ -1411,7 +1411,7 @@ export const DashboardPage = ({
                         </td>
 
                         <td className="px-4 py-4">
-                          <RiskBadge score={risk} level={user.currentRiskLevel} />
+                          {user.assessmentStatus === "NOT_ASSESSED" ? <span className="text-xs text-[#7F8A96]">Not assessed</span> : <RiskBadge score={risk} level={user.currentRiskLevel} />}
                         </td>
 
                         <td className="px-6 py-4">
@@ -1422,7 +1422,7 @@ export const DashboardPage = ({
                                 ${
                                   user.status === "FROZEN"
                                     ? "bg-red-500"
-                                    : "bg-emerald-400"
+                                    : user.hasActiveConsoleSession ? "bg-emerald-400" : "bg-gray-500"
                                 }
                               `}
                             />
@@ -1430,7 +1430,7 @@ export const DashboardPage = ({
                             <span className="text-[12px] font-mono text-[#7F8A96]">
                               {user.status === "FROZEN"
                                 ? "Terminated"
-                                : "Active"}
+                                : user.hasActiveConsoleSession ? "Active" : "No active session"}
                             </span>
                           </div>
                         </td>

@@ -181,8 +181,8 @@ model User {
   directReports     User[]         @relation("ManagedEmployees")
   trustUpdatedAt    DateTime?
 
-  riskScore  Float         @default(10)
-  trustScore Float         @default(90)
+  riskScore  Float         @default(0)
+  trustScore Float         @default(100)
   riskLevel  EventSeverity @default(LOW)
 
   createdAt DateTime @default(now())

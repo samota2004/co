@@ -1,3 +1,4 @@
+import {monitoringInclude, monitoredUser} from '../services/monitoring-state.js';
 import {releaseDeletedIdentifiers} from '../services/deleted-identifiers.js';
 import {Router} from 'express';
 import {randomUUID} from 'node:crypto';
@@ -20,11 +21,11 @@ router.get('/assignment-options',requireSecurityAdmin,api(async req=>({
   managers:await prisma.user.findMany({where:{...userScope(req.user),roleCode:'MANAGER',status:'ACTIVE',assignedAdmin:{is:{deletedAt:null,status:'ACTIVE',roleCode:{in:['SECURITY_ADMIN','SYSTEM_ADMIN']},companyId:req.user.companyId}}},select:{id:true,name:true,assignedAdminId:true},orderBy:{name:'asc'}}),
   canReassign:req.user.isMainAdmin===true
 })));
-router.get('/users',api(async req=>({users:(await prisma.user.findMany({where:{...userScope(req.user),roleCode:{in:['EMPLOYEE','MANAGER']}},orderBy:{name:'asc'},...pagination(req.query)})).map(publicUser)})));
+router.get('/users',api(async req=>({users:(await prisma.user.findMany({where:{...userScope(req.user),roleCode:{in:['EMPLOYEE','MANAGER']}},orderBy:{name:'asc'},include:monitoringInclude(),...pagination(req.query)})).map(monitoredUser)})));
 router.get('/users/:id',api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id);
   const [devices,events,trustHistory,riskHistory,baseline,incidents]=await Promise.all([prisma.device.findMany({where:{userId:u.id}}),prisma.activityEvent.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},take:100}),prisma.trustHistory.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},take:200}),prisma.riskScore.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},take:200}),prisma.behaviorProfile.findUnique({where:{userId:u.id}}),isAdmin(req.user)||req.user.roleCode==='MANAGER'?prisma.incident.findMany({where:{userId:u.id},orderBy:{createdAt:'desc'},take:50}):[]]);
-  return{user:publicUser(u),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents};
+  return{user:monitoredUser(await prisma.user.findUnique({where:{id:u.id},include:monitoringInclude()})),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents};
 }));
 async function userChanges(req,create=false,current=null){
   const b=req.body||{},fields={};
@@ -56,7 +57,7 @@ async function userChanges(req,create=false,current=null){
   }
   return fields;
 }
-router.post('/users',requireSecurityAdmin,api(async req=>{const fields=await userChanges(req,true);const user=await prisma.$transaction(async tx=>{await releaseDeletedIdentifiers(tx,req.user,fields);const u=await tx.user.create({data:{...fields,companyId:req.user.companyId,riskScore:0,trustScore:90}});await audit(tx,req.user,'USER_CREATED',{employeeId:u.employeeId},u.id);return u;});return{user:publicUser(user)};}));
+router.post('/users',requireSecurityAdmin,api(async req=>{const fields=await userChanges(req,true);const user=await prisma.$transaction(async tx=>{await releaseDeletedIdentifiers(tx,req.user,fields);const u=await tx.user.create({data:{...fields,companyId:req.user.companyId,riskScore:0,trustScore:100}});await audit(tx,req.user,'USER_CREATED',{employeeId:u.employeeId},u.id);return u;});return{user:publicUser(user)};}));
 router.patch('/users/:id',requireSecurityAdmin,api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','Use Admin Management for this account.');const fields=await userChanges(req,false,u);if(fields.managerId===u.id)throw new SecurityError(400,'INVALID_MANAGER','An employee cannot manage themselves.');const user=await prisma.$transaction(async tx=>{if(u.roleCode==='MANAGER'&&fields.roleCode==='EMPLOYEE'&&await tx.user.count({where:{managerId:u.id}}))throw new SecurityError(400,'MANAGER_HAS_REPORTS','Reassign this manager’s employees before changing their role.');
 const updated=await tx.user.update({where:{id:u.id},data:{...fields,authVersion:{increment:1}}});
 if(updated.roleCode==='MANAGER'&&fields.assignedAdminId!==undefined&&fields.assignedAdminId!==u.assignedAdminId){
