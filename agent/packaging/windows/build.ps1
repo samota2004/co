@@ -32,5 +32,7 @@ if (Test-Path -LiteralPath $kitRoot) {
   if ($state.Count -gt 0) { throw 'Installation kit contains local state or reparse points; preserve/review it before refreshing' }
 }
 Expand-Archive -LiteralPath (Join-Path $distRoot 'CYBERORBIT-windows.zip') -DestinationPath $kitRoot -Force
+& $NodeExe --test --test-isolation=none (Join-Path $agentRoot 'test/release-package.test.js')
+if ($LASTEXITCODE -ne 0) { throw 'Release verification failed; do not distribute this package' }
 Write-Output "Built $agentRoot/dist/CYBERORBIT-windows.zip ($runtimeVersion included). Unsigned development package."
 Write-Output "Refreshed $kitRoot (agent $agentVersion)."
