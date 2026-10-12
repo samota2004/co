@@ -522,68 +522,97 @@ useEffect(() => {
       </div>
 
       {/* Device Information & Active Sessions */}
-      <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:border-[#67E8F9]/30 hover:bg-[#070C12] sm:p-6 lg:p-7">
-        <div className="flex items-center justify-between mb-6 pb-3 border-b border-white/10">
-          <div>
-            <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37] block">
-              AUTHORIZED HARDWARE
-            </span>
-            <h3 className="text-2xl font-light tracking-tight mt-1">
-              Registered Devices &amp; Browsers
-            </h3>
-          </div>
-          <span className="text-[12px] font-mono text-[#D4AF37] border border-cyan-300/25 px-2.5 py-0.5">
-            REGISTERED DEVICE RECORDS
-          </span>
-        </div>
+      {/* Valid Login Sessions */}
+<div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 sm:p-6 lg:p-7">
+  <div className="flex items-center justify-between mb-6 pb-3 border-b border-white/10">
+    <div>
+      <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37] block">
+        ACCOUNT SECURITY
+      </span>
+      <h3 className="text-2xl font-light tracking-tight mt-1">
+        Valid Login Sessions
+      </h3>
+    </div>
+    <span className="text-[12px] font-mono text-[#D4AF37] border border-cyan-300/25 px-2.5 py-0.5">
+      {sessionsLoading || sessionsError ? "—" : activeSessions.length} SESSIONS
+    </span>
+  </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {displayDevices.map((dev) => (
-            <div
-              key={dev.id}
-              className={`group rounded-xl border bg-[#070C12] p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/40 hover:shadow-[0_14px_35px_rgba(103,232,249,0.06)] ${
-                dev.isCurrentDevice
-                  ? "border-[#67E8F9]/45 bg-[#67E8F9]/[0.04]"
-                  : "border-white/10 bg-[#070C12]"
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 border border-cyan-300/25 flex items-center justify-center">
-                    {dev.deviceType === "MOBILE" ? (
-                      <Smartphone className="w-5 h-5 text-[#D4AF37]" />
-                    ) : (
-                      <Laptop className="w-5 h-5 text-[#D4AF37]" />
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-base font-medium tracking-[-0.02em] flex items-center gap-2">
-                      <span>{dev.deviceName}</span>
-                      {dev.isCurrentDevice && (
-                        <span className="text-[12px] font-mono px-1.5 py-0.2 border border-cyan-300/60 text-[#D4AF37]">
-                          CURRENT
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[12px] font-mono text-[#A7B0BA] mt-0.5">
-                      {dev.os} • {dev.browser}
-                    </div>
-                  </div>
-                </div>
+  {sessionsLoading ? (
+    <p className="text-[#A7B0BA]">Loading sessions...</p>
+  ) : sessionsError ? (
+    <p role="alert" className="text-red-400">
+      Unable to load login sessions.
+    </p>
+  ) : activeSessions.length === 0 ? (
+    <p className="text-[#A7B0BA]">No valid login sessions found.</p>
+  ) : (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {activeSessions.map((session) => {
+        const isMobile = /Android|iPhone|Mobile/i.test(
+          session.userAgent || ""
+        );
 
-                <span className="text-[12px] font-mono px-2 py-0.5 border border-cyan-300/60 text-[#D4AF37]">
-                  TRUST {dev.trustScore}%
-                </span>
+        const browser = /Edg\//.test(session.userAgent || "")
+          ? "Microsoft Edge"
+          : /Chrome\//.test(session.userAgent || "")
+            ? "Google Chrome"
+            : /Firefox\//.test(session.userAgent || "")
+              ? "Firefox"
+              : "Unknown Browser";
+
+        const os = /Android/i.test(session.userAgent || "")
+          ? "Android"
+          : /Windows/i.test(session.userAgent || "")
+            ? "Windows"
+            : /iPhone|iPad/i.test(session.userAgent || "")
+              ? "iOS"
+              : /Macintosh/i.test(session.userAgent || "")
+                ? "macOS"
+                : "Unknown OS";
+
+        return (
+          <div
+            key={session.id}
+            className="rounded-xl border border-white/10 bg-[#070C12] p-5"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 border border-cyan-300/25 flex items-center justify-center">
+                {isMobile ? (
+                  <Smartphone className="w-5 h-5 text-[#D4AF37]" />
+                ) : (
+                  <Laptop className="w-5 h-5 text-[#D4AF37]" />
+                )}
               </div>
 
-              <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-[13px] font-mono text-[#A7B0BA]">
-                <span>IP: {dev.ipAddress}</span>
-                <span>Active: {dev.lastSeen || "Recently"}</span>
+              <div>
+                <div className="text-base font-medium">
+                  {isMobile ? "Mobile Browser" : "Desktop Browser"}
+                </div>
+                <div className="text-xs text-[#A7B0BA]">
+                  {os} • {browser}
+                </div>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
+
+            <div className="mt-4 pt-3 border-t border-white/10 text-xs font-mono text-[#A7B0BA] space-y-2">
+              <p>IP: {session.ip || "Unknown"}</p>
+              <p>
+                Login: {new Date(session.createdAt).toLocaleString()}
+              </p>
+              <p>
+                Expires: {new Date(session.expiresAt).toLocaleString()}
+              </p>
+              <p className="text-[#D4AF37]">
+                VALID LOGIN SESSION
+              </p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  )}
+</div>
 
       {/* Recent Activities & Security Events */}
       <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:border-[#67E8F9]/30 hover:bg-[#070C12] sm:p-6 lg:p-7">
