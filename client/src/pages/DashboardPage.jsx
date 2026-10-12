@@ -1280,11 +1280,11 @@ export const DashboardPage = ({
 
                     <th className="px-4 py-4">Status</th>
 
-                    <th className="px-4 py-4">Last Login</th>
+                    <th className="px-4 py-4">Agent last seen</th>
 
                     <th className="px-4 py-4">Trust State</th>
 
-                    <th className="px-6 py-4">Console session</th>
+                    <th className="px-6 py-4">Agent connection</th>
                   </tr>
                 </thead>
 
@@ -1401,8 +1401,8 @@ export const DashboardPage = ({
 
                         <td className="px-4 py-4">
                           <span className="text-[12px] font-mono text-[#7F8A96]">
-                            {user.lastLoginAt
-                              ? new Date(user.lastLoginAt).toLocaleString([], {
+                            {user.agentLastSeen
+                              ? new Date(user.agentLastSeen).toLocaleString([], {
                                   dateStyle: "medium",
                                   timeStyle: "short",
                                 })
@@ -1420,17 +1420,13 @@ export const DashboardPage = ({
                               className={`
                                 w-1.5 h-1.5 rounded-full
                                 ${
-                                  user.status === "FROZEN"
-                                    ? "bg-red-500"
-                                    : user.hasActiveConsoleSession ? "bg-emerald-400" : "bg-gray-500"
+                                  user.agentConnectionStatus === "CONNECTED" ? "bg-emerald-400" : "bg-gray-500"
                                 }
                               `}
                             />
 
                             <span className="text-[12px] font-mono text-[#7F8A96]">
-                              {user.status === "FROZEN"
-                                ? "Terminated"
-                                : user.hasActiveConsoleSession ? "Active" : "No active session"}
+                              {({CONNECTED:"Connected", STALE:"Contact delayed", OFFLINE:"Offline", UNENROLLED:"Not enrolled", REVOKED:"Revoked", NOT_ASSIGNED:"Not assigned"})[user.agentConnectionStatus] || "Unknown"}
                             </span>
                           </div>
                         </td>
