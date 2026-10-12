@@ -48,6 +48,38 @@ export const EmployeeDashboard = ({
   const userDevices = devices.filter((d) => d.userId === currentUser?.id);
   const displayEvents = userEvents;
   const displayDevices = userDevices;
+  const [activeSessions, setActiveSessions] = useState([]);
+const [sessionsLoading, setSessionsLoading] = useState(true);
+const [sessionsError, setSessionsError] = useState(false);
+
+useEffect(() => {
+  let cancelled = false;
+
+  const loadSessions = async () => {
+    try {
+      const result = await requestApi("/api/auth/sessions");
+
+      if (!cancelled) {
+        setActiveSessions(result.sessions ?? []);
+        setSessionsError(false);
+      }
+    } catch (error) {
+      if (!cancelled) {
+        setSessionsError(true);
+      }
+    } finally {
+      if (!cancelled) {
+        setSessionsLoading(false);
+      }
+    }
+  };
+
+  loadSessions();
+
+  return () => {
+    cancelled = true;
+  };
+}, [currentUser?.id]);
 
   // ======================================================
   // SECURITY STATUS
@@ -247,16 +279,18 @@ export const EmployeeDashboard = ({
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">
-              REGISTERED LOGICAL DEVICES
+              ACTIVE LOGIN SESSIONS
             </span>
             <Laptop className="w-4 h-4 text-[#D4AF37]" />
           </div>
           <div className="text-3xl font-light tracking-tight sm:text-4xl text-current">
-            {displayDevices.length}{" "}
-            <span className="text-sm font-mono text-[#A7B0BA]">Devices</span>
+            {sessionsLoading || sessionsError ? "—" : activeSessions.length}{" "}
+<span className="text-sm font-mono text-[#A7B0BA]">
+  Active Sessions
+</span>
           </div>
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
-            Registered records; current endpoint health is shown above
+            Valid, non-expired login sessions. Registered devices are listed separately.
           </p>
         </div>
       </div>
@@ -495,11 +529,11 @@ export const EmployeeDashboard = ({
               AUTHORIZED HARDWARE
             </span>
             <h3 className="text-2xl font-light tracking-tight mt-1">
-              Device Information &amp; Active Sessions
+              Registered Devices &amp; Browsers
             </h3>
           </div>
           <span className="text-[12px] font-mono text-[#D4AF37] border border-cyan-300/25 px-2.5 py-0.5">
-            CRYPTOGRAPHIC ENDPOINT ATTESTATION
+            REGISTERED DEVICE RECORDS
           </span>
         </div>
 

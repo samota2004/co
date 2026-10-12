@@ -356,6 +356,39 @@ router.get("/me", async (req, res) => {
 router.post('/mfa/challenge',requireAuth,api(req=>startChallenge(req.user,req,'STEP_UP')));
 router.get('/sessions',requireAuth,api(async req=>({sessions:await prisma.session.findMany({where:{userId:req.user.id,revokedAt:null,expiresAt:{gt:new Date()}},select:{id:true,ip:true,userAgent:true,createdAt:true,expiresAt:true,mfaVerifiedAt:true},orderBy:{createdAt:'desc'},take:100})})));
 router.post('/sessions/:id/revoke',requireAuth,api(async req=>{const changed=await prisma.session.updateMany({where:{id:req.params.id,userId:req.user.id,revokedAt:null},data:{revokedAt:new Date()}});if(!changed.count)throw new SecurityError(404,'SESSION_NOT_FOUND','Session not found.');await audit(prisma,req.user,'SESSION_REVOKED');return{message:'Session revoked.'};}));
+router.get('/sessions/history', requireAuth, api(async req => {
+  const now = new Date();
+
+  const sessions = await prisma.session.findMany({
+    where: {
+      userId: req.user.id
+    },
+    select: {
+      id: true,
+      ip: true,
+      userAgent: true,
+      createdAt: true,
+      expiresAt: true,
+      revokedAt: true,
+      mfaVerifiedAt: true
+    },
+    orderBy: {
+      createdAt: 'desc'
+    },
+    take: 100
+  });
+
+  return {
+    sessions: sessions.map(session => ({
+      ...session,
+      status: session.revokedAt
+        ? 'REVOKED'
+        : session.expiresAt <= now
+          ? 'EXPIRED'
+          : 'ACTIVE'
+    }))
+  };
+}));
 router.post('/password/change',requireAuth,api(async req=>{
  const {currentPassword,newPassword}=req.body;
  if(typeof currentPassword!=='string'||currentPassword.length>128||typeof newPassword!=='string'||newPassword.length<12||newPassword.length>128)throw new SecurityError(400,'INVALID_PASSWORD','Enter the current password and a new password of 12–128 characters.');
