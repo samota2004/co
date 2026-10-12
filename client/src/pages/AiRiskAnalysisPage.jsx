@@ -93,12 +93,13 @@ export const AiRiskAnalysisPage = ({
     if (!event) return false;
 
     const sources = [
-      event,
-      event.metadata,
-      event.ml,
-      event.evaluation,
-      event.decision?.evaluation,
-    ].filter(Boolean);
+  event,
+  event.metadata,
+  event.metadata?.evaluation,
+  event.ml,
+  event.evaluation,
+  event.decision?.evaluation,
+].filter(Boolean);
 
     const aiKeys = [
       "riskScore",
