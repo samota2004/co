@@ -5,11 +5,9 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 
 import {
-  Layers,
   BrainCircuit,
   ShieldCheck,
   AlertTriangle,
-  Sparkles,
   UserCheck,
   RefreshCw,
 } from "lucide-react";
@@ -21,11 +19,6 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
 } from "recharts";
 
 
@@ -54,8 +47,7 @@ export const AiRiskAnalysisPage = ({
 
   // Manual selection only. The page always opens with no employee selected.
   const [targetUserId, setTargetUserId] = useState("");
-  const [employeeEvents, setEmployeeEvents] = useState([]);
-  const [endpointData, setEndpointData] = useState({ devices: [], events: [] });
+  const [analysis, setAnalysis] = useState(null);
   const [telemetryLoading, setTelemetryLoading] = useState(false);
   const [telemetryError, setTelemetryError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -66,53 +58,43 @@ export const AiRiskAnalysisPage = ({
     let inFlight = false;
     let queued = false;
     let debounce;
-    setEmployeeEvents([]);
-    setEndpointData({ devices: [], events: [] });
+    setAnalysis(null);
     setTelemetryError("");
     setLastUpdated(null);
     setTelemetryLoading(false);
     if (!targetUserId || !fetchJson) return;
 
-    const loadTelemetry = async () => {
+    const loadAnalysis = async () => {
       if (cancelled) return;
       if (inFlight) { queued = true; return; }
       inFlight = true;
       setTelemetryLoading(true);
-      // These are distinct stores. Endpoint observations do not imply that an
-      // AI model has assessed the employee or calculated a security score.
-      const results = await Promise.allSettled([
-        fetchJson(`/api/users/${encodeURIComponent(targetUserId)}`),
-        fetchJson(`/api/endpoint/dashboard?userId=${encodeURIComponent(targetUserId)}`),
-      ]);
-      if (cancelled) return;
-      const errors = [];
-      results.forEach((result, index) => {
-        const data = result.status === "fulfilled" ? result.value : null;
-        const valid = data?.success && Array.isArray(data.events) &&
-          (index === 0 || Array.isArray(data.devices));
-        if (!valid) {
-          const message = data?.error?.message || data?.message ||
-            (typeof data?.error === "string" ? data.error : result.reason?.message) || "Invalid telemetry response";
-          errors.push(`${index === 0 ? "Security assessments" : "Endpoint telemetry"}: ${message}. Previously loaded records may be out of date.`);
-        } else if (index === 0) {
-          setEmployeeEvents(data.events);
-        } else {
-          setEndpointData(data);
+      try {
+        const result = await fetchJson(`/api/risk/analysis/${encodeURIComponent(targetUserId)}`);
+        if (cancelled) return;
+        if (!result?.success || result.analysis?.userId !== targetUserId || !Array.isArray(result.analysis?.history)) {
+          throw new Error(result?.error?.message || result?.message || (typeof result?.error === "string" ? result.error : "Unable to load risk analysis"));
         }
-      });
-      setTelemetryError(errors.join(" "));
-      if (!errors.length) setLastUpdated(new Date());
-      setTelemetryLoading(false);
-      inFlight = false;
-      if (queued) { queued = false; loadTelemetry(); }
+        setAnalysis(result.analysis);
+        setTelemetryError("");
+        setLastUpdated(new Date());
+      } catch (error) {
+        if (!cancelled) setTelemetryError(`${error.message}. Previously loaded analysis may be out of date. Refresh to retry.`);
+      } finally {
+        inFlight = false;
+        if (!cancelled) {
+          setTelemetryLoading(false);
+          if (queued) { queued = false; loadAnalysis(); }
+        }
+      }
     };
-    refreshTelemetry.current = loadTelemetry;
+    refreshTelemetry.current = loadAnalysis;
     const scheduleRefresh = () => {
       clearTimeout(debounce);
-      debounce = setTimeout(loadTelemetry, 300);
+      debounce = setTimeout(loadAnalysis, 300);
     };
-    loadTelemetry();
-    const timer = setInterval(loadTelemetry, 30000);
+    loadAnalysis();
+    const timer = setInterval(loadAnalysis, 30000);
     window.addEventListener("cyberorbit-endpoint-updated", scheduleRefresh);
     return () => {
       cancelled = true;
@@ -125,160 +107,23 @@ export const AiRiskAnalysisPage = ({
 
   useEffect(() => {
     if (!isRefreshing) refreshTelemetry.current?.();
-  }, [isRefreshing]);
+  }, [isRefreshing, events]);
+
   useEffect(() => {
-    if (targetUserId && !users.some((user) => user.id === targetUserId)) {
-      setTargetUserId("");
-    }
+    if (targetUserId && !users.some(user => String(user.id) === targetUserId)) setTargetUserId("");
   }, [users, targetUserId]);
 
-  const targetUser = useMemo(() => {
-    if (!targetUserId) return null;
-    return (
-      users.find((user) => String(user.id) === String(targetUserId)) || null
-    );
-  }, [users, targetUserId]);
-
-  // ======================================================
-  // ACTUAL TELEMETRY
-  // ======================================================
-
-  const userEvents = useMemo(() => {
-  if (!targetUser) return [];
-
-  const merged = new Map();
-  // Keep live assessments delivered by SSE as well as employee-specific history.
-  for (const event of [...employeeEvents, ...events]) {
-    if (String(event.userId ?? "") === String(targetUser.id)) {
-      merged.set(event.id || event.eventId, event);
-    }
-  }
-  return [...merged.values()]
-    .filter(
-      (event) =>
-        String(event.userId ?? "") === String(targetUser.id)
-    )
-    .sort((a, b) => {
-      const dateA = new Date(
-        a.timestamp || a.createdAt || a.time || 0
-      ).getTime();
-
-      const dateB = new Date(
-        b.timestamp || b.createdAt || b.time || 0
-      ).getTime();
-
-      return dateB - dateA;
-    });
-}, [employeeEvents, events, targetUser]);
-
-  // Generic application events are not automatically AI telemetry.
-  // The analysis branch opens only when at least one selected-user event
-  // contains an actual AI/risk signal.
-  const isAiTelemetryEvent = (event) => {
-    if (!event) return false;
-
-    const sources = [
-  event,
-  event.metadata,
-  event.metadata?.evaluation,
-  event.metadata?.ml,
-  event.ml,
-  event.evaluation,
-  event.decision?.evaluation,
-].filter(Boolean);
-
-    const aiKeys = [
-      "riskScore",
-      "riskContribution",
-      "trustScore",
-      "supervisedProbability",
-      "rfProbability",
-      "isolationForestScore",
-      "iforestScore",
-      "authenticationRisk",
-      "authRisk",
-      "deviceRisk",
-      "networkRisk",
-      "dataTransferRisk",
-      "threat_probability",
-      "mlThreatProbability",
-    ];
-
-    return sources.some((source) =>
-      aiKeys.some((key) => {
-        const value = source?.[key];
-        return (
-          typeof value === "number" && Number.isFinite(value)
-        ) || (
-          typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))
-        );
-      })
-    );
-  };
-
-  const aiTelemetryEvents = userEvents.filter(isAiTelemetryEvent);
-  const hasAssessment = aiTelemetryEvents.length > 0;
-  const hasTelemetry = userEvents.length > 0 || endpointData.events.length > 0;
-  const latestEvent = aiTelemetryEvents[0] || null;
-
-  const getNumber = (...values) => {
-    for (const value of values) {
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-      if (typeof value === "string" && value.trim() !== "") {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed)) return parsed;
-      }
-    }
-    return null;
-  };
-
-  const normalizeScore = (...values) => {
-    const value = getNumber(...values);
-    return value === null ? null : Math.min(100, Math.max(0, value));
-  };
-  const evaluation = latestEvent?.metadata?.evaluation || latestEvent?.evaluation || latestEvent?.decision?.evaluation || latestEvent;
-  const riskScore = normalizeScore(evaluation?.riskScore, latestEvent?.riskScore, latestEvent?.riskContribution, latestEvent?.metadata?.riskContribution);
-  const trustScore = normalizeScore(evaluation?.trustScore);
-  const rfProbability = getNumber(latestEvent?.metadata?.ml?.threat_probability, latestEvent?.ml?.threat_probability, latestEvent?.mlThreatProbability);
-  const riskFactors = (evaluation?.contributingFactors || []).map(factor => ({
-    name: factor.factor, score: factor.scoreImpact, description: factor.description
+  const targetUser = useMemo(() => users.find(user => String(user.id) === targetUserId) || null, [users, targetUserId]);
+  const hasTelemetry = analysis?.hasTelemetry === true;
+  const riskScore = analysis?.riskScore ?? null;
+  const trustScore = analysis?.trustScore ?? null;
+  const rfProbability = analysis?.ml?.probability ?? null;
+  const riskFactors = (analysis?.contributingFactors || []).map(factor => ({
+    name: factor.factor, score: factor.scoreImpact, description: factor.description,
   }));
-
-  const radarData = riskFactors
-    .filter((factor) => factor.score !== null)
-    .map((factor) => ({ subject: factor.name.replace(" Risk", ""), value: factor.score, fullMark: 100 }));
-
-  // Historical chart is built only from real recorded events.
-  const riskHistory = aiTelemetryEvents
-    .map((event, index) => {
-      const eventRisk = normalizeScore(
-        event?.metadata?.evaluation?.riskScore, event?.riskScore, event?.riskContribution,
-        event?.metadata?.riskContribution, event?.evaluation?.riskScore,
-        event?.decision?.evaluation?.riskScore
-      );
-      const eventMlProbability = getNumber(event?.metadata?.ml?.threat_probability, event?.mlThreatProbability);
-      if (eventRisk === null && eventMlProbability === null) return null;
-      return {
-        time: event.timestamp || event.createdAt || event.time || `Event ${index + 1}`,
-        score: eventRisk,
-        mlProb: eventMlProbability === null ? null : Math.min(100, Math.max(0, eventMlProbability <= 1 ? eventMlProbability * 100 : eventMlProbability)),
-      };
-    })
-    .filter(Boolean)
-    .reverse()
-    .slice(-20);
-
-  const formatScore = (value) => {
-    if (value === null || value === undefined || !Number.isFinite(Number(value))) return "N/A";
-    return Number(value).toFixed(Number.isInteger(Number(value)) ? 0 : 1);
-  };
-
-  const formatProbability = (value) => {
-    if (value === null || value === undefined || !Number.isFinite(Number(value))) return "N/A";
-    const normalized = Number(value) <= 1 ? Number(value) * 100 : Number(value);
-    return `${Math.min(100, Math.max(0, normalized)).toFixed(1)}%`;
-  };
-
+  const riskHistory = analysis?.history || [];
+  const formatScore = value => typeof value === "number" && Number.isFinite(value) ? value.toFixed(Number.isInteger(value) ? 0 : 1) : "N/A";
+  const formatProbability = value => typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "N/A";
   // ======================================================
   // MAIN PAGE
   // ======================================================
@@ -340,7 +185,7 @@ export const AiRiskAnalysisPage = ({
                   </span>
 
                   <span className="text-[13px] uppercase tracking-wider text-[#7F8A96]">
-                    STORED CONTEXT · APPROVED MODEL INPUTS
+                    BEHAVIORAL EVIDENCE · RISK INSIGHTS
                   </span>
                 </div>
 
@@ -349,7 +194,7 @@ export const AiRiskAnalysisPage = ({
                 </h1>
 
                 <p className="mt-4 max-w-2xl text-[14px] leading-6 text-[#A7B0BA]">
-                  Live activity from assigned laptops, recorded security assessments, and model predictions when complete inputs are available.
+                  Risk scores, contributing evidence, and behavioral trends calculated from recorded activity.
                 </p>
               </div>
 
@@ -383,52 +228,25 @@ export const AiRiskAnalysisPage = ({
         </section>
 
         {targetUser && (
-          <section aria-label="Recorded endpoint telemetry" aria-busy={telemetryLoading} className="rounded-2xl border border-white/10 bg-[#050A10] p-6 space-y-4">
+          <section aria-label="Risk analysis summary" aria-busy={telemetryLoading} className="rounded-2xl border border-white/10 bg-[#050A10] p-6 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl text-[#F4F7FA]">Recorded endpoint telemetry</h2>
-                <p className="mt-1 text-sm text-[#7F8A96]">
-                  Assigned laptops: {endpointData.devices.length} · Loaded endpoint events: {endpointData.events.length} · Security events: {userEvents.length}
-                </p>
+                <h2 className="text-xl text-[#F4F7FA]">Behavioral risk assessment</h2>
+                <p className="mt-1 text-sm text-[#7F8A96]">Last 24 hours · {analysis?.coverage ? `${analysis.coverage.endpointEvents + analysis.coverage.securityEvents} recorded observations reviewed` : "Analysing recorded observations"}</p>
               </div>
-              <button type="button" aria-label="Refresh risk telemetry" disabled={telemetryLoading} onClick={() => refreshTelemetry.current?.()} className="flex items-center gap-2 rounded-lg border border-[#67E8F9]/25 px-3 py-2 text-sm text-[#67E8F9] disabled:opacity-50">
+              <button type="button" aria-label="Refresh risk analysis" disabled={telemetryLoading} onClick={() => refreshTelemetry.current?.()} className="flex items-center gap-2 rounded-lg border border-[#67E8F9]/25 px-3 py-2 text-sm text-[#67E8F9] disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${telemetryLoading ? "animate-spin" : ""}`} />
-                {telemetryLoading ? "Refreshing..." : "Refresh telemetry"}
+                {telemetryLoading ? "Analysing..." : "Refresh analysis"}
               </button>
             </div>
             {telemetryError && <p role="alert" className="text-sm text-red-300">{telemetryError}</p>}
-            {lastUpdated && <p className="text-xs text-[#7F8A96]">Last refreshed: {lastUpdated.toLocaleString()}. Updates automatically as events arrive.</p>}
-            <div className="grid gap-3 sm:grid-cols-2">
-              {endpointData.devices.map(device => (
-                <article key={device.id} className="rounded-xl border border-white/10 p-4">
-                  <p className="font-medium text-[#67E8F9]">{device.name}</p>
-                  <p className="mt-1 text-sm">{device.connectionStatus} · {device.platform}{device.config?.paused ? " · Collection paused" : ""}</p>
-                  <p className="mt-1 text-xs text-[#7F8A96]">Last agent contact: {device.lastSeen ? new Date(device.lastSeen).toLocaleString() : "Not yet reported"}</p>
-                </article>
-              ))}
-            </div>
-            {endpointData.events.length > 0 && (
-              <>
-                <p className="text-xs text-[#7F8A96]">Latest {Math.min(20, endpointData.events.length)} of {endpointData.events.length} loaded endpoint events.{endpointData.timeline?.hasMore ? " Older events remain stored." : ""} Device-wide observations are labeled separately from verified employee activity.</p>
-                <ul className="max-h-96 space-y-3 overflow-y-auto" aria-label="Risk endpoint event timeline">
-                  {endpointData.events.slice(0, 20).map(event => (
-                    <li key={event.id || event.eventId} data-event-id={event.eventId} className="rounded-lg border border-white/10 p-3 text-sm">
-                      <div className="flex flex-wrap justify-between gap-2">
-                        <strong>{event.type.replaceAll("_", " ")}{event.metadata?.name ? ` · ${event.metadata.appName || event.metadata.name}` : ""}</strong>
-                        <time dateTime={event.occurredAt} className="text-xs text-[#7F8A96]">{new Date(event.occurredAt).toLocaleString()}</time>
-                      </div>
-                      <p className="mt-1 text-xs text-[#7F8A96]">{endpointData.devices.find(device => device.id === event.deviceId)?.name || "Assigned laptop"} · {event.userId === targetUser.id ? "Verified employee activity" : "Device-wide observation"}</p>
-                      {event.type === "APPLICATION_USAGE" && <p className="mt-1">{event.metadata.durationSeconds} seconds foreground usage</p>}
-                      {event.metadata?.browserTitle && <p className="mt-1 break-words">{event.metadata.browserTitle}</p>}
-                      <details className="mt-2 text-xs text-[#7F8A96]"><summary className="cursor-pointer">Recorded details</summary><pre className="mt-2 whitespace-pre-wrap break-words">{JSON.stringify(event.metadata, null, 2)}</pre></details>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
+            {hasTelemetry && <>
+              <p className="text-[#A7B0BA]"><span className="font-semibold text-[#D4AF37]">{analysis.riskLevel} RISK</span> · {analysis.explanation}</p>
+              <p className="text-sm text-[#67E8F9]">Recommendation: {analysis.recommendation}</p>
+            </>}
+            {lastUpdated && <p className="text-xs text-[#7F8A96]">Last analysed: {lastUpdated.toLocaleString()}. Updates as new observations arrive.</p>}
           </section>
         )}
-
         {!targetUser ? (
           <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center shadow-[0_18px_60px_rgba(0,0,0,0.18)] sm:p-12">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/[0.04] text-[#D4AF37]">
@@ -440,16 +258,16 @@ export const AiRiskAnalysisPage = ({
         ) : telemetryLoading && !hasTelemetry ? (
   <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center sm:p-12">
     <div className="text-[13px] font-semibold text-[#67E8F9]">
-      LOADING EMPLOYEE TELEMETRY...
+      ANALYSING RECORDED ACTIVITY...
     </div>
     <p className="mt-2 text-[13px] text-[#7F8A96]">
-      Fetching recorded security events for {targetUser.name}.
+      Evaluating behavioral risk for {targetUser.name}.
     </p>
   </section>
 ) : telemetryError && !hasTelemetry ? (
   <section className="rounded-2xl border border-red-500/20 bg-[#050A10] p-8 text-center sm:p-12">
     <div className="text-[13px] font-semibold text-red-400">
-      TELEMETRY LOAD FAILED
+      RISK ANALYSIS UNAVAILABLE
     </div>
     <p className="mt-2 text-[13px] text-[#7F8A96]">
       {telemetryError}
@@ -461,13 +279,7 @@ export const AiRiskAnalysisPage = ({
               <ShieldCheck className="h-6 w-6" strokeWidth={1.5} />
             </div>
             <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO TELEMETRY AVAILABLE</div>
-            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">{targetUser.name} has no recorded security telemetry yet.</p>
-          </section>
-        ) : !hasAssessment ? (
-          <section className="rounded-2xl border border-[#D4AF37]/20 bg-[#050A10] p-6">
-            <h2 className="text-lg text-[#D4AF37]">Telemetry received · Risk assessment pending</h2>
-            <p className="mt-2 text-sm text-[#A7B0BA]">Recorded activity is available for {targetUser.name}. No calculated risk or trust assessment is recorded for these events yet.</p>
-            <p className="mt-2 text-sm text-[#7F8A96]">{endpointData.ml?.reason || "Model predictions require complete approved user-day inputs. Scores appear when an assessment is recorded."}</p>
+            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">No recorded activity is available for {targetUser.name} in the last 24 hours.</p>
           </section>
         ) : (
           <>
@@ -481,7 +293,7 @@ export const AiRiskAnalysisPage = ({
           <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
             <div className="flex items-start justify-between">
               <span className="text-[12px] font-medium tracking-[0.12em] text-[#A7B0BA]">
-                RISK SCORE
+                OBSERVED RISK SCORE
               </span>
 
               <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#D4AF37]/20 bg-[#D4AF37]/[0.05] text-[#D4AF37]">
@@ -494,7 +306,7 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              Stored contextual risk, 0–100
+              Highest observed risk in the last 24 hours · {analysis?.riskLevel}
             </span>
           </div>
 
@@ -516,7 +328,7 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              Recorded adaptive trust
+              {analysis?.trustTimestamp ? `Latest recorded trust · ${new Date(analysis.trustTimestamp).toLocaleString()}` : "No recorded trust assessment"}
             </span>
           </div>
 
@@ -525,7 +337,7 @@ export const AiRiskAnalysisPage = ({
           <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
             <div className="flex items-start justify-between">
               <span className="max-w-[180px] text-[12px] font-medium leading-4 tracking-[0.12em] text-[#A7B0BA]">
-                ML ANOMALY PROBABILITY
+                ML THREAT PROBABILITY
               </span>
 
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
@@ -538,11 +350,11 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              Random Forest supervised tree probability
+              {analysis?.ml?.available ? `Recorded model prediction · ${new Date(analysis.ml.timestamp).toLocaleString()}` : "Complete model inputs unavailable"}
             </span>
           </div>
 
-          <div className="rounded-xl border border-cyan-900 p-5"><p>Assessment sources</p><p className="mt-4">Contextual rules and historical baseline. Random Forest inference is available only for complete approved user-day inputs. No Isolation Forest is deployed.</p></div>
+          <div className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><p className="text-xs tracking-wider text-[#A7B0BA]">ANALYSIS BASIS</p><p className="mt-4 text-sm text-[#67E8F9]">{analysis?.source}</p><p className="mt-3 text-xs leading-5 text-[#7F8A96]">Coverage: {analysis?.coverage?.status}. {analysis?.baselineBasis}: {analysis?.window?.normalStartHour}:00–{analysis?.window?.normalEndHour}:00 ({analysis?.window?.timezone}). Unobserved activity remains unassessed.</p></div>
         </section>
 
         {/* ==================================================
@@ -567,7 +379,7 @@ export const AiRiskAnalysisPage = ({
               </span>
 
               <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
-                Risk Vectors &amp; Mathematical Bars
+                Contributing Risk Factors
               </h3>
             </div>
 
@@ -577,7 +389,7 @@ export const AiRiskAnalysisPage = ({
           </div>
 
           <div className="mt-7 space-y-7">
-            {riskFactors.length === 0 && <p>No elevated factors were recorded for this assessment.</p>}
+            {riskFactors.length === 0 && <p className="text-sm text-[#A7B0BA]">No elevated factors were found in the available evidence. Missing inputs are listed in Evidence Coverage.</p>}
             {riskFactors.map((factor, idx) => (
               <div key={idx} className="space-y-2.5">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -592,15 +404,13 @@ export const AiRiskAnalysisPage = ({
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <span className="hidden max-w-[600px] truncate text-[12px] text-[#7F8A96] xl:inline">
-                      {factor.description}
-                    </span>
-
                     <span className="text-sm font-semibold text-[#67E8F9]">
                       {factor.score !== null ? `${formatScore(factor.score)} / 100` : "N/A"}
                     </span>
                   </div>
                 </div>
+
+                <p className="text-xs leading-5 text-[#7F8A96]">{factor.description}</p>
 
                 {/* Elegant Visual Bar */}
 
@@ -651,19 +461,19 @@ export const AiRiskAnalysisPage = ({
                 </span>
 
                 <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
-                  Risk &amp; ML Evolution
+                Risk Trend · Last 24 Hours
                 </h3>
               </div>
 
               <div className="flex items-center gap-2 text-[12px] text-[#7F8A96]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#67E8F9]" />
                 Risk
-                <span className="ml-2 h-1.5 w-1.5 rounded-full bg-[#D4AF37]" />
-                ML
+                {analysis?.ml?.available && <><span className="ml-2 h-1.5 w-1.5 rounded-full bg-[#D4AF37]" />ML</>}
               </div>
             </div>
 
             <div className="h-64 w-full">
+              {riskHistory.every(point => point.score === null && point.mlProb === null) ? <p className="flex h-full items-center justify-center text-center text-sm text-[#7F8A96]">No scored interactive observations or security assessments are available for this window.</p> :
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
                   data={riskHistory}
@@ -698,6 +508,7 @@ export const AiRiskAnalysisPage = ({
 
                   <XAxis
                     dataKey="time"
+                    tickFormatter={value => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     stroke="#596570"
                     fontSize={10}
                     tickLine={false}
@@ -717,6 +528,7 @@ export const AiRiskAnalysisPage = ({
                   />
 
                   <Tooltip
+                    labelFormatter={value => new Date(value).toLocaleString()}
                     contentStyle={{
                       backgroundColor: "#050A10",
                       borderColor: "rgba(103,232,249,0.25)",
@@ -741,125 +553,34 @@ export const AiRiskAnalysisPage = ({
                     strokeWidth={2}
                     fillOpacity={1}
                     fill="url(#aiCyanArea)"
-                    name="Composite Risk"
+                    name="Observed risk"
                   />
 
-                  <Area
+                  {analysis?.ml?.available && <Area
                     type="monotone"
                     dataKey="mlProb"
                     stroke="#D4AF37"
                     strokeWidth={1.5}
                     fillOpacity={1}
                     fill="url(#aiGoldArea)"
-                    name="ML Prob %"
-                  />
+                    name="Model threat probability %"
+                  />}
                 </AreaChart>
-              </ResponsiveContainer>
+              </ResponsiveContainer>}
             </div>
           </div>
 
-          {/* ==================================================
-              MULTI-VECTOR RADAR
-              ================================================== */}
-
-          <div
-            className={`
-              flex
-              flex-col
-              justify-between
-              rounded-2xl
-              border
-              ${panelClass}
-              p-6
-              sm:p-8
-              lg:col-span-5
-              shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)]
-            `}
-          >
-            <div>
-              <span className="text-[12px] uppercase tracking-[0.2em] text-[#67E8F9]">
-                GEOMETRIC SURFACE
-              </span>
-
-              <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
-                Multi-Vector Radar
-              </h3>
+          <div className="rounded-2xl border border-white/10 bg-[#050A10] p-6 sm:p-8 lg:col-span-5">
+            <span className="text-[12px] uppercase tracking-[0.2em] text-[#67E8F9]">EVIDENCE COVERAGE</span>
+            <h3 className="mt-1 text-2xl font-light text-[#F4F7FA]">What this assessment covers</h3>
+            <div className="mt-5 space-y-4">
+              {(analysis?.vectors || []).map(vector => <div key={vector.name} className="border-b border-white/10 pb-3">
+                <div className="flex justify-between gap-3"><p className="text-sm font-medium">{vector.name}</p><span className={`text-xs ${vector.status === "Observed" ? "text-[#67E8F9]" : "text-[#7F8A96]"}`}>{vector.status}</span></div>
+                <p className="mt-1 text-xs leading-5 text-[#7F8A96]">{vector.detail}</p>
+              </div>)}
             </div>
-
-            <div className="my-2 h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={radarData}>
-                  <PolarGrid
-                    stroke="rgba(103,232,249,0.12)"
-                  />
-
-                  <PolarAngleAxis
-                    dataKey="subject"
-                    stroke="#A7B0BA"
-                    fontSize={9}
-                  />
-
-                  <PolarRadiusAxis
-                    angle={30}
-                    domain={[0, 100]}
-                    stroke="#596570"
-                    fontSize={8}
-                  />
-
-                  <Tooltip
-                    shared={false}
-                    cursor={false}
-                    contentStyle={{
-                      backgroundColor: "#050A10",
-                      borderColor: "rgba(103,232,249,0.35)",
-                      borderWidth: "1px",
-                      borderRadius: "10px",
-                      color: "#F4F7FA",
-                      fontSize: "12px",
-                      padding: "10px 12px",
-                    }}
-                    labelStyle={{
-                      color: "#67E8F9",
-                      marginBottom: "4px",
-                      fontSize: "12px",
-                    }}
-                    itemStyle={{
-                      color: "#D4AF37",
-                      fontSize: "12px",
-                    }}
-                    formatter={(value) => [`${value} / 100`, "Risk Level"]}
-                  />
-
-                  <Radar
-                    name="Risk Level"
-                    dataKey="value"
-                    stroke="#67E8F9"
-                    fill="#67E8F9"
-                    fillOpacity={0.14}
-                    strokeWidth={2}
-                    strokeDasharray="0"
-                    dot={{
-                      r: 0,
-                      fill: "transparent",
-                      stroke: "transparent",
-                      strokeWidth: 0,
-                    }}
-                    activeDot={{
-                      r: 5,
-                      fill: "#F4F7FA",
-                      stroke: "#67E8F9",
-                      strokeWidth: 2,
-                    }}
-                  />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="border-t border-white/[0.07] pt-4 text-center text-[12px] text-[#7F8A96]">
-              User: <span className="text-[#A7B0BA]">{targetUser?.name}</span> •
-              ID:{" "}
-              <span className="text-[#67E8F9]">{targetUser?.employeeId}</span>
-            </div>
+            <p className="mt-4 text-xs leading-5 text-[#7F8A96]">{analysis?.coverage?.verifiedEvents} observations attributed to the employee; {analysis?.coverage?.deviceWideEvents} device-wide observations. Device-wide evidence describes activity on assigned laptops, without identifying the operator.</p>
+            {analysis?.coverage?.truncated && <p role="status" className="mt-3 text-sm text-[#D4AF37]">The analysis limit was reached. Scores and trends use the latest 5,000 interactive observations and 5,000 security assessments; totals include all stored observations in the window.</p>}
           </div>
         </section>
           </>

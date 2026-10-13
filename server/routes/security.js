@@ -7,6 +7,7 @@ import {requireAuth,requireSecurityAdmin} from '../middleware/auth.js';
 import {api,SecurityError,userScope,scopedUser,publicUser,pagination,text,audit,isAdmin} from '../services/security-common.js';
 import {getPolicy,savePolicy} from '../services/policy-service.js';
 import {securityService} from '../services/security-service.js';
+import {getRiskAnalysis} from '../services/risk-analysis-service.js';
 import {learnBaseline} from '../services/ueba-service.js';
 import {sseManager} from '../services/sse.js';
 import {sendExport} from '../services/export-service.js';
@@ -101,6 +102,7 @@ router.get('/activity/:id',api(async req=>{const event=await prisma.activityEven
 router.post('/activity',requireSecurityAdmin,api(assess));
 router.post('/telemetry/ingest',requireSecurityAdmin,api(assess));
 router.post('/risk/evaluate',requireSecurityAdmin,api(assess));
+router.get('/risk/analysis/:id',requireSecurityAdmin,api(async req=>({analysis:await getRiskAnalysis(prisma,req.user,req.params.id)})));
 router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{userId:u.id,riskScore:u.riskScore,riskLevel:u.riskLevel,latest:await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}})};}));
 router.get('/risk/history/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.riskScore.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
 router.get('/trust/:id/history',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.trustHistory.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
