@@ -324,15 +324,15 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <div className="mt-5 text-4xl font-light tracking-[-0.04em]">
-              {formatScore(trustScore)} <span className="text-sm text-[#7F8A96]">/ 100</span>
+              {trustScore === null ? <span className="text-2xl">Unassessed</span> : <>{formatScore(trustScore)} <span className="text-sm text-[#7F8A96]">/ 100</span></>}
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              {analysis?.trustTimestamp ? `Latest recorded trust · ${new Date(analysis.trustTimestamp).toLocaleString()}` : "No recorded trust assessment"}
+              {analysis?.trustBasis === "ACCOUNT_BASELINE" ? "Stored account baseline · no adaptive assessment yet" : analysis?.trustTimestamp ? `Latest recorded trust · ${new Date(analysis.trustTimestamp).toLocaleString()}` : "No stored trust score"}
             </span>
           </div>
 
-          {/* 3. ML Anomaly Probability */}
+          {/* 3. Recorded supervised-model probability or explicit input status */}
 
           <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
             <div className="flex items-start justify-between">
@@ -346,11 +346,11 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <div className="mt-5 text-4xl font-light tracking-[-0.04em]">
-              {formatProbability(rfProbability)}
+              {analysis?.ml?.available ? formatProbability(rfProbability) : <span className="text-2xl">Awaiting inputs</span>}
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              {analysis?.ml?.available ? `Recorded model prediction · ${new Date(analysis.ml.timestamp).toLocaleString()}` : "Complete model inputs unavailable"}
+              {analysis?.ml?.available ? `Recorded model prediction · ${new Date(analysis.ml.timestamp).toLocaleString()}` : analysis?.ml?.reason}
             </span>
           </div>
 

@@ -56,6 +56,7 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     await b.command('Page.navigate', { url: `${origin}/risk-analysis` });
     const main = 'document.querySelector("main")';
     const has = text => `${main}?.textContent.includes(${JSON.stringify(text)})`;
+    const card = label => `Array.from(${main}.querySelectorAll('span')).find(e=>e.textContent.trim()===${JSON.stringify(label)}).parentElement.parentElement.textContent`;
     const select = id => b.evaluate(`(()=>{const e=document.querySelector('[aria-label="Risk analysis employee"]');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(e,${JSON.stringify(id)});e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
     const settled = 'document.querySelector(\'[aria-label="Risk analysis summary"]\')?.getAttribute("aria-busy")==="false"';
     const refresh = () => b.evaluate('document.querySelector(\'[aria-label="Refresh risk analysis"]\').click()');
@@ -75,6 +76,13 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     assert.equal(initialAnalysis.analysis.riskScore, 20);
     assert.equal(initialAnalysis.analysis.coverage.interactiveEvents, 1);
     assert.equal(initialAnalysis.analysis.coverage.endpointEvents, 182);
+    assert.equal(initialAnalysis.analysis.trustScore, f.employee.trustScore);
+    assert.equal(initialAnalysis.analysis.trustBasis, 'ACCOUNT_BASELINE');
+    assert.ok((await b.evaluate(card('TRUST SCORE'))).includes(String(f.employee.trustScore)));
+    assert.ok((await b.evaluate(card('TRUST SCORE'))).includes('Stored account baseline'));
+    assert.ok((await b.evaluate(card('ML THREAT PROBABILITY'))).includes('Awaiting inputs'));
+    assert.ok(!(await b.evaluate(card('TRUST SCORE'))).includes('N/A'));
+    assert.ok(!(await b.evaluate(card('ML THREAT PROBABILITY'))).includes('N/A'));
     const newUsage = { ...usage, eventId: randomUUID(), occurredAt: new Date().toISOString(), metadata: { ...usage.metadata, name: 'brave', durationSeconds: 12 } };
     const accepted = await fetch(`${origin}/api/endpoint/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${enrolled.credential}` }, body: JSON.stringify({ events: [newUsage] }) });
     assert.equal(accepted.status, 200);
@@ -100,7 +108,6 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     const assessment = await securityService.evaluate(f.admin, { userId: f.employee.id, eventType: 'FILE_DOWNLOAD', downloadVolumeMB: 600 });
     // Security-service SSE events update the combined observed risk and recorded trust.
     await waitUntil(b, `${has('Recorded security assessment')} && ${has('Latest recorded trust')}`, 'recorded security assessment');
-    const card = label => `Array.from(${main}.querySelectorAll('span')).find(e=>e.textContent.trim()===${JSON.stringify(label)}).parentElement.parentElement.textContent`;
     assert.ok((await b.evaluate(card('OBSERVED RISK SCORE'))).includes(String(assessment.decision.evaluation.riskScore)));
     assert.ok((await b.evaluate(card('TRUST SCORE'))).includes(String(assessment.decision.evaluation.trustScore)));
     assert.equal(await b.evaluate(has('2 interactive observations analysed')), true);
@@ -109,6 +116,19 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     const denied = await fetch(`${origin}/api/risk/analysis/${f.foreign.id}`, { headers: { Authorization: `Bearer ${generateJwtToken(f.admin, true)}` } });
     assert.equal(denied.status, 404, 'Another company cannot leak through analysis aggregates');
     assert.equal(await f.prisma.mlPrediction.count(), 0);
+    // Explicit persisted-result fixture: model outputs must be read from their
+    // own store even when no recent activity event carries ML metadata.
+    const otherModel = await f.prisma.modelVersion.create({ data: { modelName: 'Different anomaly model', version: 'isolated-regression-fixture' } });
+    await f.prisma.mlPrediction.create({ data: { userId: f.employee.id, modelVersionId: otherModel.id, featureVector: {}, anomalyScore: 0.99, isAnomalous: true, riskScore: 20, attributions: [] } });
+    await refresh();
+    await waitUntil(b, settled, 'different model result checked');
+    assert.ok((await b.evaluate(card('ML THREAT PROBABILITY'))).includes('Awaiting inputs'), 'An arbitrary anomaly score must not become a supervised threat probability');
+    const { registerModel } = await import('../services/ml-service.js');
+    const model = await registerModel(f.prisma);
+    await f.prisma.mlPrediction.create({ data: { userId: f.employee.id, modelVersionId: model.id, featureVector: {}, anomalyScore: 0.37, isAnomalous: false, riskScore: 20, attributions: [], timestamp: new Date(Date.now() - 48 * 3600000) } });
+    await refresh();
+    await waitUntil(b, `${settled} && ${card('ML THREAT PROBABILITY')}.includes('37.0%')`, 'stored approved model prediction');
+    assert.ok(!(await b.evaluate(card('ML THREAT PROBABILITY'))).includes('Awaiting inputs'));
     assert.ok(!responses.some(r => r.status === 404));
   } finally {
     if (previousTimezone === undefined) delete process.env.SECURITY_TIMEZONE; else process.env.SECURITY_TIMEZONE = previousTimezone;

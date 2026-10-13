@@ -10,11 +10,12 @@ const user = { id: 'employee', trustScore: 100 };
 const group = (type, count, userId = null) => ({ type, userId, _count: { _all: count } });
 const analyse = overrides => analyzeRiskWindow({ user, activeEvents: [], counts: [], securityEvents: [], securityCount: 0, trust: null, baseline: null, policy: DEFAULT_POLICY, at, ...overrides });
 
-test('absence of evidence stays unavailable instead of becoming a zero risk or trust measurement', () => {
-  const result = analyse({});
+test('absence of evidence and stored trust stays unavailable instead of becoming a fabricated measurement', () => {
+  const result = analyse({ user: { id: user.id } });
   assert.equal(result.hasTelemetry, false);
   assert.equal(result.riskScore, null);
   assert.equal(result.trustScore, null);
+  assert.equal(result.trustBasis, 'UNASSESSED');
   assert.equal(result.ml.probability, null);
   assert.ok(result.history.every(point => point.score === null));
 });
@@ -26,7 +27,8 @@ test('background processes, attached USB, file changes and connections do not be
   assert.equal(result.coverage.endpointEvents, 16024);
   assert.equal(result.coverage.verifiedEvents, 0);
   assert.equal(result.vectors.find(vector => vector.name === 'Data transfer').status, 'Unavailable');
-  assert.equal(result.trustScore, null);
+  assert.equal(result.trustScore, 100);
+  assert.equal(result.trustBasis, 'ACCOUNT_BASELINE');
   assert.equal(result.ml.available, false);
   assert.ok(result.history.every(point => point.score === null));
 });
@@ -82,4 +84,38 @@ test('bounded evidence is disclosed even when the aggregate counts are complete'
 test('recorded assessment factors establish coverage even when the event type is generic', () => {
   const result = analyse({ securityCount: 1, securityEvents: [{ type: 'RESOURCE_ACCESS', timestamp: at, riskContribution: 60, metadata: { evaluation: { riskScore: 60, contributingFactors: ['AUTH', 'VOLUME', 'PRIVILEGE'].map(category => ({ category, factor: category, scoreImpact: 20 })) } } }] });
   for (const name of ['Authentication', 'Data transfer', 'Privilege changes']) assert.equal(result.vectors.find(vector => vector.name === name).status, 'Observed');
+});
+
+test('stored account trust is returned without inventing an adaptive assessment or replacing a valid zero', () => {
+  for (const value of [0, 100]) {
+    const result = analyse({ user: { ...user, trustScore: value } });
+    assert.equal(result.trustScore, value);
+    assert.equal(result.trustBasis, 'ACCOUNT_BASELINE');
+    assert.equal(result.trustTimestamp, null);
+  }
+  const timestamp = new Date('2026-10-13T10:00:00Z');
+  const result = analyse({ user: { ...user, trustScore: 79, trustUpdatedAt: timestamp }, trust: { trustScore: 86, timestamp: new Date('2026-10-13T09:00:00Z') } });
+  assert.equal(result.trustScore, 79);
+  assert.equal(result.trustBasis, 'STORED_ASSESSMENT');
+  assert.equal(result.trustTimestamp, timestamp);
+});
+
+test('persisted approved-model predictions outside the activity window remain available with their original timestamp', () => {
+  const timestamp = new Date('2026-10-11T10:00:00Z');
+  const result = analyse({ prediction: { anomalyScore: 0, timestamp, attributions: [] } });
+  assert.equal(result.ml.available, true);
+  assert.equal(result.ml.status, 'RECORDED_PREDICTION');
+  assert.equal(result.ml.probability, 0);
+  assert.equal(result.ml.timestamp, timestamp);
+  assert.ok(result.history.every(point => point.mlProb === null));
+});
+
+test('newest valid model result wins and invalid probabilities remain awaiting inputs', () => {
+  const event = { type: 'MODEL_ASSESSMENT', timestamp: new Date('2026-10-13T11:00:00Z'), metadata: { ml: { threat_probability: 0.42 } } };
+  const result = analyse({ securityCount: 1, securityEvents: [event], prediction: { anomalyScore: 0.81, timestamp: new Date('2026-10-13T09:00:00Z') } });
+  assert.equal(result.ml.probability, 0.42);
+  const invalid = analyse({ prediction: { anomalyScore: 2, timestamp: at } });
+  assert.equal(invalid.ml.available, false);
+  assert.equal(invalid.ml.status, 'AWAITING_INPUTS');
+  assert.equal(invalid.ml.probability, null);
 });

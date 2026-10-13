@@ -2,15 +2,17 @@ import { riskEngine } from '../../cyber/risk-engine/risk-engine.js';
 import { getPolicy, riskLevel } from './policy-service.js';
 import { scopedUser, userScope } from './security-common.js';
 import { securityTimezone } from './time-context.js';
+import { modelMetadata } from './ml-service.js';
 
 const HOUR = 3600000;
 const LIMIT = 5000;
 const interactiveTypes = ['APPLICATION_USAGE', 'APPLICATION_FOREGROUND', 'SESSION_LOGIN', 'SESSION_UNLOCK'];
 const finiteScore = value => typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+const finiteProbability = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 
 // A read-only view over real observations. Reading the analysis neither imports
 // synthetic activity nor changes account trust, policy state or restrictions.
-export function analyzeRiskWindow({ user, activeEvents, counts, securityEvents, securityCount, trust, baseline, policy, at = new Date(), truncated = false }) {
+export function analyzeRiskWindow({ user, activeEvents, counts, securityEvents, securityCount, trust, prediction = null, baseline, policy, at = new Date(), truncated = false }) {
   const start = new Date(at.getTime() - 24 * HOUR);
   const endpointCount = counts.reduce((total, group) => total + group._count._all, 0);
   const countType = predicate => counts.filter(group => predicate(group.type)).reduce((total, group) => total + group._count._all, 0);
@@ -49,10 +51,14 @@ export function analyzeRiskWindow({ user, activeEvents, counts, securityEvents, 
   const hasTelemetry = endpointCount + securityCount > 0;
   const candidates = [{ ...endpointEvaluation, source: 'Contextual analysis of assigned-laptop activity' }, ...assessed];
   const strongest = candidates.reduce((current, candidate) => candidate.riskScore >= current.riskScore ? candidate : current);
-  const mlEvent = securityEvents.find(event => {
-    const probability = event.metadata?.ml?.threat_probability;
-    return typeof probability === 'number' && Number.isFinite(probability) && probability >= 0 && probability <= 1;
-  });
+  const mlCandidates = securityEvents.map(event => ({ probability: finiteProbability(event.metadata?.ml?.threat_probability), timestamp: event.timestamp, reasons: event.metadata?.ml?.xai_reasons ?? [] }));
+  if (prediction) mlCandidates.push({ probability: finiteProbability(prediction.anomalyScore), timestamp: prediction.timestamp, reasons: prediction.attributions ?? [] });
+  const latestMl = mlCandidates.filter(result => result.probability !== null && Number.isFinite(+new Date(result.timestamp))).sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp))[0] || null;
+  const recordedTrust = finiteScore(trust?.trustScore);
+  const storedTrust = finiteScore(user.trustScore);
+  const useStoredTrust = recordedTrust === null || (storedTrust !== null && +new Date(user.trustUpdatedAt) > +new Date(trust?.timestamp));
+  const trustScore = useStoredTrust ? storedTrust : recordedTrust;
+  const trustBasis = trustScore === null ? 'UNASSESSED' : !useStoredTrust ? 'RECORDED_ASSESSMENT' : user.trustUpdatedAt ? 'STORED_ASSESSMENT' : 'ACCOUNT_BASELINE';
   const history = Array.from({ length: 24 }, (_, index) => {
     const from = start.getTime() + index * HOUR;
     const to = from + HOUR;
@@ -60,6 +66,7 @@ export function analyzeRiskWindow({ user, activeEvents, counts, securityEvents, 
     const recorded = assessed.filter(event => +new Date(event.timestamp) >= from && +new Date(event.timestamp) < to);
     const scores = [...(interactive.length ? [evaluateEndpoint(interactive).riskScore] : []), ...recorded.map(event => event.riskScore)];
     const probabilities = securityEvents.filter(event => +new Date(event.timestamp) >= from && +new Date(event.timestamp) < to).map(event => event.metadata?.ml?.threat_probability).filter(value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1);
+    if (prediction && finiteProbability(prediction.anomalyScore) !== null && +new Date(prediction.timestamp) >= from && +new Date(prediction.timestamp) < to) probabilities.push(prediction.anomalyScore);
     return { time: new Date(from).toISOString(), score: scores.length ? Math.max(...scores) : null, mlProb: probabilities.length ? Math.max(...probabilities) * 100 : null };
   });
   // Absence of downloaded-byte/failure/privilege evidence is unknown coverage,
@@ -82,8 +89,8 @@ export function analyzeRiskWindow({ user, activeEvents, counts, securityEvents, 
     recommendation: strongest.riskScore >= policy.mfaThreshold ? 'Review the contributing evidence and the recorded policy decision.' : offHours.length ? 'Review whether the off-hours activity was expected. Continue monitoring the available signals.' : 'Continue monitoring. No elevated signal was found in the available observations.',
     source: strongest.source,
     baselineBasis: profile ? 'Learned historical access hours' : 'Configured access hours',
-    trustScore: finiteScore(trust?.trustScore), trustTimestamp: trust?.timestamp ?? null,
-    ml: { available: Boolean(mlEvent), probability: mlEvent?.metadata.ml.threat_probability ?? null, timestamp: mlEvent?.timestamp ?? null, reasons: mlEvent?.metadata.ml.xai_reasons ?? [], reason: 'A model prediction requires complete approved daily login, device, file, web and email inputs. Laptop observations alone do not supply all of them.' },
+    trustScore, trustBasis, trustTimestamp: useStoredTrust ? user.trustUpdatedAt ?? null : trust.timestamp,
+    ml: { available: Boolean(latestMl), status: latestMl ? 'RECORDED_PREDICTION' : 'AWAITING_INPUTS', probability: latestMl?.probability ?? null, timestamp: latestMl?.timestamp ?? null, reasons: latestMl?.reasons ?? [], reason: latestMl ? 'Latest recorded approved model prediction; original timestamp retained.' : 'No approved model prediction is recorded. Complete daily login, device, file, web and email inputs are required.' },
     coverage: { status: 'Partial', truncated, endpointEvents: endpointCount, securityEvents: securityCount, verifiedEvents: verifiedCount, deviceWideEvents: endpointCount - verifiedCount, interactiveEvents: activeEvents.length, offHoursEvents: offHours.length, observedVectors: vectors.filter(vector => vector.status === 'Observed').length },
     vectors, history,
   };
@@ -94,14 +101,17 @@ export async function getRiskAnalysis(db, actor, id, at = new Date()) {
   const from = new Date(at.getTime() - 24 * HOUR);
   const endpointScope = { companyId: actor.companyId, device: { companyId: actor.companyId, userId: user.id, user: userScope(actor) }, occurredAt: { gte: from, lte: at } };
   const activityScope = { userId: user.id, timestamp: { gte: from, lte: at } };
-  const [counts, activeRows, securityRows, securityCount, trust, baseline, policy] = await Promise.all([
+  const [counts, activeRows, securityRows, securityCount, trust, prediction, baseline, policy] = await Promise.all([
     db.endpointEvent.groupBy({ by: ['type', 'userId'], where: endpointScope, _count: { _all: true } }),
     db.endpointEvent.findMany({ where: { ...endpointScope, type: { in: interactiveTypes }, OR: [{ userId: user.id }, { userId: null }] }, select: { userId: true, type: true, occurredAt: true }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: LIMIT + 1 }),
     db.activityEvent.findMany({ where: activityScope, select: { timestamp: true, type: true, riskContribution: true, metadata: true }, orderBy: [{ timestamp: 'desc' }, { id: 'desc' }], take: LIMIT + 1 }),
     db.activityEvent.count({ where: activityScope }),
     db.trustHistory.findFirst({ where: { userId: user.id }, orderBy: { timestamp: 'desc' }, select: { timestamp: true, trustScore: true } }),
+    // anomalyScore stores the supervised probability for this registered model.
+    // Other models' anomaly scores must not be presented as threat probabilities.
+    db.mlPrediction.findFirst({ where: { userId: user.id, modelVersion: { is: { modelName: modelMetadata.model_name } } }, orderBy: { timestamp: 'desc' }, select: { timestamp: true, anomalyScore: true, attributions: true } }),
     db.behaviorProfile.findUnique({ where: { userId: user.id } }),
     getPolicy(db, actor.companyId),
   ]);
-  return analyzeRiskWindow({ user, activeEvents: activeRows.slice(0, LIMIT), counts, securityEvents: securityRows.slice(0, LIMIT), securityCount, trust, baseline, policy, at, truncated: activeRows.length > LIMIT || securityRows.length > LIMIT });
+  return analyzeRiskWindow({ user, activeEvents: activeRows.slice(0, LIMIT), counts, securityEvents: securityRows.slice(0, LIMIT), securityCount, trust, prediction, baseline, policy, at, truncated: activeRows.length > LIMIT || securityRows.length > LIMIT });
 }
