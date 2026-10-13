@@ -1405,6 +1405,7 @@ export default function App() {
   selectedUserId={currentUserId}
   onSelectUser={(userId) => setCurrentUserId(userId)}
   fetchJson={safeFetchJson}
+  isRefreshing={isRefreshing}
 />
             )}
 

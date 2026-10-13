@@ -2,7 +2,7 @@
 // IMPORTS
 // ======================================================
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 
 import {
   Layers,
@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   Sparkles,
   UserCheck,
+  RefreshCw,
 } from "lucide-react";
 
 import {
@@ -36,6 +37,7 @@ export const AiRiskAnalysisPage = ({
   users = [],
   events = [],
   fetchJson,
+  isRefreshing = false,
 }) => {
 
   // ======================================================
@@ -52,55 +54,78 @@ export const AiRiskAnalysisPage = ({
 
   // Manual selection only. The page always opens with no employee selected.
   const [targetUserId, setTargetUserId] = useState("");
-const [employeeEvents, setEmployeeEvents] = useState([]);
-const [telemetryLoading, setTelemetryLoading] = useState(false);
-const [telemetryError, setTelemetryError] = useState("");
+  const [employeeEvents, setEmployeeEvents] = useState([]);
+  const [endpointData, setEndpointData] = useState({ devices: [], events: [] });
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+  const [telemetryError, setTelemetryError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const refreshTelemetry = useRef(null);
 
-useEffect(() => {
-  let cancelled = false;
-
-  if (!targetUserId || !fetchJson) {
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    let queued = false;
+    let debounce;
     setEmployeeEvents([]);
+    setEndpointData({ devices: [], events: [] });
     setTelemetryError("");
+    setLastUpdated(null);
     setTelemetryLoading(false);
-    return;
-  }
+    if (!targetUserId || !fetchJson) return;
 
-  setEmployeeEvents([]);
-  setTelemetryError("");
-  setTelemetryLoading(true);
-
-  const loadTelemetry = async () => {
-    try {
-      const result = await fetchJson(
-        `/api/users/${encodeURIComponent(targetUserId)}`
-      );
-
+    const loadTelemetry = async () => {
       if (cancelled) return;
+      if (inFlight) { queued = true; return; }
+      inFlight = true;
+      setTelemetryLoading(true);
+      // These are distinct stores. Endpoint observations do not imply that an
+      // AI model has assessed the employee or calculated a security score.
+      const results = await Promise.allSettled([
+        fetchJson(`/api/users/${encodeURIComponent(targetUserId)}`),
+        fetchJson(`/api/endpoint/dashboard?userId=${encodeURIComponent(targetUserId)}`),
+      ]);
+      if (cancelled) return;
+      const errors = [];
+      results.forEach((result, index) => {
+        const data = result.status === "fulfilled" ? result.value : null;
+        const valid = data?.success && Array.isArray(data.events) &&
+          (index === 0 || Array.isArray(data.devices));
+        if (!valid) {
+          const message = data?.error?.message || data?.message ||
+            (typeof data?.error === "string" ? data.error : result.reason?.message) || "Invalid telemetry response";
+          errors.push(`${index === 0 ? "Security assessments" : "Endpoint telemetry"}: ${message}. Previously loaded records may be out of date.`);
+        } else if (index === 0) {
+          setEmployeeEvents(data.events);
+        } else {
+          setEndpointData(data);
+        }
+      });
+      setTelemetryError(errors.join(" "));
+      if (!errors.length) setLastUpdated(new Date());
+      setTelemetryLoading(false);
+      inFlight = false;
+      if (queued) { queued = false; loadTelemetry(); }
+    };
+    refreshTelemetry.current = loadTelemetry;
+    const scheduleRefresh = () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(loadTelemetry, 300);
+    };
+    loadTelemetry();
+    const timer = setInterval(loadTelemetry, 30000);
+    window.addEventListener("cyberorbit-endpoint-updated", scheduleRefresh);
+    return () => {
+      cancelled = true;
+      refreshTelemetry.current = null;
+      clearTimeout(debounce);
+      clearInterval(timer);
+      window.removeEventListener("cyberorbit-endpoint-updated", scheduleRefresh);
+    };
+  }, [targetUserId, fetchJson]);
 
-      if (!result?.success) {
-        throw new Error(result?.message || "Unable to load employee telemetry");
-      }
-
-      setEmployeeEvents(
-        Array.isArray(result.events) ? result.events : []
-      );
-    } catch (error) {
-      if (!cancelled) {
-        setTelemetryError(error.message);
-        setEmployeeEvents([]);
-      }
-    } finally {
-      if (!cancelled) setTelemetryLoading(false);
-    }
-  };
-
-  loadTelemetry();
-
-  return () => {
-    cancelled = true;
-  };
-}, [targetUserId, fetchJson]);
+  useEffect(() => {
+    if (!isRefreshing) refreshTelemetry.current?.();
+  }, [isRefreshing]);
   useEffect(() => {
     if (targetUserId && !users.some((user) => user.id === targetUserId)) {
       setTargetUserId("");
@@ -121,7 +146,14 @@ useEffect(() => {
   const userEvents = useMemo(() => {
   if (!targetUser) return [];
 
-  return employeeEvents
+  const merged = new Map();
+  // Keep live assessments delivered by SSE as well as employee-specific history.
+  for (const event of [...employeeEvents, ...events]) {
+    if (String(event.userId ?? "") === String(targetUser.id)) {
+      merged.set(event.id || event.eventId, event);
+    }
+  }
+  return [...merged.values()]
     .filter(
       (event) =>
         String(event.userId ?? "") === String(targetUser.id)
@@ -137,7 +169,7 @@ useEffect(() => {
 
       return dateB - dateA;
     });
-}, [employeeEvents, targetUser]);
+}, [employeeEvents, events, targetUser]);
 
   // Generic application events are not automatically AI telemetry.
   // The analysis branch opens only when at least one selected-user event
@@ -149,6 +181,7 @@ useEffect(() => {
   event,
   event.metadata,
   event.metadata?.evaluation,
+  event.metadata?.ml,
   event.ml,
   event.evaluation,
   event.decision?.evaluation,
@@ -167,6 +200,8 @@ useEffect(() => {
       "deviceRisk",
       "networkRisk",
       "dataTransferRisk",
+      "threat_probability",
+      "mlThreatProbability",
     ];
 
     return sources.some((source) =>
@@ -182,7 +217,8 @@ useEffect(() => {
   };
 
   const aiTelemetryEvents = userEvents.filter(isAiTelemetryEvent);
-  const hasTelemetry = aiTelemetryEvents.length > 0;
+  const hasAssessment = aiTelemetryEvents.length > 0;
+  const hasTelemetry = userEvents.length > 0 || endpointData.events.length > 0;
   const latestEvent = aiTelemetryEvents[0] || null;
 
   const getNumber = (...values) => {
@@ -200,10 +236,10 @@ useEffect(() => {
     const value = getNumber(...values);
     return value === null ? null : Math.min(100, Math.max(0, value));
   };
-  const evaluation = latestEvent?.metadata?.evaluation || latestEvent?.evaluation || latestEvent;
-  const riskScore = normalizeScore(evaluation?.riskScore, latestEvent?.riskContribution);
+  const evaluation = latestEvent?.metadata?.evaluation || latestEvent?.evaluation || latestEvent?.decision?.evaluation || latestEvent;
+  const riskScore = normalizeScore(evaluation?.riskScore, latestEvent?.riskScore, latestEvent?.riskContribution, latestEvent?.metadata?.riskContribution);
   const trustScore = normalizeScore(evaluation?.trustScore);
-  const rfProbability = getNumber(latestEvent?.metadata?.ml?.threat_probability, latestEvent?.mlThreatProbability);
+  const rfProbability = getNumber(latestEvent?.metadata?.ml?.threat_probability, latestEvent?.ml?.threat_probability, latestEvent?.mlThreatProbability);
   const riskFactors = (evaluation?.contributingFactors || []).map(factor => ({
     name: factor.factor, score: factor.scoreImpact, description: factor.description
   }));
@@ -313,7 +349,7 @@ useEffect(() => {
                 </h1>
 
                 <p className="mt-4 max-w-2xl text-[14px] leading-6 text-[#A7B0BA]">
-                  Recorded contextual risk factors and real supervised model predictions, when complete model inputs are available.
+                  Live activity from assigned laptops, recorded security assessments, and model predictions when complete inputs are available.
                 </p>
               </div>
 
@@ -324,6 +360,7 @@ useEffect(() => {
                 </span>
 
                 <select
+                  aria-label="Risk analysis employee"
                   value={targetUserId}
                   onChange={(e) => {
                     setTargetUserId(e.target.value);
@@ -345,6 +382,53 @@ useEffect(() => {
           </div>
         </section>
 
+        {targetUser && (
+          <section aria-label="Recorded endpoint telemetry" aria-busy={telemetryLoading} className="rounded-2xl border border-white/10 bg-[#050A10] p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl text-[#F4F7FA]">Recorded endpoint telemetry</h2>
+                <p className="mt-1 text-sm text-[#7F8A96]">
+                  Assigned laptops: {endpointData.devices.length} · Loaded endpoint events: {endpointData.events.length} · Security events: {userEvents.length}
+                </p>
+              </div>
+              <button type="button" aria-label="Refresh risk telemetry" disabled={telemetryLoading} onClick={() => refreshTelemetry.current?.()} className="flex items-center gap-2 rounded-lg border border-[#67E8F9]/25 px-3 py-2 text-sm text-[#67E8F9] disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${telemetryLoading ? "animate-spin" : ""}`} />
+                {telemetryLoading ? "Refreshing..." : "Refresh telemetry"}
+              </button>
+            </div>
+            {telemetryError && <p role="alert" className="text-sm text-red-300">{telemetryError}</p>}
+            {lastUpdated && <p className="text-xs text-[#7F8A96]">Last refreshed: {lastUpdated.toLocaleString()}. Updates automatically as events arrive.</p>}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {endpointData.devices.map(device => (
+                <article key={device.id} className="rounded-xl border border-white/10 p-4">
+                  <p className="font-medium text-[#67E8F9]">{device.name}</p>
+                  <p className="mt-1 text-sm">{device.connectionStatus} · {device.platform}{device.config?.paused ? " · Collection paused" : ""}</p>
+                  <p className="mt-1 text-xs text-[#7F8A96]">Last agent contact: {device.lastSeen ? new Date(device.lastSeen).toLocaleString() : "Not yet reported"}</p>
+                </article>
+              ))}
+            </div>
+            {endpointData.events.length > 0 && (
+              <>
+                <p className="text-xs text-[#7F8A96]">Latest {Math.min(20, endpointData.events.length)} of {endpointData.events.length} loaded endpoint events.{endpointData.timeline?.hasMore ? " Older events remain stored." : ""} Device-wide observations are labeled separately from verified employee activity.</p>
+                <ul className="max-h-96 space-y-3 overflow-y-auto" aria-label="Risk endpoint event timeline">
+                  {endpointData.events.slice(0, 20).map(event => (
+                    <li key={event.id || event.eventId} data-event-id={event.eventId} className="rounded-lg border border-white/10 p-3 text-sm">
+                      <div className="flex flex-wrap justify-between gap-2">
+                        <strong>{event.type.replaceAll("_", " ")}{event.metadata?.name ? ` · ${event.metadata.appName || event.metadata.name}` : ""}</strong>
+                        <time dateTime={event.occurredAt} className="text-xs text-[#7F8A96]">{new Date(event.occurredAt).toLocaleString()}</time>
+                      </div>
+                      <p className="mt-1 text-xs text-[#7F8A96]">{endpointData.devices.find(device => device.id === event.deviceId)?.name || "Assigned laptop"} · {event.userId === targetUser.id ? "Verified employee activity" : "Device-wide observation"}</p>
+                      {event.type === "APPLICATION_USAGE" && <p className="mt-1">{event.metadata.durationSeconds} seconds foreground usage</p>}
+                      {event.metadata?.browserTitle && <p className="mt-1 break-words">{event.metadata.browserTitle}</p>}
+                      <details className="mt-2 text-xs text-[#7F8A96]"><summary className="cursor-pointer">Recorded details</summary><pre className="mt-2 whitespace-pre-wrap break-words">{JSON.stringify(event.metadata, null, 2)}</pre></details>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        )}
+
         {!targetUser ? (
           <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center shadow-[0_18px_60px_rgba(0,0,0,0.18)] sm:p-12">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/[0.04] text-[#D4AF37]">
@@ -353,7 +437,7 @@ useEffect(() => {
             <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO EMPLOYEE SELECTED</div>
             <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">Select an employee from the TARGET list above to inspect recorded security telemetry.</p>
           </section>
-        ) : telemetryLoading ? (
+        ) : telemetryLoading && !hasTelemetry ? (
   <section className="rounded-2xl border border-white/10 bg-[#050A10] p-8 text-center sm:p-12">
     <div className="text-[13px] font-semibold text-[#67E8F9]">
       LOADING EMPLOYEE TELEMETRY...
@@ -362,7 +446,7 @@ useEffect(() => {
       Fetching recorded security events for {targetUser.name}.
     </p>
   </section>
-) : telemetryError ? (
+) : telemetryError && !hasTelemetry ? (
   <section className="rounded-2xl border border-red-500/20 bg-[#050A10] p-8 text-center sm:p-12">
     <div className="text-[13px] font-semibold text-red-400">
       TELEMETRY LOAD FAILED
@@ -378,6 +462,12 @@ useEffect(() => {
             </div>
             <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO TELEMETRY AVAILABLE</div>
             <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">{targetUser.name} has no recorded security telemetry yet.</p>
+          </section>
+        ) : !hasAssessment ? (
+          <section className="rounded-2xl border border-[#D4AF37]/20 bg-[#050A10] p-6">
+            <h2 className="text-lg text-[#D4AF37]">Telemetry received · Risk assessment pending</h2>
+            <p className="mt-2 text-sm text-[#A7B0BA]">Recorded activity is available for {targetUser.name}. No calculated risk or trust assessment is recorded for these events yet.</p>
+            <p className="mt-2 text-sm text-[#7F8A96]">{endpointData.ml?.reason || "Model predictions require complete approved user-day inputs. Scores appear when an assessment is recorded."}</p>
           </section>
         ) : (
           <>
