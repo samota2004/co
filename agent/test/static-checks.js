@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-const roots=['agent/src','agent/shared','agent/test','server/routes/endpoint.js','server/services/endpoint-service.js','server/routes/events.js','server/routes/telemetry.js','server/services/sse.js','server/repositories/user-repository.js','server/server.js'];
+const roots=['agent/src','agent/shared','agent/test','agent/packaging/macos','server/routes/endpoint.js','server/services/endpoint-service.js','server/routes/events.js','server/routes/telemetry.js','server/services/sse.js','server/repositories/user-repository.js','server/server.js'];
 let count=0;
 async function check(file) {
   if((await fs.stat(file)).isDirectory()){for(const name of await fs.readdir(file))await check(path.join(file,name));}

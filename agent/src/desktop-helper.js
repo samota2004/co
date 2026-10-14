@@ -17,13 +17,18 @@ export async function runDesktopHelper(config) {
     ? spawn(powershell,[...windowsHelperArguments(file),'-Exclusive',...(config.browserTitles===true?['-BrowserTitles']:[])],{windowsHide:true,stdio:['ignore','pipe','pipe']})
     : process.platform==='linux'
       ? spawn('/usr/bin/python3',[path.join(nativeDirectory,file),...titleArgs],{stdio:['ignore','pipe','pipe']})
-      : spawn(path.join(nativeDirectory,file),titleArgs,{stdio:['ignore','pipe','pipe']});
+      : spawn(path.join(nativeDirectory,file),titleArgs,{stdio:['pipe','pipe','pipe']});
   const category=nativeStderrCategory(child);child.on('error',()=>console.error(nativeFailure(file,null,'HELPER_STARTUP').message));
+  child.stdin?.on('error',()=>{});
   process.once('SIGINT',()=>child.kill());process.once('SIGTERM',()=>child.kill());
+  if(config.installMode==='user')process.once('disconnect',()=>child.kill());
+  let lastError=0;
   const lines=readline.createInterface({input:child.stdout});
   for await(const line of lines) try {
     const sample=JSON.parse(line);if(sample.identity!==grant.identity) throw new Error('Desktop identity mismatch');
-    await sendSample(grant,sample);
-  }catch {console.error('Desktop sample unavailable; check background service and assignment.');}
+    const port=config.installMode==='user'?Number(await fs.readFile(path.join(config.dataDirectory,'ipc-port'),'utf8')):undefined;
+    const reply=await sendSample(grant,sample,port?{port}:{});
+    if(process.platform==='darwin' && child.stdin.writable) child.stdin.write(JSON.stringify({activeApplication:reply.activeApplication===true,browserTitles:reply.browserTitles===true,proofs:reply.proofs || []})+'\n');
+  }catch {if(Date.now()-lastError>60000){console.error('Desktop sample unavailable; check background service and assignment.');lastError=Date.now();}}
   throw nativeFailure(file,child.exitCode,category());
 }

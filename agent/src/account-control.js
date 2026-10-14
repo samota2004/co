@@ -5,6 +5,7 @@ import { applyUnixAccountControl } from './unix-account-control.js';
 // Only fresh authenticated heartbeat responses drive OS changes. Never replay
 // cached collector settings, queued events, or agent-provided employee IDs.
 export async function reconcileAccountControl(local, secrets, command, run = nativeInput, platform = process.platform) {
+  if(local.installMode==='user') return 'unsupported: user mode cannot change OS accounts';
   const windows = platform === 'win32';
   const policy = windows ? local.windowsAccountControl : local.unixAccountControl;
   if (policy?.enabled !== true) return 'disabled: local OS account control not approved';

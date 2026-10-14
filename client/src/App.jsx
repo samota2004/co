@@ -1413,12 +1413,8 @@ export default function App() {
               <ExplainableAiPage
                 users={users}
                 events={recentEvents}
-                incidents={incidents}
-                onSelectUser={(userId) => {
-                  setCurrentUserId(userId);
-
-                  handleNavigate("risk-analysis");
-                }}
+                fetchJson={safeFetchJson}
+                isRefreshing={isRefreshing}
               />
             )}
 

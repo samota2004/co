@@ -45,7 +45,7 @@ export function nativeInput(file, input, { policyOverride = true } = {}) {
     let output = '', size = 0, settled = false;
     const category = nativeStderrCategory(child);
     const fail = (exitCode, cause, signal) => { if (!settled) { settled=true; clearTimeout(timer); reject(nativeFailure(file,exitCode,cause,signal)); } };
-    const timer = setTimeout(() => { child.kill(); fail(null,'TIMEOUT'); }, file==='windows-snapshot.ps1' ? 45000 : 15000);
+    const timer = setTimeout(() => { child.kill(); fail(null,'TIMEOUT'); }, file==='windows-snapshot.ps1' ? 45000 : file==='keychain' && process.getuid?.()>0 ? 120000 : 15000);
     child.stdout.on('data', b => { size += b.length; if (size > 1024*1024) { child.kill(); fail(null,'OUTPUT_LIMIT'); } else output += b; });
     child.on('error', error => fail(null,['EACCES','EPERM'].includes(error.code) ? 'FILE_ACCESS' : error.code==='ENOENT' ? 'HELPER_NOT_FOUND' : 'HELPER_STARTUP'));
     child.on('close', (code,signal) => {

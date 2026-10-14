@@ -7,6 +7,9 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "start": "node src/cli.js service",
-    "build:windows": "powershell -NoProfile -File packaging/windows/build.ps1"
+    "build:windows": "powershell -NoProfile -File packaging/windows/build.ps1",
+    "build:unix": "sh packaging/build-unix.sh",
+    "test:macos": "node --test test/macos-user.test.js test/macos-runtime.test.js test/macos-kit.test.js",
+    "prepare:macos-kit": "node packaging/macos/prepare-build-kit.js"
   }
 }

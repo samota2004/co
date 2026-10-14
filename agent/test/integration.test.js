@@ -11,6 +11,7 @@ import { snapshot } from '../src/collectors/windows.js';
 import { normalize } from '../src/normalizer.js';
 import { EncryptedQueue } from '../src/queue.js';
 import { Transport, Uploader } from '../src/uploader.js';
+import {EndpointService} from '../../server/services/endpoint-service.js';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 dotenv.config({path:path.join(root,'.env'),quiet:true});
 test('real Windows observation -> authenticated HTTP -> durable PostgreSQL -> employee dashboard',{skip:process.platform!=='win32'||!process.env.DATABASE_URL,timeout:180000},async()=>{
@@ -37,7 +38,7 @@ test('real Windows observation -> authenticated HTTP -> durable PostgreSQL -> em
     const origin=`http://127.0.0.1:${server.address().port}`;
     await client.role.createMany({data:[{code:'EMPLOYEE',name:'Employee'},{code:'SECURITY_ADMIN',name:'Security admin'}]});
     await client.department.create({data:{code:'ENGINEERING',name:'Engineering'}});
-    const admin=await client.user.create({data:{employeeId:randomUUID(),email:`${randomUUID()}@test.invalid`,name:'Test admin',companyId:'A',roleCode:'SECURITY_ADMIN'}});
+    const admin=await client.user.create({data:{employeeId:randomUUID(),email:`${randomUUID()}@test.invalid`,name:'Test admin',companyId:'A',roleCode:'SECURITY_ADMIN',isMainAdmin:true}});
     const employee=await client.user.create({data:{employeeId:randomUUID(),email:`${randomUUID()}@test.invalid`,name:'Assigned employee',companyId:'A'}});
     const other=await client.user.create({data:{employeeId:randomUUID(),email:`${randomUUID()}@test.invalid`,name:'Other company',companyId:'B',roleCode:'SECURITY_ADMIN'}});
     const otherEmployee=await client.user.create({data:{employeeId:randomUUID(),email:`${randomUUID()}@test.invalid`,name:'Other employee',companyId:'A'}});
@@ -46,12 +47,12 @@ test('real Windows observation -> authenticated HTTP -> durable PostgreSQL -> em
       return{status:response.status,data:await response.json()};
     };
     assert.equal((await fetch(`${origin}/api/events/stream`)).status,401);
-    const streamSession=await fetch(`${origin}/api/events/stream-session`,{method:'POST',headers:{Authorization:`Bearer ${generateJwtToken(employee,true)}`}});assert.equal(streamSession.status,200);
+    const streamSession=await fetch(`${origin}/api/events/stream-session`,{method:'POST',headers:{Authorization:`Bearer ${generateJwtToken(admin,true)}`}});assert.equal(streamSession.status,200);
     const controller=new AbortController();
     const stream=await fetch(`${origin}/api/events/stream`,{headers:{Cookie:streamSession.headers.get('set-cookie').split(';')[0]},signal:controller.signal});assert.equal(stream.status,200);
     const reader=stream.body.getReader();await reader.read();
     sseManager.broadcast('ENDPOINT_UPDATED',{companyId:'B',userId:employee.id});
-    sseManager.broadcast('ENDPOINT_UPDATED',{companyId:'A',userId:otherEmployee.id});
+    sseManager.broadcast('ENDPOINT_UPDATED',{companyId:'B',userId:otherEmployee.id});
     sseManager.broadcast('ENDPOINT_UPDATED',{companyId:'A',userId:employee.id});
     const live=new TextDecoder().decode((await reader.read()).value);
     assert.equal(live.split('ENDPOINT_UPDATED').length-1,1);assert.ok(!live.includes(otherEmployee.id));controller.abort();
@@ -73,9 +74,14 @@ test('real Windows observation -> authenticated HTTP -> durable PostgreSQL -> em
     online=true;const recoveredUploader=new Uploader(recovered,flaky);await recoveredUploader.tick();assert.equal(recovered.health().queueEvents,0);
     await deviceTransport.post('ingest',{events:[observation,observation]});assert.equal(await client.endpointEvent.count({where:{deviceId:r.deviceId}}),1);
     await deviceTransport.post('ingest',{events:[normalize(r.deviceId,'PROCESS_RUNNING',{...observedProcess,identity:'S-1-5-21-000-111-222-333'})]});
-    const dash=await call('dashboard',employee);assert.equal(dash.status,200);assert.equal(dash.data.events.length,1);assert.equal(dash.data.events[0].userId,employee.id);assert.equal(dash.data.devices[0].userId,employee.id);assert.equal(dash.data.ml.available,false);
+    // Current console accepts administrators only; service-level employee
+    // attribution remains verified without weakening console authentication.
+    assert.equal((await call('dashboard',employee)).status,401);
+    const service=new EndpointService(client),personal=await service.dashboard(employee);
+    assert.equal(personal.events.length,1);assert.equal(personal.events[0].userId,employee.id);
+    const dash=await call(`dashboard?userId=${employee.id}`,admin);assert.equal(dash.status,200);assert.equal(dash.data.devices[0].userId,employee.id);assert.equal(dash.data.ml.available,false);
     assert.equal((await call('dashboard',other)).data.devices.length,0);
-    assert.equal((await call(`dashboard?userId=${employee.id}`,otherEmployee)).status,403);
+    await assert.rejects(service.dashboard(otherEmployee,employee.id),e=>e.status===403);
     assert.equal((await call(`${r.deviceId}/revoke`,other,'POST')).status,404);
     assert.equal((await call(`${r.deviceId}/revoke`,admin,'POST')).status,200);
     await assert.rejects(deviceTransport.post('ingest',{events:[observation]}),e=>e.status===401);

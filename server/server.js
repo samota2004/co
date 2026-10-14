@@ -128,5 +128,9 @@ app.use(errorHandler);
 
 export default app;
 
+const {scheduleEndpointRetention}=await import('./services/endpoint-retention.js');
+const {prisma:retentionDb}=await import('./models/prisma.js');
+const stopRetention=scheduleEndpointRetention(retentionDb);
+httpServer.once('close',stopRetention);
 ready = true;
 console.log(`[CyberOrbit SOC] Server running on http://localhost:${httpServer.address().port}`);

@@ -3,8 +3,9 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 export const IPC_PORT = 47731;
 export const sign = (key, text) => createHmac('sha256',Buffer.from(key,'base64')).update(text).digest('hex');
 const equal = (a,b) => typeof a==='string' && /^[a-f0-9]{64}$/.test(a) && timingSafeEqual(Buffer.from(a,'hex'),Buffer.from(b,'hex'));
-export function startIpc(secrets, onSample, {port=IPC_PORT}={}) {
+export function startIpc(secrets, onSample, {port=IPC_PORT,controls=()=>({})}={}) {
   const seen=new Map();
+  let serial=Promise.resolve();
   const server=http.createServer(async (req,res)=> {
     if (req.method!=='POST' || req.url!=='/sample' || req.headers.origin || req.headers.host!==`127.0.0.1:${server.address().port}`) {res.writeHead(403).end();return;}
     const time=req.headers['x-orbit-time'], nonce=req.headers['x-orbit-nonce'];
@@ -17,12 +18,14 @@ export function startIpc(secrets, onSample, {port=IPC_PORT}={}) {
       if(seen.has(nonce) || seen.size>1000) {res.writeHead(409).end();return;} seen.set(nonce,Date.now());
       const data=JSON.parse(body);
       if (data.identity!==secrets.mappedIdentity) {res.writeHead(403).end();return;}
-      await onSample({...data,identity:secrets.mappedIdentity});
-      const reply=JSON.stringify({accepted:true});
+      const task=serial.then(()=>onSample({...data,identity:secrets.mappedIdentity}));
+      serial=task.catch(()=>{});await task;
+      const reply=JSON.stringify({accepted:true,...controls()});
       res.writeHead(200,{'Content-Type':'application/json','x-orbit-signature':sign(secrets.helperKey,`${nonce}\n${reply}`)}); res.end(reply);
     } catch { if(!res.headersSent) res.writeHead(400);res.end(); }
   });
   server.requestTimeout=5000; server.headersTimeout=5000; server.maxConnections=20;
+  server.drain=()=>serial;
   return new Promise((resolve,reject)=> {server.once('error',reject);server.listen(port,'127.0.0.1',()=>resolve(server));});
 }
 export async function sendSample(grant, sample, {port=IPC_PORT}={}) {
@@ -31,4 +34,5 @@ export async function sendSample(grant, sample, {port=IPC_PORT}={}) {
     headers:{'Content-Type':'application/json','x-orbit-time':time,'x-orbit-nonce':nonce,'x-orbit-signature':sign(grant.key,`${time}\n${nonce}\n${body}`)},body});
   const reply=await response.text();
   if(!response.ok || !equal(response.headers.get('x-orbit-signature'),sign(grant.key,`${nonce}\n${reply}`))) throw new Error('Local service authentication failed');
+  return JSON.parse(reply);
 }

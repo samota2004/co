@@ -1,5 +1,5 @@
 export class SystemCollectors {
-  constructor(emit,health) { this.emit=emit; this.health=health; this.previous={}; this.lastRunning=0; }
+  constructor(emit,health,local={}) { this.emit=emit; this.health=health; this.local=local; this.previous={}; this.lastRunning=0; }
   async poll(config) {
     const platform = process.platform === 'win32' ? './windows.js' : process.platform === 'darwin' ? './macos.js' : './linux.js';
     const { snapshot } = await import(platform);
@@ -7,7 +7,7 @@ export class SystemCollectors {
     for (const source of ['processes','sessions','usb','network']) {
       if (!config[source]) { this.health[source]='disabled'; delete this.previous[source]; continue; }
       try {
-        const data = (await snapshot({[source]:true}))[source] || [];
+        const data = (await snapshot({[source]:true, userOnly:this.local.installMode==='user'}))[source] || [];
         const key = x => source==='processes' ? `${x.pid}:${x.startedAt}` : source==='sessions' ? x.sessionId : source==='usb' ? x.hardwareId : JSON.stringify(x);
         const current=new Map(data.map(x=>[key(x),x])), prior=this.previous[source];
         const prefix = {processes:'PROCESS',sessions:'SESSION',usb:'USB'}[source];

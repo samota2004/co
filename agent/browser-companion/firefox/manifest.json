@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "name": "CYBERORBIT Browser Privacy Companion",
+  "version": "1.0.0",
+  "description": "Confirms active normal-window titles for explicitly approved employee monitoring.",
+  "permissions": ["tabs", "nativeMessaging", "alarms"],
+  "incognito": "not_allowed",
+  "browser_specific_settings": {"gecko": {"id": "cyberorbit-companion@cyberorbit.local", "strict_min_version": "91.0"}},
+  "background": {"scripts": ["background.js"]}
+}

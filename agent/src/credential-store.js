@@ -4,6 +4,14 @@ import { nativeInput, exec } from './native.js';
 import { hostCredential } from './linux-credentials.js';
 export class CredentialStore {
   constructor(directory) { this.directory = directory; }
+  async exists() {
+    if(process.platform!=='darwin')throw new Error('Keychain check is macOS only');
+    return (await nativeInput('keychain',{action:'exists',account:this.directory}))==='true';
+  }
+  async remove() {
+    if(process.platform!=='darwin') throw new Error('Keychain removal is macOS only');
+    await nativeInput('keychain',{action:'delete',account:this.directory});
+  }
   async save(value) {
     if (process.platform === 'win32') {
       const encrypted = await nativeInput('vault.ps1', { action: 'protect', value: JSON.stringify(value) });

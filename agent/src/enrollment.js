@@ -4,10 +4,12 @@ import { randomBytes } from 'node:crypto';
 import { CredentialStore } from './credential-store.js';
 import { Transport } from './uploader.js';
 import { AGENT_VERSION, validateEnrollment, validateConfig } from '../shared/contract.js';
+import {assertUserConfig} from './macos-user.js';
 export function createEnrollmentRequest(token, platform = process.platform) {
   return validateEnrollment({ token: typeof token === 'string' ? token.trim() : token, platform, agentVersion: AGENT_VERSION });
 }
 export async function enroll(config, token) {
+  if(config.installMode==='user') assertUserConfig(config);
   const store = new CredentialStore(config.dataDirectory);
   // Preserve credentials, partial writes, enrollment markers and orphaned queues.
   try {
@@ -15,11 +17,19 @@ export async function enroll(config, token) {
   } catch(e) { if(e.code!=='ENOENT')throw e; }
   // Local validation catches a pasted label, JSON, quote or truncated token
   // before sending it. The wire schema is shared with backend validation.
-  const r = await new Transport(config).post('enroll', createEnrollmentRequest(token));
+  if(process.platform==='darwin' && await store.exists()) throw new Error('Keychain enrollment already exists; preserve it and review the assignment before reinstalling');
+  const request=createEnrollmentRequest(token);
+  if(config.installMode==='user') {
+    request.mappedIdentity=config.desktopIdentity;request.expectedDeviceId=config.expectedDeviceId;
+    if(!request.expectedDeviceId)throw new Error('Confirm the assigned device ID before enrollment');
+    validateEnrollment(request);
+  }
+  const r = await new Transport(config).post('enroll', request);
   try {
     if (!/^[0-9a-f-]{36}$/i.test(r.deviceId) || !/^[A-Za-z0-9_-]{43}$/.test(r.credential) || (r.mappedIdentity !== null && (typeof r.mappedIdentity !== 'string' || !(process.platform === 'win32' ? /^S-1-5-(\d+-)*\d+$/ : /^uid:\d+$/).test(r.mappedIdentity)))) throw new Error();
     validateConfig(r.config);
     if(process.platform!=='win32' && config.desktopIdentity && r.mappedIdentity!==config.desktopIdentity)throw new Error('Enrollment identity differs from local desktop configuration');
+    if(config.expectedDeviceId && r.deviceId!==config.expectedDeviceId)throw new Error('Assigned device differs from local confirmation');
   } catch {
     throw new Error('Backend accepted enrollment but returned an invalid response. Do not reuse the token. Review the device in the dashboard; revoke an enrolled record before a new assignment.');
   }
@@ -39,7 +49,7 @@ export async function enroll(config, token) {
     } else if (secrets.mappedIdentity) {
       const grantFile=config.helperCapabilityFile || path.join(config.dataDirectory,'helper-capability.json');
       await fs.writeFile(grantFile,JSON.stringify({key:secrets.helperKey,identity:secrets.mappedIdentity}),{mode:0o400});
-      await fs.chown(grantFile,Number(secrets.mappedIdentity.slice(4)),0);
+      if(config.installMode!=='user') await fs.chown(grantFile,Number(secrets.mappedIdentity.slice(4)),0);
     }
   } catch {
     throw new Error(`Enrollment accepted for device ${r.deviceId}, but ${phase} failed. Preserve local data and review the dashboard. Do not reuse the token; revoke the enrolled record before creating a new assignment.`);

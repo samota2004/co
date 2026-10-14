@@ -1,4 +1,5 @@
 packaging/**/*.sh text eol=lf
+packaging/**/*.command text eol=lf
 packaging/**/*.plist text eol=lf
 packaging/**/*.service text eol=lf
 native/*.py text eol=lf

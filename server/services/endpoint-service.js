@@ -80,9 +80,10 @@ export class EndpointService {
       if (device.enrolledAt) throw new EndpointError(401, 'Enrollment token has already been used. Do not enroll this device again.', 'ENROLLMENT_TOKEN_USED');
       if (!device.enrollmentExpiresAt || new Date(device.enrollmentExpiresAt).getTime() <= Date.now()) throw new EndpointError(401, 'Enrollment token expired. Issue a fresh token and use it within 15 minutes.', 'ENROLLMENT_TOKEN_EXPIRED');
       if (device.platform !== body.platform) throw new EndpointError(400, 'Enrollment token belongs to a different operating system. Select an assignment matching this agent operating system.', 'ENROLLMENT_PLATFORM_MISMATCH', { field: 'platform', reason: 'assignment_mismatch' });
+      if ((body.mappedIdentity!==undefined && body.mappedIdentity!==device.mappedIdentity) || (body.expectedDeviceId!==undefined && body.expectedDeviceId!==device.id)) throw new EndpointError(409,'The assigned device or macOS account does not match this installation. Ask the administrator to verify the assignment. The token was not consumed.','ENROLLMENT_IDENTITY_MISMATCH');
       if (!device.user || device.user.companyId !== device.companyId || device.user.status !== 'ACTIVE' || !['EMPLOYEE','MANAGER'].includes(device.user.roleCode)) throw new EndpointError(401, 'Device assignment is no longer valid for an active employee. Ask an administrator to review the assignment.', 'ENROLLMENT_ASSIGNMENT_INVALID');
       const where = { enrollmentHash: tokenHash, enrollmentExpiresAt: { gt: new Date() }, enrolledAt: null, revokedAt: null, platform: body.platform,
-        userId: device.userId, companyId: device.companyId, user: { companyId: device.companyId, status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } } };
+        userId: device.userId, companyId: device.companyId, mappedIdentity:device.mappedIdentity, user: { companyId: device.companyId, status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } } };
       const changed = await tx.endpointDevice.updateMany({ where: { ...where, id: device.id }, data: {
         enrollmentHash: null, enrollmentExpiresAt: null, credentialHash: hashSecret(secret), enrolledAt: new Date(), agentVersion: body.agentVersion
       } });
@@ -107,7 +108,7 @@ export class EndpointService {
       if (touched.count !== 1) throw new EndpointError(401, 'Revoked credential');
       const records = body.events.map(e => ({ ...e, occurredAt: new Date(e.occurredAt), companyId: d.companyId,
         // Device-wide observations intentionally have no employee attribution.
-        userId: /^(PROCESS_|APPLICATION_|SESSION_)/.test(e.type) && d.mappedIdentity && e.metadata.identity === d.mappedIdentity ? d.userId : null }));
+        userId: (/^(PROCESS_|APPLICATION_|SESSION_)/.test(e.type) || e.type==='FILE_CHANGE') && d.mappedIdentity && e.metadata.identity === d.mappedIdentity ? d.userId : null }));
       await tx.endpointEvent.createMany({ data: records, skipDuplicates: true });
       return { acceptedEventIds: body.events.map(e => e.eventId), companyId: d.companyId, userId: d.userId, deviceId: d.id };
     });

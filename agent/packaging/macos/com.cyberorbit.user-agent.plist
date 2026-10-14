@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reference only. src/macos-user.js renders escaped absolute account paths.
+     Do not load this template directly. -->
+<plist version="1.0"><dict>
+<key>Label</key><string>com.cyberorbit.user-agent</string>
+<key>LimitLoadToSessionType</key><string>Aqua</string>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+<key>ThrottleInterval</key><integer>30</integer>
+</dict></plist>

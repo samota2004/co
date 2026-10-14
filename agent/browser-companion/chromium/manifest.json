@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "CYBERORBIT Browser Privacy Companion",
+  "version": "1.0.0",
+  "description": "Confirms active normal-window titles for locally approved CYBERORBIT monitoring. No private-window access or page contents.",
+  "permissions": ["tabs", "nativeMessaging", "alarms"],
+  "incognito": "not_allowed",
+  "background": {"service_worker": "background.js"}
+}

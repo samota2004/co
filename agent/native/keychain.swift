@@ -7,13 +7,22 @@ var query: [String:Any] = [kSecClass as String:kSecClassGenericPassword,
   kSecAttrService as String:"CYBERORBIT endpoint", kSecAttrAccount as String:r["account"]!]
 // LaunchDaemon credentials belong in the System keychain, not an employee's
 // locked login keychain. Root service only; no interactive unlock fallback.
-guard getuid() == 0 else { exit(1) }
-SecKeychainSetUserInteractionAllowed(false)
+let rootMode = getuid() == 0
+SecKeychainSetUserInteractionAllowed(!rootMode)
 var systemKeychain: SecKeychain?
-guard SecKeychainOpen("/Library/Keychains/System.keychain", &systemKeychain) == errSecSuccess,
+let opened = rootMode ? SecKeychainOpen("/Library/Keychains/System.keychain", &systemKeychain) : SecKeychainCopyDefault(&systemKeychain)
+guard opened == errSecSuccess,
       let keychain = systemKeychain else { exit(1) }
 query[kSecMatchSearchList as String] = [keychain]
-if r["action"] == "set" {
+if r["action"] == "exists" {
+  var found:CFTypeRef?
+  let status=SecItemCopyMatching(query as CFDictionary,&found)
+  guard status == errSecSuccess || status == errSecItemNotFound else {exit(1)}
+  print(status == errSecSuccess ? "true" : "false")
+} else if r["action"] == "delete" {
+  let status = SecItemDelete(query as CFDictionary)
+  guard status == errSecSuccess || status == errSecItemNotFound else { exit(1) }
+} else if r["action"] == "set" {
   let value = r["value"]!.data(using:.utf8)!
   let updated = SecItemUpdate(query as CFDictionary, [kSecValueData as String:value] as CFDictionary)
   if updated == errSecSuccess { exit(0) }
@@ -27,7 +36,7 @@ if r["action"] == "set" {
   var q = query; q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
   var result:CFTypeRef?
   var status = SecItemCopyMatching(q as CFDictionary,&result)
-  if status == errSecItemNotFound {
+  if status == errSecItemNotFound && rootMode {
     // Preserve readability of existing root-keychain enrollments for migration.
     q.removeValue(forKey:kSecMatchSearchList as String)
     status = SecItemCopyMatching(q as CFDictionary,&result)

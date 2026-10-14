@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import {setTimeout as pause} from 'node:timers/promises';
+import {ownedPath} from './macos-user.js';
 export async function renameDurably(source,target){
   // Windows antivirus/OneDrive can briefly hold a file after close. Retry the
   // atomic rename; never unlink its destination or discard a valid ciphertext.
@@ -11,11 +12,11 @@ export async function renameDurably(source,target){
   }
 }
 export class EncryptedQueue {
-  constructor(directory, key, { maxBytes = 50*1024*1024, maxEvents = 50000, retentionMs = 7*86400000 } = {}) {
+  constructor(directory, key, { maxBytes = 50*1024*1024, maxEvents = 50000, retentionMs = 7*86400000, uid=null } = {}) {
     this.directory = directory; this.key = Buffer.from(key,'base64');
     if (this.key.length !== 32) throw new Error('Invalid queue key');
     this.maxBytes = maxBytes; this.maxEvents = maxEvents; this.retentionMs = retentionMs;
-    this.entries = []; this.dropped = 0; this.serial = Promise.resolve();
+    this.entries = []; this.dropped = 0; this.serial = Promise.resolve();this.uid=uid;
   }
   encrypt(value) {
     const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm',this.key,iv);
@@ -30,11 +31,19 @@ export class EncryptedQueue {
   }
   run(fn) { const result = this.serial.then(fn); this.serial = result.catch(() => {}); return result; }
   async atomic(file, data) {
+    if(this.uid!==null) {
+      await ownedPath(this.directory,this.uid,{directory:true});
+      for(const target of [file,`${file}.tmp`])try{await ownedPath(target,this.uid);}catch(e){if(e.code!=='ENOENT')throw e;}
+    }
     await fs.writeFile(`${file}.tmp`,data,{mode:0o600}); const h = await fs.open(`${file}.tmp`,'r+'); try{await h.sync();}finally{await h.close();} await renameDurably(`${file}.tmp`,file);
     if(process.platform!=='win32') {const directory=await fs.open(this.directory,'r');try{await directory.sync();}finally{await directory.close();}}
   }
   async init() {
     await fs.mkdir(this.directory,{recursive:true,mode:0o700});
+    if(this.uid!==null) {
+      await ownedPath(this.directory,this.uid,{directory:true});
+      for(const file of await fs.readdir(this.directory))await ownedPath(path.join(this.directory,file),this.uid);
+    }
     // Recover completed encrypted writes interrupted just before rename.
     for (const file of (await fs.readdir(this.directory)).filter(f=>f.endsWith('.tmp'))) {
       const target=file.slice(0,-4), data=await fs.readFile(path.join(this.directory,file));
@@ -60,6 +69,7 @@ export class EncryptedQueue {
     }
   }
   append(event) { return this.run(async () => {
+    if(this.entries.some(e=>e.event.eventId===event.eventId))return;
     const data = this.encrypt(event), file = `${Date.now().toString().padStart(16,'0')}-${event.eventId}.event`;
     await this.atomic(path.join(this.directory,file),data); this.entries.push({file,bytes:data.length,event});
     await this.trim(); await this.stats();
