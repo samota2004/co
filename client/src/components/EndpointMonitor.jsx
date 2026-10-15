@@ -1,6 +1,26 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { requestApi } from '../services/api.js';
 const request = (path,method='GET',body) => requestApi(`/api/endpoint${path}`, { method, body });
+const isDeviceUuid = value => typeof value==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+function DeviceUuid({deviceId}) {
+  const [copyState,setCopyState]=useState('');
+  const copy=async()=>{
+    setCopyState('copying');
+    try {
+      await navigator.clipboard.writeText(deviceId);
+      setCopyState('copied');
+    } catch {setCopyState('failed');}
+  };
+  if(!isDeviceUuid(deviceId))return <p role="status">Assigned device UUID unavailable. Refresh the device list.</p>;
+  return <div className="space-y-1">
+    <div className="flex flex-wrap items-center gap-3 text-sm">
+      <span>Assigned device UUID: <code aria-label="Assigned device UUID" className="break-all select-all">{deviceId}</code></span>
+      <button type="button" disabled={copyState==='copying'} onClick={copy} className="text-cyan-300 disabled:opacity-50">{copyState==='copied'?'Copied UUID':'Copy Device UUID'}</button>
+    </div>
+    <p className="text-xs text-slate-400">Enter this UUID at the macOS installer's “Assigned Mac device UUID” prompt. Enter the enrollment token separately at its hidden token prompt.</p>
+    <p role="status" className={copyState==='failed'?'text-sm text-amber-200':'text-sm text-emerald-300'}>{copyState==='failed'?'Clipboard unavailable. Select and copy the displayed device UUID manually.':copyState==='copied'?'Device UUID copied.':''}</p>
+  </div>;
+}
 export const formatEndpointEvent = e => ({...e, timestamp:e.occurredAt,eventType:e.type});
 const applicationKey = name => typeof name==='string'?name.toLowerCase():'';
 const applicationLabel = name => ({chrome:'Chrome',brave:'Brave',msedge:'Microsoft Edge',firefox:'Mozilla Firefox',notepad:'Notepad',code:'Visual Studio Code',powershell:'PowerShell',windowsterminal:'Windows Terminal'})[applicationKey(name)] || name || 'Unknown application';
@@ -78,7 +98,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
     try{
       const {deviceId,...fields}=assignment;
       const result=await request('/assign','POST',{...fields,name:fields.name.trim(),...(deviceId?{deviceId}:{}),issueEnrollmentToken:false});
-      if(typeof result.deviceId!=='string' || result.userId!==assignment.userId)throw new Error('The backend returned an invalid assignment confirmation. Refresh to check the saved device.');
+      if(!isDeviceUuid(result.deviceId) || result.userId!==assignment.userId)throw new Error('The backend returned an invalid assignment confirmation. Refresh to check the saved device.');
       setSavedDevice({id:result.deviceId,userId:result.userId,name:result.name,platform:assignment.platform,mappedIdentity:assignment.mappedIdentity});
       setAssignment(current=>({...current,deviceId:result.deviceId}));
       setNotice(`Assigned ${result.name} to ${data.employees.find(u=>u.id===result.userId).name}.`);
@@ -93,7 +113,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
     setPending('token');setToken(null);setCopied(false);
     try{
       const result=await request(`/${encodeURIComponent(selectedDevice.id)}/enrollment-token`,'POST',{});
-      if(result.deviceId!==selectedDevice.id || !/^[A-Za-z0-9_-]{43}$/.test(result.enrollmentToken || '') || !Number.isFinite(Date.parse(result.expiresAt))) throw new Error('The backend returned an invalid enrollment token.');
+      if(!isDeviceUuid(result.deviceId) || result.deviceId!==selectedDevice.id || !/^[A-Za-z0-9_-]{43}$/.test(result.enrollmentToken || '') || !Number.isFinite(Date.parse(result.expiresAt))) throw new Error('The backend returned an invalid enrollment token.');
       setToken(result);setNotice('Enrollment token issued. Copy it now; it cannot be retrieved later.');
     }catch(err){setError(err.message);}finally{setPending('');}
   };
@@ -120,13 +140,14 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
       {!refreshing&&!refreshError&&!data.employees.length&&<p role="status" className="w-full text-sm text-amber-200">No active employees in your company. Add or activate an employee in Employee Management, then Refresh.</p>}
       <p className="w-full text-sm text-slate-400">Verify the employee's OS identity on the laptop before mapping it. Without a mapping, observations remain unattributed.</p>
     </form>}
-    {token&&<div className="rounded border border-amber-500/30 p-3"><p>Single-use token; expires {new Date(token.expiresAt).toLocaleString()}. Enter it at the laptop installer prompt. Issuing another token invalidates the previous one.</p><code aria-label="Enrollment token" className="break-all select-all">{token.enrollmentToken}</code><button type="button" className="ml-4 text-cyan-300" onClick={async()=>{try{await navigator.clipboard.writeText(token.enrollmentToken);setCopied(true);}catch{setError('Clipboard copy failed. Select and copy the displayed token.');}}}>{copied?'Copied':'Copy token'}</button><button type="button" className="ml-4 text-cyan-300" onClick={()=>{setToken(null);setCopied(false);}}>Dismiss token</button></div>}
+    {administrator&&selectedDevice&&<div aria-label="Selected device assignment" className="rounded border border-cyan-300/25 p-3 space-y-2"><p className="font-medium">Saved device: {selectedDevice.name}</p><DeviceUuid key={selectedDevice.id} deviceId={selectedDevice.id}/></div>}
+    {token&&<div aria-label="Enrollment details" className="rounded border border-amber-500/30 p-3 space-y-3"><DeviceUuid key={token.deviceId} deviceId={token.deviceId}/><p>Single-use enrollment token; expires {new Date(token.expiresAt).toLocaleString()}. Enter this at the hidden enrollment-token prompt after the device UUID. Issuing another token invalidates the previous one.</p><div><code aria-label="Enrollment token" className="break-all select-all">{token.enrollmentToken}</code><button type="button" className="ml-4 text-cyan-300" onClick={async()=>{try{await navigator.clipboard.writeText(token.enrollmentToken);setCopied(true);}catch{setError('Clipboard copy failed. Select and copy the displayed token.');}}}>{copied?'Copied':'Copy token'}</button><button type="button" className="ml-4 text-cyan-300" onClick={()=>{setToken(null);setCopied(false);}}>Dismiss token</button></div></div>}
     {refreshing&&<p className="text-slate-400">Loading devices…</p>}
     {!refreshing&&!refreshError&&!data.devices.length&&<p className="text-slate-400">No laptops assigned.</p>}
     {data.devices.map(d=><article key={d.id} className="rounded border border-white/10 p-3 space-y-2">
       <p><strong>{d.name}</strong> · {d.user.name} · {d.connectionStatus}</p>
       <p className="text-sm text-slate-300">{d.platform} · agent {d.agentVersion || 'not enrolled'} · last seen {d.lastSeen?new Date(d.lastSeen).toLocaleString():'never'} · OS mapping {d.mappedIdentity || 'unverified'}</p>
-      <p className="text-xs text-slate-400 select-all">Assigned device ID: {d.id}</p><p className="text-sm">Queue {d.health?.queueEvents ?? 'unknown'} events / {d.health?.queueBytes ?? 'unknown'} bytes · dropped {d.health?.droppedEvents ?? 'unknown'} · {d.health?.paused?'paused':'monitoring configuration active'}</p>
+      <DeviceUuid deviceId={d.id}/><p className="text-sm">Queue {d.health?.queueEvents ?? 'unknown'} events / {d.health?.queueBytes ?? 'unknown'} bytes · dropped {d.health?.droppedEvents ?? 'unknown'} · {d.health?.paused?'paused':'monitoring configuration active'}</p>
       <p className="text-sm text-slate-400">{Object.entries(d.health?.collectors || {}).map(([k,v])=>`${k}: ${v}`).join(' · ') || 'Collector health not yet reported'}</p>
       <p className="text-sm">Existing pipeline risk {d.user.riskScore} · trust {d.user.trustScore} · {d.user.riskLevel}</p>
       <p className="text-sm text-slate-300">OS sign-in control: {d.health?.collectors?.accountControl || d.health?.collectors?.windowsAccount || 'not enabled / not reported'}. Last report: {d.lastSeen?new Date(d.lastSeen).toLocaleString():'never'}. Offline reports are not current confirmation.</p>

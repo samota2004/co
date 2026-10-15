@@ -11,7 +11,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "agent:test": "node --test --test-concurrency=1 agent/test/*.test.js",
-    "test:devices": "node --test server/test/device-buttons.test.js server/test/device-buttons.browser.test.js",
+    "test:devices": "node --test server/test/device-buttons.test.js server/test/device-buttons.browser.test.js server/test/device-uuid.browser.test.js",
     "test:usage": "node --test server/test/application-usage.test.js server/test/device-buttons.browser.test.js",
     "test:startup": "node --test server/test/server-startup.test.js",
     "test:enrollment": "node --test agent/test/enrollment.test.js agent/test/windows-enrollment-input.test.js server/test/enrollment.test.js",
