@@ -34,7 +34,7 @@ export async function prepare(args=[]) {
   for(const name of ['src','shared','native','packaging','browser-companion'])await fs.cp(path.join(agent,name),path.join(root,'agent',name),{recursive:true});
   await fs.copyFile(path.join(agent,'package.json'),path.join(root,'agent/package.json'));
   await fs.mkdir(path.join(root,'agent/test'));
-  for(const name of ['macos-user.test.js','macos-runtime.test.js','macos-kit.test.js'])await fs.copyFile(path.join(agent,'test',name),path.join(root,'agent/test',name));
+  for(const name of ['macos-user.test.js','macos-runtime.test.js','macos-kit.test.js','desktop-usage.test.js'])await fs.copyFile(path.join(agent,'test',name),path.join(root,'agent/test',name));
   for(const browser of ['chromium','firefox'])await fs.copyFile(path.join(agent,'browser-companion/background.js'),path.join(root,'agent/browser-companion',browser,'background.js'));
   await fs.copyFile(path.join(packaging,'Build-Mac-Install-Kit.command'),path.join(root,'Build-Mac-Install-Kit.command'));
   await fs.copyFile(path.join(packaging,'BUILD-README.txt'),path.join(root,'README.txt'));

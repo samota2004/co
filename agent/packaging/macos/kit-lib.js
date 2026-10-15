@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {deflateRawSync} from 'node:zlib';
 export const architectures=['arm64','x64'];
-export const commands=['Install-CYBERORBIT.command','Uninstall-CYBERORBIT.command','Check-CYBERORBIT.command','Show-Employee-Identity.command','Enable-Browser-Titles.command'];
+export const commands=['Install-CYBERORBIT.command','Update-CYBERORBIT.command','Diagnose-Application-Usage.command','Uninstall-CYBERORBIT.command','Check-CYBERORBIT.command','Show-Employee-Identity.command','Enable-Browser-Titles.command'];
 export const helpers=['keychain','macos-desktop','macos-lock'];
 export const sha256=data=>createHash('sha256').update(data).digest('hex');
 export function safeRelative(value) {

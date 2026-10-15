@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {inflateRawSync} from 'node:zlib';
 import {architectures,commands,helpers,assertMachO,safeRelative,writeInventory,verifyKit,createZip} from '../packaging/macos/kit-lib.js';
+import {updatePaths} from '../packaging/macos/update-user.js';
 // Synthetic headers test package rejection logic only, never native functionality.
 function syntheticMachO(arch) {const b=Buffer.alloc(32);b.writeUInt32LE(0xfeedfacf);b.writeUInt32LE(arch==='arm64'?0x0100000c:0x01000007,4);b.writeUInt32LE(2,12);return b;}
 async function fixture(t) {
@@ -26,6 +27,13 @@ test('Mac package rejects Windows/ELF/source binaries, wrong CPU and unsafe path
   assert.throws(()=>assertMachO(syntheticMachO('x64'),'arm64'));
   for(const bytes of [Buffer.from('MZ Windows executable'),Buffer.from('import Foundation'),Buffer.from('\x7fELF')])assert.throws(()=>assertMachO(bytes,'arm64'));
   for(const file of ['../escape','/absolute','a/../escape','C:/escape','a\\b','a\nb'])assert.throws(()=>safeRelative(file));
+});
+test('user update paths stay beside app without targeting config, queue or enrollment state',()=>{
+  const root=path.resolve('fixture-user','Library','Application Support','CYBERORBIT');
+  const paths=updatePaths({root},'12345678-1234-1234-1234-123456789abc');
+  for(const target of Object.values(paths)){assert.equal(path.dirname(target),root);assert.ok(!target.endsWith('config.json'));assert.ok(!target.endsWith('data'));}
+  assert.throws(()=>updatePaths({root},'../data'));
+  assert.ok(commands.includes('Update-CYBERORBIT.command'));assert.ok(commands.includes('Diagnose-Application-Usage.command'));
 });
 test('kit verification requires both complete architecture payloads and detects changed/missing/unlisted files',async t=>{
   const {root,write}=await fixture(t);await writeInventory(root);assert.equal((await verifyKit(root,'arm64')).buildComplete,true);

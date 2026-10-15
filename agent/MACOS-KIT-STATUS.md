@@ -1,4 +1,31 @@
-# Current macOS kit status — 14 October 2026
+# Current macOS kit status
+
+## 15 October 2026 — application-usage update prepared
+
+Current artifact:
+`C:\Users\priya\OneDrive\Desktop\capstone\agent\dist\CYBERORBIT-macOS-Build-Kit.zip`
+
+SHA-256: `c66500fea0c7ea7c42099ad62395f6bba9a046d98ce9b4bb3294f8314c2ca1cf`.
+The refreshed build kit includes desktop pipeline revision 2, a no-enrollment
+`Update-CYBERORBIT.command`, and `Diagnose-Application-Usage.command`.
+
+The final combined agent/macOS-contract test run passed 78 tests with six skips
+(five Mac-native tests and Unix-only ownership testing) and zero failures.
+JavaScript/PowerShell checks covered 65/15 files; 14 macOS shell scripts parsed.
+The signed IPC/aggregation/queue/HTTP/PostgreSQL/dashboard integration used
+simulated native samples; it does not establish real Mac runtime success.
+
+Extract this new build kit into a fresh folder on your Mac and run
+`Build-Mac-Install-Kit.command`. Extract the resulting
+`output/CYBERORBIT-macOS-Install-Kit.zip`; run `Update-CYBERORBIT.command` in the
+already-enrolled employee account. Credentials/config/assignment/queue and the
+installed Keychain helper are preserved. Do not uninstall or re-enroll.
+
+The reported application-usage incident remains **pending real Mac/dashboard
+verification**. Follow [the exact update and verification guide](packaging/macos/APPLICATION-USAGE-UPDATE.md)
+and return the diagnostic output plus a fresh usage record from the dashboard.
+
+## Historical snapshot — 14 October 2026
 
 The resumed audit preserved existing application/UI edits and inspected the
 current packaging, agent, dashboard contract, runtime archives and generated ZIP.

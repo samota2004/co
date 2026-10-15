@@ -1,5 +1,25 @@
 # macOS employee-agent verification — 14 October 2026
 
+## 15 October: application-usage incident update
+
+Desktop pipeline revision 2 is implemented, with explicit locked/unlocked/unknown
+states, positive own-console/active-app/UID validation, AppKit application event
+loop initialization, signed control bootstrap, observable native-control receipt,
+serialized usage aggregation/reset/flush and local queue/upload diagnostics.
+See [the exact update and runtime procedure](packaging/macos/APPLICATION-USAGE-UPDATE.md).
+The updater preserves existing enrollment/config/queue and the installed
+Keychain helper; it never requests a new token.
+
+Portable regressions cover switches, idle/lock/stale gaps, threshold/shutdown
+flush, unknown-state privacy, control receipt and legacy Windows/Linux samples.
+The real local HTTP/PostgreSQL test now passes simulated native samples through
+signed IPC, the production aggregator and encrypted uploader, and verifies an
+attributed 30-second usage event in the actual dashboard API response.
+This is explicitly **not real macOS observation evidence**.
+Five native Mac tests (including enabled AppKit foreground observation) skip on
+this Windows machine. The incident remains pending until the affected Mac
+produces fresh dashboard `APPLICATION_USAGE` events and its lock/idle tests pass.
+
 Implementation is in the repository. **Production acceptance is not complete**:
 this workspace runs Windows and provides no macOS runtime or Swift/macOS SDK.
 No production enrollment token was requested or consumed, and nothing was

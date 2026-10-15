@@ -22,6 +22,11 @@ ONE MAC BUILD
    acceptance gate. The build does not claim those browser tests passed.
 6. Distribute ONLY that output employee ZIP, plus its checksum, to employees.
    They extract it and double-click Install-CYBERORBIT.command.
+   Already-enrolled employees double-click Update-CYBERORBIT.command instead.
+   The update preserves enrollment/config/queue and keeps the installed
+   Keychain helper unchanged. No token is requested for a code update.
+   Use Diagnose-Application-Usage.command to verify controls/foreground/queue
+   stages, then confirm actual new APPLICATION_USAGE events in the dashboard.
 
 The builder can cross-compile both architectures on one supported Mac. Native
 tests execute only the build Mac's architecture. Runtime acceptance on the other

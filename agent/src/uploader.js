@@ -51,6 +51,8 @@ export class Uploader {
       const r = await this.transport.post('ingest',{events});
       if (!Array.isArray(r.acceptedEventIds) || r.acceptedEventIds.some(id=>!events.some(e=>e.eventId===id))) throw new Error('Invalid durable acknowledgment');
       await this.queue.acknowledge(r.acceptedEventIds); this.failures = 0; this.nextAttempt = now + 1000;
+      const acceptedUsage=events.filter(e=>e.type==='APPLICATION_USAGE' && r.acceptedEventIds.includes(e.eventId)).at(-1);
+      if(acceptedUsage)this.lastAcceptedUsage={eventId:acceptedUsage.eventId,occurredAt:acceptedUsage.occurredAt,acknowledgedAt:new Date().toISOString()};
     } catch(e) {
       if (e.status === 401 || e.status === 403) this.revoked = true;
       this.failures++; this.nextAttempt = now + 1000 + Math.random()*Math.min(300000,1000*2**Math.min(this.failures,12));

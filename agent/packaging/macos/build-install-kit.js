@@ -38,14 +38,14 @@ export async function build(args) {
     for(const file of ['src/cli.js','src/macos-user-install.js','src/service.js'])await exec(process.execPath,['--check',path.join(root,file)],{timeout:5000});
   }
   console.log('Running native and privacy tests on this build Mac (the other architecture requires its own runtime acceptance).');
-  const tests=await exec(process.execPath,['--test',path.join(agent,'test/macos-user.test.js'),path.join(agent,'test/macos-runtime.test.js'),path.join(agent,'test/macos-kit.test.js')],{timeout:300000,maxBuffer:1024*1024});console.log(tests.stdout);
+  const tests=await exec(process.execPath,['--test',...['macos-user.test.js','macos-runtime.test.js','macos-kit.test.js','desktop-usage.test.js'].map(name=>path.join(agent,'test',name))],{timeout:300000,maxBuffer:1024*1024});console.log(tests.stdout);
   await fs.mkdir(path.join(kit,'lib'));
   for(const name of ['kit-lib.js','verify-kit.js','employee-common.sh'])await fs.copyFile(path.join(packaging,name),path.join(kit,'lib',name));
   for(const name of commands) {await fs.copyFile(path.join(packaging,name),path.join(kit,name));await fs.chmod(path.join(kit,name),0o755);}
   await fs.writeFile(path.join(kit,'package.json'),JSON.stringify({private:true,type:'module'}));
   await fs.copyFile(path.join(packaging,'EMPLOYEE-README.txt'),path.join(kit,'README.txt'));
   const pkg=JSON.parse(await fs.readFile(path.join(agent,'package.json'),'utf8'));
-  await fs.writeFile(path.join(kit,'kit-manifest.json'),JSON.stringify({format:1,kind:'employee-install',platform:'darwin',buildComplete:true,agentVersion:pkg.version,nodeVersion:runtime.version,minimumMacOS:runtime.minimumMacOS,architectures,builtAt:new Date().toISOString(),nativeTestsRunOn:process.arch,browserTitlesVerified:false},null,2)+'\n');
+  await fs.writeFile(path.join(kit,'kit-manifest.json'),JSON.stringify({format:1,kind:'employee-install',platform:'darwin',buildComplete:true,agentVersion:pkg.version,desktopPipelineRevision:2,nodeVersion:runtime.version,minimumMacOS:runtime.minimumMacOS,architectures,builtAt:new Date().toISOString(),nativeTestsRunOn:process.arch,browserTitlesVerified:false},null,2)+'\n');
   await writeInventory(kit);await verifyKit(kit,process.arch);
   const result=await createZip(kit,path.join(output,'CYBERORBIT-macOS-Install-Kit.zip'));
   console.log(JSON.stringify(result,null,2));return result;

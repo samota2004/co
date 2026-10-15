@@ -1,5 +1,12 @@
 CYBERORBIT macOS Employee Install Kit
 
+EXISTING ENROLLED EMPLOYEES: double-click Update-CYBERORBIT.command instead of
+installing/enrolling again. It replaces code and restarts the current user job,
+preserving config, offline queue, credential and installed Keychain helper.
+After updating, use an app for 45 seconds and open
+Diagnose-Application-Usage.command. Verify fresh APPLICATION_USAGE records for
+this device/employee in the dashboard; heartbeat alone is not usage verification.
+
 This folder supports Apple Silicon and Intel Macs running macOS 13 or later.
 Your administrator must validate the kit on supported Macs before rollout.
 No Node installation, Xcode, sudo, or source editing is needed by employees.

@@ -130,6 +130,10 @@ export async function main(args) {
     await enroll(config,await hiddenToken());console.log('Enrollment stored in the user Keychain.');await start(context,config);
   } else if(command==='start') await start(context,config);
   else if(command==='permissions')console.log((await exec(path.join(context.root,'app/native/macos-desktop'),['--request-accessibility'],{timeout:10000})).stdout.trim());
+  else if(command==='desktop-status') {
+    console.log(await fs.readFile(path.join(config.dataDirectory,'desktop-status.json'),'utf8'));
+    console.log('This is local diagnostic evidence. Verify lastAcceptedUsage.eventId in the dashboard; a heartbeat alone does not verify application usage.');
+  }
   else if(command==='status') {
     const result=await exec('/bin/launchctl',['print',`gui/${context.uid}/${label}`],{timeout:5000});
     console.log(result.stdout);

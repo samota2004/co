@@ -11,9 +11,12 @@ import {expireMacBrowserTitles} from '../services/endpoint-retention.js';
 import {Transport,Uploader} from '../../agent/src/uploader.js';
 import {EncryptedQueue} from '../../agent/src/queue.js';
 import {normalize} from '../../agent/src/normalizer.js';
+import {DesktopUsage} from '../../agent/src/desktop-usage.js';
+import {desktopControls,nativeDesktopControl} from '../../agent/src/desktop-control.js';
+import {startIpc,sendSample} from '../../agent/src/ipc.js';
 
 test('macOS contract over real HTTP/PostgreSQL: assignment guards, heartbeat, offline replay, attribution, retention and revocation', {skip:!process.env.DATABASE_URL,timeout:90000},async()=>{
-  const f=await deviceFixture();let server,sse,directory;
+  const f=await deviceFixture();let server,sse,directory,ipc;
   try {
     const {default:router}=await import('../routes/endpoint.js');sse=(await import('../services/sse.js')).sseManager;
     const app=express();app.use(express.json());app.use('/api/endpoint',router);
@@ -44,6 +47,24 @@ test('macOS contract over real HTTP/PostgreSQL: assignment guards, heartbeat, of
     const dashboard=await fetch(`${config.serverUrl}/api/endpoint/dashboard?deviceId=${a.deviceId}`,{headers:{Authorization:`Bearer ${generateJwtToken(f.admin,true)}`}});
     assert.equal(dashboard.status,200);const view=await dashboard.json();
     assert.equal(view.devices[0].connectionStatus,'CONNECTED');assert.equal(view.events.length,5);assert.equal(view.devices[0].agentVersion,'1.2.0');
+    // Simulated native samples through the real signed IPC -> shared usage
+    // aggregator -> encrypted queue -> HTTP -> PostgreSQL -> dashboard route.
+    // These fixtures are not claimed as macOS runtime verification.
+    let clock=Date.now();const helperKey=randomBytes(32).toString('base64');
+    const usage=new DesktopUsage(async(type,metadata)=>q.append(normalize(a.deviceId,type,metadata)),{now:()=>clock});
+    const usageConfig={identity,activeApplication:true,sessions:true,browserTitles:false};
+    ipc=await startIpc({helperKey,mappedIdentity:identity},s=>s.kind==='desktop-control'?undefined:usage.sample(s,usageConfig),{port:0,controls:()=>desktopControls({...usageConfig,paused:false})});
+    const channel={port:ipc.address().port},grant={key:helperKey,identity};
+    const control=await sendSample(grant,{kind:'desktop-control',identity},channel);assert.equal(nativeDesktopControl(control).activeApplication,true);
+    const observed={identity,sessionId:'desktop:724',pid:71,name:'TextEdit',appId:'com.apple.TextEdit',identitySource:'macos-bundle',idleMilliseconds:10,
+      sessionState:'unknown',consoleActive:true,foregroundOwned:true,activityEligible:true,controlFresh:true,controlActiveApplication:true};
+    for(let i=0;i<17;i++){clock+=2000;await sendSample(grant,observed,channel);}
+    const liveUploader=new Uploader(q,device);await liveUploader.tick();
+    assert.ok(liveUploader.lastAcceptedUsage?.eventId);
+    const usageDashboard=await fetch(`${config.serverUrl}/api/endpoint/dashboard?eventType=APPLICATION_USAGE&deviceId=${a.deviceId}`,{headers:{Authorization:`Bearer ${generateJwtToken(f.admin,true)}`}});
+    assert.equal(usageDashboard.status,200);const usageView=await usageDashboard.json();
+    assert.ok(usageView.events.some(e=>e.eventId===liveUploader.lastAcceptedUsage.eventId && e.metadata.name==='TextEdit' && e.metadata.durationSeconds===30 && e.userId===f.employee.id));
+    assert.equal(await f.prisma.endpointEvent.count({where:{deviceId:a.deviceId,type:'SESSION_UNLOCK'}}),0);
     await assert.rejects(service.dashboard(f.otherAdmin,undefined,undefined,a.deviceId),e=>e.status===404);
     await f.prisma.endpointEvent.updateMany({where:{deviceId:a.deviceId,type:'APPLICATION_USAGE'},data:{occurredAt:new Date(Date.now()-8*86400000)}});
     await expireMacBrowserTitles(f.prisma);
@@ -52,6 +73,7 @@ test('macOS contract over real HTTP/PostgreSQL: assignment guards, heartbeat, of
     await assert.rejects(device.post('heartbeat',{agentVersion:'1.2.0',health}),e=>e.status===401);
     await q.append(events[0]);const revoked=new Uploader(q,device);await revoked.tick();assert.equal(revoked.revoked,true);assert.equal(q.health().queueEvents,1);
   } finally {
+    if(ipc)await new Promise(resolve=>ipc.close(resolve));
     if(server)await new Promise(r=>server.close(r));sse?.close?.();if(sse?.heartbeatInterval)clearInterval(sse.heartbeatInterval);
     if(directory)await fs.rm(directory,{recursive:true,force:true});await f.close();
   }

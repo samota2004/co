@@ -58,7 +58,7 @@ test('real macOS desktop emits employee samples without unapproved titles and la
   const {directory,binary}=await compiled(t,'macos-desktop');
   const plist=path.join(directory,'agent.plist');await fs.writeFile(plist,launchAgent(userContext()));
   await execute('/usr/bin/plutil',['-lint',plist],{timeout:5000});
-  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe']});t.after(()=>child.kill());
+  const child=spawn(binary,['--diagnostic-lock',path.join(directory,'desktop.lock')],{stdio:['pipe','pipe','pipe']});t.after(()=>child.kill());
   child.stdin.write(JSON.stringify({browserTitles:false,proofs:[]})+'\n');
   const lines=readline.createInterface({input:child.stdout});
   const timer=setTimeout(()=>child.kill(),10000);t.after(()=>clearTimeout(timer));
@@ -68,4 +68,24 @@ test('real macOS desktop emits employee samples without unapproved titles and la
     assert.ok(sample.kind==='desktop-status'||Number.isFinite(sample.idleMilliseconds));return;
   }
   assert.fail('No desktop sample; a logged-in GUI session is required');
+});
+test('real macOS AppKit receives enable controls and resolves an own active foreground application',{skip:!mac,timeout:90000},async t=>{
+  const {binary,directory}=await compiled(t,'macos-desktop');
+  const child=spawn(binary,['--diagnostic-lock',path.join(directory,'desktop.lock')],{stdio:['pipe','pipe','pipe']});t.after(()=>child.kill());
+  child.stderr.resume();
+  const controls={activeApplication:true,browserTitles:false,proofs:[]};
+  child.stdin.write(JSON.stringify(controls)+'\n');
+  const timer=setTimeout(()=>child.kill(),12000);t.after(()=>clearTimeout(timer));
+  let last;
+  for await(const line of readline.createInterface({input:child.stdout})) {
+    last=JSON.parse(line);child.stdin.write(JSON.stringify(controls)+'\n');
+    if(!last.controlFresh || !last.controlActiveApplication)continue;
+    assert.equal(last.helperRevision,2);assert.equal(last.identity,`uid:${process.getuid()}`);assert.equal(last.browserTitle,undefined);
+    if(last.activityEligible && last.pid>0 && last.name && last.foregroundOwned && last.consoleActive) {
+      assert.ok(['unknown','unlocked'].includes(last.sessionState));
+      if(last.sessionState==='unknown')assert.equal(last.locked,undefined);
+      return;
+    }
+  }
+  assert.fail(`No enabled own foreground app in logged-in GUI session; status=${last?.foregroundStatus || 'no-sample'}, controls=${last?.controlActiveApplication===true}`);
 });
