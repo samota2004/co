@@ -1,5 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { requestApi } from '../services/api.js';
+import {EndpointCity} from './EndpointCity.jsx';
 const request = (path,method='GET',body) => requestApi(`/api/endpoint${path}`, { method, body });
 const isDeviceUuid = value => typeof value==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 function DeviceUuid({deviceId}) {
@@ -119,7 +120,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
   };
   const action=async(id,kind,body)=>{
     setPending(`${kind}:${id}`);setError('');setNotice('');
-    try{await request(`/${encodeURIComponent(id)}/${kind}`,kind==='config'?'PUT':'POST',body ?? {});setNotice(kind==='revoke'?'Device credential revoked.':'Collector configuration saved.');await refresh().catch(()=>{});}
+    try{await request(`/${encodeURIComponent(id)}/${kind}`,kind==='config'?'PUT':'POST',body ?? {});setNotice(kind==='revoke'?'Device credential revoked.':kind==='city-estimate'?'City estimate setting saved. Enabled devices update at their next heartbeat.':'Collector configuration saved.');await refresh().catch(()=>{});}
     catch(e){setError(e.message);}finally{setPending('');}
   };
   return <section className="rounded-2xl border border-cyan-300/25 bg-[#050A10] p-5 text-[#F4F7FA] space-y-4" aria-label="Installed endpoint agents" aria-busy={refreshing}>
@@ -149,6 +150,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
       <p className="text-sm text-slate-300">{d.platform} · agent {d.agentVersion || 'not enrolled'} · last seen {d.lastSeen?new Date(d.lastSeen).toLocaleString():'never'} · OS mapping {d.mappedIdentity || 'unverified'}</p>
       <DeviceUuid deviceId={d.id}/><p className="text-sm">Queue {d.health?.queueEvents ?? 'unknown'} events / {d.health?.queueBytes ?? 'unknown'} bytes · dropped {d.health?.droppedEvents ?? 'unknown'} · {d.health?.paused?'paused':'monitoring configuration active'}</p>
       <p className="text-sm text-slate-400">{Object.entries(d.health?.collectors || {}).map(([k,v])=>`${k}: ${v}`).join(' · ') || 'Collector health not yet reported'}</p>
+      <EndpointCity device={d} administrator={administrator} pending={Boolean(pending)} onChange={action}/>
       <p className="text-sm">Existing pipeline risk {d.user.riskScore} · trust {d.user.trustScore} · {d.user.riskLevel}</p>
       <p className="text-sm text-slate-300">OS sign-in control: {d.health?.collectors?.accountControl || d.health?.collectors?.windowsAccount || 'not enabled / not reported'}. Last report: {d.lastSeen?new Date(d.lastSeen).toLocaleString():'never'}. Offline reports are not current confirmation.</p>
       {administrator&&!d.revokedAt&&<fieldset disabled={Boolean(pending)} className="flex flex-wrap gap-4"><button type="button" className="text-red-300" onClick={()=>action(d.id,'revoke')}>Revoke credential</button><button type="button" className="text-cyan-300" onClick={()=>action(d.id,'config',{config:{...d.config,paused:!d.config.paused}})}>{d.config.paused?'Resume':'Pause'} collectors</button><button type="button" className="text-cyan-300" onClick={()=>{const text=window.prompt('Approved directory paths, one per line. Local approval is also required.',(d.config.approvedDirectories||[]).join('\n'));if(text!==null)action(d.id,'config',{config:{...d.config,approvedDirectories:text.split('\n').map(s=>s.trim()).filter(Boolean)}});}}>Approved directories</button><button type="button" className="text-cyan-300" onClick={()=>action(d.id,'config',{config:{...d.config,network:!d.config.network}})}>{d.config.network?'Disable':'Enable'} TCP metadata</button></fieldset>}

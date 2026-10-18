@@ -55,11 +55,12 @@ router.post('/ingest', handle(async req => {
   return { acceptedEventIds: result.acceptedEventIds };
 }));
 router.post('/heartbeat', handle(async req => {
-  const result = await service.heartbeat(credential(req), req.body);
+  const result = await service.heartbeat(credential(req), req.body,req.ip);
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
   return { config: result.config, accountControl: result.accountControl };
 }));
 router.get('/dashboard', requireAuth, handle(req => service.dashboard(req.user, req.query.userId, req.query.eventType, req.query.deviceId)));
 router.put('/:id/config', requireSecurityAdmin, handle(req => service.change(req.user, req.params.id, req.body)));
+router.post('/:id/city-estimate', requireSecurityAdmin, handle(req => service.changeCity(req.user, req.params.id, req.body)));
 router.post('/:id/revoke', requireSecurityAdmin, handle(req => service.change(req.user, req.params.id, {}, true)));
 export default router;

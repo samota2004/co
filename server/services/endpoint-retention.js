@@ -15,8 +15,13 @@ export function scheduleEndpointRetention(prisma) {
   let busy=false;
   const timer=setInterval(async()=>{
     if(busy)return;busy=true;
-    try{await expireMacBrowserTitles(prisma);}catch{console.error('macOS browser-title retention maintenance failed; check database availability.');}
+    try{await expireMacBrowserTitles(prisma);await expireCityEstimates(prisma);}catch{console.error('Endpoint retention maintenance failed; check database availability and migrations.');}
     finally{busy=false;}
   },60000);
   timer.unref();return ()=>clearInterval(timer);
+}
+export async function expireCityEstimates(prisma,now=new Date()) {
+  const cutoff=new Date(now.getTime()-86400000).toISOString();
+  return prisma.$executeRaw`UPDATE endpoint_devices SET "ipCity" = '{"status":"expired"}'::jsonb
+    WHERE "ipCity"->>'status' = 'available' AND "ipCity"->>'observedAt' < ${cutoff}`;
 }

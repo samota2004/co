@@ -229,6 +229,9 @@ model EndpointDevice {
   lastSeen       DateTime?
   agentVersion   String?
   health         Json?
+  ipCityEnabled  Boolean  @default(false)
+  ipCityGeneration Int    @default(0)
+  ipCity         Json?
   config         Json
   createdAt      DateTime @default(now())
   events         EndpointEvent[]
