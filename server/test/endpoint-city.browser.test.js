@@ -13,6 +13,7 @@ const cityPanel='document.querySelector(\'[aria-label="Estimated device city"]\'
 const health={queueEvents:0,queueBytes:0,droppedEvents:0,paused:false,helperLastSeen:null,collectors:{}};
 test('unchanged agents on all three platforms show estimated city, timestamp, stale/error states and immediate disable',{skip:!process.env.DATABASE_URL||!hasBrowser,timeout:90000},async()=>{
   const f=await deviceFixture();let server,b,profile,sse;const exceptions=[];
+  const oldProvider=process.env.IPAPI_PROVIDER;
   try {
     const service=new EndpointService(f.prisma,{lookup:async()=>({status:'available',source:'heartbeat-public-ip',provider:'ipapi.co',city:'Fixture Delhi',region:'Fixture Region',country:'India',countryCode:'IN',resolvedAt:new Date().toISOString()})});
     const {default:api}=await import('../routes/index.js');
@@ -25,6 +26,8 @@ test('unchanged agents on all three platforms show estimated city, timestamp, st
     await b.command('Runtime.enable');await b.command('Page.enable');
     await b.command('Page.addScriptToEvaluateOnNewDocument',{source:`localStorage.setItem('zero_trust_token',${JSON.stringify(generateJwtToken(f.admin,true))});localStorage.setItem('zero_trust_user',${JSON.stringify(JSON.stringify(f.admin))});Object.defineProperty(navigator,'geolocation',{configurable:true,get(){throw new Error('Browser geolocation must not be used for heartbeat city estimates');}});`});
     for(const [platform,identity] of [['darwin','uid:843'],['win32','S-1-5-21-1234-5678-9012-1007'],['linux','uid:1943']]) {
+      const provider=platform==='linux'?'ipapi.is':'ipapi.co';process.env.IPAPI_PROVIDER=provider;
+      service.locator={provider,lookup:async()=>({status:'available',source:'heartbeat-public-ip',provider,city:'Fixture Delhi',region:'Fixture Region',country:'India',countryCode:'IN',resolvedAt:new Date().toISOString()})};
       const a=await service.assign(f.admin,{userId:f.employee.id,name:`${platform} city fixture`,platform,mappedIdentity:identity});
       const e=await service.enroll({token:a.enrollmentToken,platform,agentVersion:'1.1.0'});
       await b.command('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/devices`});
@@ -33,6 +36,8 @@ test('unchanged agents on all three platforms show estimated city, timestamp, st
       await click('Enable city estimate');
       await waitUntil(b,`${cityPanel}?.textContent.includes('Waiting for the next authenticated laptop heartbeat')`,'old-agent heartbeat pending');
       assert.ok(await b.evaluate(`${cityPanel}.textContent.includes('no kit update')`));
+      assert.ok(await b.evaluate(`${cityPanel}.textContent.includes(${JSON.stringify('Configured provider: '+provider)})`));
+      assert.ok(await b.evaluate(`${cityPanel}.textContent.includes(${JSON.stringify('public IP is sent to '+provider)})`));
       await service.heartbeat(e.credential,{agentVersion:'1.1.0',health},'8.8.8.8');
       await b.evaluate("window.dispatchEvent(new Event('cyberorbit-endpoint-updated'))");
       await waitUntil(b,`${cityPanel}?.textContent.includes('Fixture Delhi') && ${cityPanel}.textContent.includes('Recent network estimate') && ${cityPanel}.textContent.includes('Last updated:')`,'estimated city and timestamp');
@@ -40,6 +45,10 @@ test('unchanged agents on all three platforms show estimated city, timestamp, st
       await f.prisma.endpointDevice.update({where:{id:a.deviceId},data:{lastSeen:old,ipCity:{...saved.ipCity,observedAt:old.toISOString()}}});
       await b.evaluate("window.dispatchEvent(new Event('cyberorbit-endpoint-updated'))");
       await waitUntil(b,`${cityPanel}?.textContent.includes('Last known estimate; not current')`,'stale estimate');
+      const reason=provider==='ipapi.is'?'invalid-api-key':'authentication-failed',message=provider==='ipapi.is'?'Location provider rejected the API key':'Location provider authentication failed';
+      await f.prisma.endpointDevice.update({where:{id:a.deviceId},data:{ipCity:{status:'lookup-unavailable',provider,reason,httpStatus:403}}});
+      await b.evaluate("window.dispatchEvent(new Event('cyberorbit-endpoint-updated'))");
+      await waitUntil(b,`${cityPanel}?.textContent.includes(${JSON.stringify(message)}) && ${cityPanel}.textContent.includes('HTTP 403') && !${cityPanel}.textContent.includes('Fixture Delhi')`,'actionable provider/key error without an obsolete city');
       await f.prisma.endpointDevice.update({where:{id:a.deviceId},data:{ipCity:{status:'provider-not-configured'}}});
       await b.evaluate("window.dispatchEvent(new Event('cyberorbit-endpoint-updated'))");
       await waitUntil(b,`${cityPanel}?.textContent.includes('Location API is not configured') && !${cityPanel}.textContent.includes('Fixture Delhi')`,'honest provider status');
@@ -48,5 +57,5 @@ test('unchanged agents on all three platforms show estimated city, timestamp, st
       assert.deepEqual((await f.prisma.endpointDevice.findUnique({where:{id:a.deviceId}})).ipCity,{status:'disabled'});
     }
     assert.deepEqual(exceptions,[]);
-  }finally{if(b)await b.close();if(sse)clearInterval(sse.heartbeatInterval);if(server)await new Promise(resolve=>server.close(resolve));if(profile)await fs.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:200});await f.close();}
+  }finally{if(oldProvider===undefined)delete process.env.IPAPI_PROVIDER;else process.env.IPAPI_PROVIDER=oldProvider;if(b)await b.close();if(sse)clearInterval(sse.heartbeatInterval);if(server)await new Promise(resolve=>server.close(resolve));if(profile)await fs.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:200});await f.close();}
 });

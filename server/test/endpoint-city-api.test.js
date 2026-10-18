@@ -63,6 +63,19 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
     r=await post(chain);assert.equal(r.status,200);assert.equal(providerCalls,1);
     let displayed=(await service.dashboard(f.admin)).devices.find(device=>device.id===a.deviceId);
     assert.equal(displayed.ipCity.city,'Render proxy fixture city');assert.equal(displayed.ipCity.stale,false);assert.equal(displayed.connectionStatus,'CONNECTED');
+    // The other supported provider has a different endpoint and nested response.
+    // Test the actual unchanged-agent HTTP route, not just the provider parser.
+    let isCalls=0;const isProvider=new CityLookup({env:{ENDPOINT_CITY_ENABLED:'true',IPAPI_PROVIDER:'ipapi.is',IPAPI_API_KEY:'synthetic-is-key',NODE_ENV:'production'},fetcher:async(url,options)=>{
+      isCalls++;assert.equal(url.href,'https://api.ipapi.is/');assert.equal(options.method,'POST');assert.equal(JSON.parse(options.body).q,'8.8.8.8');
+      return new Response(JSON.stringify({ip:'8.8.8.8',location:{city:'IPAPI IS fixture city',state:'Fixture State',country:'India',country_code:'IN',latitude:20,longitude:70}}));
+    }});
+    cityLookup.lookup=address=>isProvider.lookup(address);
+    r=await post(chain);assert.equal(r.status,200);assert.equal(isCalls,1);
+    const isService=new EndpointService(f.prisma,isProvider);
+    displayed=(await isService.dashboard(f.admin)).devices.find(device=>device.id===a.deviceId);
+    assert.equal(displayed.ipCityProvider,'ipapi.is');assert.equal(displayed.ipCity.provider,'ipapi.is');assert.equal(displayed.ipCity.city,'IPAPI IS fixture city');
+    assert.equal('latitude' in displayed.ipCity,false);assert.equal('longitude' in displayed.ipCity,false);
+    assert.equal((await saved()).credentialHash,original.credentialHash);assert.equal((await saved()).mappedIdentity,original.mappedIdentity);
     cityLookup.lookup=locator.lookup;
     const auth=(await import('../middleware/auth.js')).generateJwtToken;
     const control=(user,enabled)=>fetch(origin+`/api/endpoint/${a.deviceId}/city-estimate`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${auth(user,true)}`},body:JSON.stringify({enabled})});

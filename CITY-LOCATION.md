@@ -30,16 +30,25 @@ available when only the optional city schema is pending.
 
    ```text
    ENDPOINT_CITY_ENABLED=true
-   IPAPI_API_KEY=<your ipapi.co production key>
+   IPAPI_PROVIDER=ipapi.is
+   IPAPI_API_KEY=<your ipapi.is account key>
    ```
 
-   The production backend requires a key; do not put it in a Vite variable,
-   employee kit, URL in the dashboard or Git. The provider is **ipapi.co**, not
-   Google's Maps/Geolocation API. A Google key is not interchangeable.
-   [Provider API documentation](https://ipapi.co/api/) describes explicit-IP
-   requests. The provider's [current plan information](https://ipapi.co/#pricing)
-   reserves its free trial for development/testing. Select an appropriate plan
-   for a deployment; no subscription or charge is created by this code.
+   `IPAPI_PROVIDER` must match the key's issuer. Supported values are **ipapi.is**
+   and **ipapi.co**; the default remains `ipapi.co` for existing deployments.
+   For an existing ipapi.co production subscription, set `IPAPI_PROVIDER=ipapi.co`
+   and use that provider's key. Keys from the two services are not interchangeable.
+   Google Maps keys are not supported. No automatic provider fallback takes place.
+
+   The production backend requires a key. ipapi.is requires an account key in all
+   environments; the anonymous tier is not used. Keep keys out of Vite variables,
+   employee kits, dashboard URLs and Git. [ipapi.is API
+   documentation](https://ipapi.is/developers.html) documents explicit-IP requests
+   and a single-IP HTTPS POST, which this integration uses to keep the key out of
+   the request URL. Its [terms](https://ipapi.is/terms.html) describe the account
+   free tier and limits. [ipapi.co API documentation](https://ipapi.co/api/)
+   documents that provider's separate endpoint and response. No subscription,
+   account or charge is created by this code.
 
 3. Configure the backend's ingress proxy policy. For a **Render public web
    service**, after deploying the proxy-policy update, set:
@@ -106,11 +115,16 @@ stops lookup and hides/clears the saved estimate. Resume gets a fresh heartbeat.
   fields and are not sent in collector config to older agents.
 - Provider failure or optional location-write failure does not revoke an agent
   credential or roll back an accepted heartbeat. Application/queue sync continues.
-- Lookups use a fixed HTTPS host, explicit validated public IP, no redirects,
-  a two-second timeout, a 64 KiB response limit and a bounded in-memory cache.
+- Lookups use a fixed allowlisted HTTPS host for the explicitly selected provider,
+  an explicit validated public IP, no redirects, a five-second timeout, a 64 KiB
+  response limit and a bounded in-memory cache.
   Private, reserved and scoped addresses are excluded. Successful results are
   cached for five minutes; failures for one minute, maximum 512 cached IPs and
-  60 uncached lookups/minute per server process. Coalescing shares pending work.
+  60 uncached lookups/minute per server process. Authentication/refusal and quota
+  errors pause all lookups for that configuration for at least five minutes,
+  respecting a longer `Retry-After` up to 24 hours. A provider/key change clears
+  the prior cache/cooldown; delayed old results cannot overwrite the new cache.
+  Coalescing shares pending work. There is no retry through another provider.
 - A generation counter prevents delayed results overwriting newer heartbeats or
   restoring data after pause/resume, disable/re-enable or revocation. Frequent
   event uploads do not cancel an independent heartbeat location lookup.
@@ -168,6 +182,26 @@ Executed for the proxy update: **31 passed, zero failed/skipped**, including
 proxy-policy security, city unit/API/browser, pending migration compatibility,
 server startup/production serving, HTTP security, enrollment, application usage,
 macOS backend, agent core and Windows release checks. No kit files changed.
+
+### Connected device says "Location API unavailable"
+
+This is different from the public-IP/proxy error: a lookup was attempted but no
+usable provider response was obtained. One confirmed configuration problem was
+an **ipapi.is key used by the old ipapi.co-only integration**. After deploying
+the provider update, set `IPAPI_PROVIDER=ipapi.is` in Render's backend Environment,
+keep the corresponding key in `IPAPI_API_KEY`, and **Save, rebuild, and deploy**.
+Keep `TRUST_PROXY=render`, `ENDPOINT_CITY_ENABLED=true`, the device's city setting
+and its existing enrollment. Do not replace the database or employee kits.
+
+The card now shows the configured provider, the actual last-result provider if
+different, and actionable authentication/quota/timeout/network/response errors.
+`[endpoint-city-provider]` logs contain only the provider, safe status/reason and
+HTTP status, at most once per minute. They never contain the API key, query URL,
+employee IP, raw provider error/body or account details. A provider response for
+a different IP is discarded. Only city, state/region, country and timestamps
+are extracted from ipapi.is; coordinates, postcode and other returned fields
+are excluded. An actual city and fresh observation timestamp on the live
+dashboard are still required to confirm recovery.
 
 ## Verification in this workspace — 18 October 2026
 
