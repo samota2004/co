@@ -1,7 +1,8 @@
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { audit, userScope } from './security-common.js';
 import { DEFAULT_CONFIG, validateConfig, validateEvent, validateHealth, validateEnrollment } from '../../agent/shared/contract.js';
 import {cityLookup,cityView} from './endpoint-city.js';
+import {coreDeviceSelect,cityDeviceSelect,citySchemaReady,withCitySchema,invalidateCitySchema,isMissingCityColumn} from './endpoint-city-schema.js';
 export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
@@ -38,7 +39,7 @@ export class EndpointService {
     let device;
     if (deviceId) {
       device = await this.prisma.$transaction(async tx => {
-        const existing = await tx.endpointDevice.findFirst({ where: { id: deviceId, companyId: admin.companyId, user: userScope(admin) } });
+        const existing = await tx.endpointDevice.findFirst({ where: { id: deviceId, companyId: admin.companyId, user: userScope(admin) },select:coreDeviceSelect });
         if (!existing) throw new EndpointError(404, 'Device not found in company');
         if (existing.revokedAt || existing.enrolledAt) throw new EndpointError(409, 'An enrolled or revoked laptop cannot be reassigned. Revoke and create a new enrollment record.');
         if (existing.platform !== platform) throw new EndpointError(400, 'Selected device platform does not match');
@@ -47,7 +48,17 @@ export class EndpointService {
         return { ...existing, ...values };
       });
     } else {
-      device = await this.prisma.endpointDevice.create({ data: { companyId: admin.companyId, ...values } });
+      if(typeof this.prisma.$queryRaw==='function'&&!await citySchemaReady(this.prisma)) {
+        // Prisma also supplies client-side defaults in INSERT statements, even
+        // with a restricted select. Omit the optional columns completely while
+        // the additive migration is pending. Scope/employee validation above and
+        // the database FK constraints still apply; all values are parameters.
+        const id=randomUUID();
+        [device]=await this.prisma.$queryRaw`INSERT INTO endpoint_devices
+          (id,"companyId","userId",name,platform,"mappedIdentity",config,"enrollmentHash","enrollmentExpiresAt")
+          VALUES (${id},${admin.companyId},${values.userId},${values.name},${platform},${values.mappedIdentity},${JSON.stringify(values.config)}::jsonb,${values.enrollmentHash},${values.enrollmentExpiresAt})
+          RETURNING id,name`;
+      } else device = await this.prisma.endpointDevice.create({ data: { companyId: admin.companyId, ...values },select:coreDeviceSelect });
     }
     return { deviceId: device.id, userId: employee.id, name: device.name,
       ...(token ? { enrollmentToken: token, expiresAt } : {}) };
@@ -57,7 +68,7 @@ export class EndpointService {
     if (typeof deviceId !== 'string' || !/^[0-9a-f-]{36}$/i.test(deviceId)) throw new EndpointError(400, 'Select an assigned device');
     const token = randomBytes(32).toString('base64url'), expiresAt = new Date(Date.now() + 15 * 60000);
     return this.prisma.$transaction(async tx => {
-      const device = await tx.endpointDevice.findFirst({ where: { id: deviceId, companyId: admin.companyId, user: userScope(admin) }, include: { user: true } });
+      const device = await tx.endpointDevice.findFirst({ where: { id: deviceId, companyId: admin.companyId, user: userScope(admin) },select:{...coreDeviceSelect,user:true} });
       if (!device) throw new EndpointError(404, 'Device not found in company');
       if (device.revokedAt || device.enrolledAt) throw new EndpointError(409, 'Device is already enrolled or revoked; a new enrollment token cannot be issued.');
       if (!device.user || device.user.companyId !== admin.companyId || device.user.status !== 'ACTIVE' || !['EMPLOYEE','MANAGER'].includes(device.user.roleCode)) throw new EndpointError(409, 'Assign the device to an active employee in your company first.');
@@ -73,7 +84,7 @@ export class EndpointService {
     const secret = randomBytes(32).toString('base64url');
     return this.prisma.$transaction(async tx => {
       const tokenHash = hashSecret(body.token);
-      const device = await tx.endpointDevice.findFirst({ where: { enrollmentHash: tokenHash }, include: { user: true } });
+      const device = await tx.endpointDevice.findFirst({ where: { enrollmentHash: tokenHash },select:{...coreDeviceSelect,user:true} });
       // A consumed/replaced/revoked token hash is erased. Do not retain token
       // history or weaken single-use checks just to distinguish these cases.
       if (!device) throw new EndpointError(401, 'Enrollment token is invalid, replaced, already used or revoked. Ask an administrator for a fresh token for an unenrolled device.', 'ENROLLMENT_TOKEN_UNAVAILABLE');
@@ -92,9 +103,9 @@ export class EndpointService {
       return { deviceId: device.id, credential: secret, config: device.config, mappedIdentity: device.mappedIdentity };
     });
   }
-  async authenticate(tx, secret) {
+  async authenticate(tx, secret, cityAvailable=false) {
     if (typeof secret !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(secret)) throw new EndpointError(401, 'Device authentication required');
-    const d = await tx.endpointDevice.findFirst({ where: { credentialHash: hashSecret(secret), revokedAt: null }, include: { user: true } });
+    const d = await tx.endpointDevice.findFirst({ where: { credentialHash: hashSecret(secret), revokedAt: null },select:{...coreDeviceSelect,...(cityAvailable?cityDeviceSelect:{}),user:true} });
     if (!d || d.user.companyId !== d.companyId) throw new EndpointError(401, 'Invalid or revoked device credential');
     return d;
   }
@@ -117,8 +128,8 @@ export class EndpointService {
   async heartbeat(secret, body, address) {
     try { validateHealth(body.health); } catch (e) { throw new EndpointError(400, e.message); }
     if (typeof body.agentVersion !== 'string' || body.agentVersion.length > 40) throw new EndpointError(400, 'Invalid version');
-    const result=await this.prisma.$transaction(async tx => {
-      const d = await this.authenticate(tx, secret);
+    const result=await withCitySchema(this.prisma,cityAvailable=>this.prisma.$transaction(async tx => {
+      const d = await this.authenticate(tx, secret,cityAvailable);
       const observedAt=new Date();
       const changed = await tx.endpointDevice.updateMany({ where: { id: d.id, credentialHash: hashSecret(secret), revokedAt: null }, data: { lastSeen: observedAt, agentVersion: body.agentVersion, health: body.health,
         ...(d.ipCityEnabled?{ipCityGeneration:{increment:1}}:{}) } });
@@ -129,7 +140,7 @@ export class EndpointService {
       const eligible=['win32','linux','darwin'].includes(d.platform) && d.mappedIdentity && ['EMPLOYEE','MANAGER'].includes(d.user.roleCode);
       const action=eligible ? (d.user.status==='FROZEN'?'BLOCK':d.user.status==='ACTIVE'?'ALLOW':'HOLD') : 'HOLD';
       return { config: d.config, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:new Date().toISOString()}, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
-    });
+    }));
     const {cityDevice:d,generation,observedAt,...response}=result;
     // Optional lookup cannot roll back or fail an authenticated heartbeat.
     // Ingest may update lastSeen independently; a separate generation prevents
@@ -141,15 +152,16 @@ export class EndpointService {
         catch{estimate={status:'lookup-unavailable'};}
       }
       try{await this.prisma.endpointDevice.updateMany({where:{id:d.id,revokedAt:null,credentialHash:hashSecret(secret),ipCityEnabled:true,ipCityGeneration:generation,config:{equals:d.config}},data:{ipCity:estimate}});}
-      catch{console.warn('Endpoint city estimate could not be stored; authenticated heartbeat remains accepted.');}
+      catch(error){if(isMissingCityColumn(error))invalidateCitySchema(this.prisma);console.warn('Endpoint city estimate could not be stored; authenticated heartbeat remains accepted.');}
     }
     return response;
   }
   async changeCity(admin,id,body) {
     if(!admin||!isEndpointAdmin(admin)||admin.status!=='ACTIVE'||!admin.companyId)throw new EndpointError(403,'Active administrator required');
     if(!body||typeof body.enabled!=='boolean'||Object.keys(body).some(key=>key!=='enabled'))throw new EndpointError(400,'Use enabled: true or false');
+    if(!await citySchemaReady(this.prisma))throw new EndpointError(503,'City estimates are unavailable until the backend database update is applied. Existing devices and monitoring remain available.','CITY_MIGRATION_REQUIRED');
     await this.prisma.$transaction(async tx=>{
-      const device=await tx.endpointDevice.findFirst({where:{id,companyId:admin.companyId,user:userScope(admin),revokedAt:null}});
+      const device=await tx.endpointDevice.findFirst({where:{id,companyId:admin.companyId,user:userScope(admin),revokedAt:null},select:coreDeviceSelect});
       if(!device)throw new EndpointError(404,'Device not found');
       if(body.enabled&&!device.enrolledAt)throw new EndpointError(409,'Enroll the assigned laptop first');
       const changed=await tx.endpointDevice.updateMany({where:{id,companyId:admin.companyId,user:userScope(admin),revokedAt:null},data:{ipCityEnabled:body.enabled,ipCityGeneration:{increment:1},ipCity:{status:body.enabled?'awaiting-heartbeat':'disabled'}}});
@@ -168,11 +180,11 @@ export class EndpointService {
     }
     const userId = isEndpointAdmin(user) ? employeeId : (employeeId || user.id);
     const where = { companyId: user.companyId, user: userScope(user), ...(userId ? { userId } : {}) };
-    const devices = await this.prisma.endpointDevice.findMany({ where, select: {
+    const {devices,cityAvailable} = await withCitySchema(this.prisma,async cityAvailable=>({cityAvailable,devices:await this.prisma.endpointDevice.findMany({ where, select: {
       id: true, userId: true, name: true, platform: true, mappedIdentity: true, enrolledAt: true,
-      revokedAt: true, lastSeen: true, agentVersion: true, health: true, config: true,ipCityEnabled:true,ipCity:true,
+      revokedAt: true, lastSeen: true, agentVersion: true, health: true, config: true,...(cityAvailable?{ipCityEnabled:true,ipCity:true}:{}),
       user: { select: { id: true, name: true, employeeId: true, riskScore: true, trustScore: true, riskLevel: true } }
-    }, orderBy: { createdAt: 'desc' } });
+    }, orderBy: { createdAt: 'desc' } })}));
     // A device filter must resolve inside the already-scoped company/employee
     // list. This keeps the dashboard filter from becoming an IDOR.
     if (deviceId && !devices.some(d => d.id === deviceId)) throw new EndpointError(404, 'Device not found');
@@ -198,19 +210,20 @@ export class EndpointService {
     }
     const incidents = isEndpointAdmin(user)||user.roleCode==='MANAGER' ? await this.prisma.incident.findMany({ where: { user: userScope(user), ...(userId ? { userId } : {}) }, take: 30, orderBy: { createdAt: 'desc' } }) : [];
     const employees = isEndpointAdmin(user) ? await this.prisma.user.findMany({ where: { ...userScope(user), status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } }, select: { id: true, employeeId: true, name: true }, orderBy: { name: 'asc' } }) : [];
-    return { devices: devices.map(d => ({ ...d,ipCity:cityView(d),connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: ML_AVAILABILITY };
+    return { devices: devices.map(d => ({ ...d,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: ML_AVAILABILITY };
   }
   async change(admin, id, body, revoke = false) {
     if (!admin || !isEndpointAdmin(admin) || admin.status !== 'ACTIVE' || !admin.companyId) throw new EndpointError(403, 'Active administrator required');
-    const data = revoke ? { revokedAt: new Date(), credentialHash: null, enrollmentHash: null,ipCityEnabled:false,ipCityGeneration:{increment:1},ipCity:{status:'revoked'} } : { config: validateConfig(body.config),ipCityGeneration:{increment:1},...(body.config?.paused?{ipCity:{status:'paused'}}:{}) };
-    await this.prisma.$transaction(async tx => {
+    const config=revoke?null:validateConfig(body.config);
+    await withCitySchema(this.prisma,cityAvailable=>this.prisma.$transaction(async tx => {
+      const data = revoke ? { revokedAt: new Date(), credentialHash: null, enrollmentHash: null,...(cityAvailable?{ipCityEnabled:false,ipCityGeneration:{increment:1},ipCity:{status:'revoked'}}:{}) } : { config,...(cityAvailable?{ipCityGeneration:{increment:1},...(config.paused?{ipCity:{status:'paused'}}:{})}:{}) };
       const result = await tx.endpointDevice.updateMany({ where: { id, companyId: admin.companyId, user: userScope(admin) }, data });
       if (!result.count) throw new EndpointError(404, 'Device not found');
       await audit(tx, admin, revoke ? 'AGENT_REVOKED' : data.config.paused ? 'AGENT_PAUSED' : 'AGENT_CONFIGURATION_UPDATED', {
         deviceId: id, actorId: admin.id, actorRole: admin.roleCode, isMainAdmin: admin.isMainAdmin === true,
         ...(revoke ? {} : { paused: data.config.paused })
       });
-    });
+    }));
     return { success: true };
   }
 }

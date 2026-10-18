@@ -1,6 +1,7 @@
 import React from 'react';
 
 const statuses={disabled:'City estimate is off',revoked:'Device revoked',paused:'Monitoring paused',
+  'migration-required':'City estimates need a backend database update. Existing devices and monitoring remain available.',
   'awaiting-heartbeat':'Waiting for the next authenticated laptop heartbeat',
   'provider-not-configured':'Location API is not configured on the backend',
   'public-ip-unavailable':'Public laptop IP unavailable; check the backend proxy configuration',
@@ -18,7 +19,7 @@ export function EndpointCity({device,administrator,pending,onChange}) {
     </>:<p role="status">{statuses[city.status]||'City estimate unavailable'}</p>}
     <p className="text-xs text-slate-400">Approximate city/region of the laptop's heartbeat network. VPNs, proxies and mobile networks can show another city. This does not confirm the employee's physical presence. Latest estimate expires after 24 hours.</p>
     {administrator&&!device.revokedAt&&<>
-      <button type="button" disabled={pending||!device.enrolledAt} className="text-cyan-300 disabled:opacity-50" onClick={()=>onChange(device.id,'city-estimate',{enabled:!device.ipCityEnabled})}>{device.ipCityEnabled?'Disable city estimate':'Enable city estimate'}</button>
+      <button type="button" disabled={pending||!device.enrolledAt||device.ipCitySchemaReady===false} className="text-cyan-300 disabled:opacity-50" onClick={()=>onChange(device.id,'city-estimate',{enabled:!device.ipCityEnabled})}>{device.ipCityEnabled?'Disable city estimate':'Enable city estimate'}</button>
       {!device.enrolledAt&&<p className="text-xs text-slate-400">Enroll this assigned laptop first.</p>}
       <p className="text-xs text-slate-400">Uses existing Windows, Linux and macOS agents; no kit update or OS Location permission needed. When enabled under your company's disclosed monitoring policy, the public IP is sent to ipapi.co. Disabling clears the saved estimate.</p>
     </>}

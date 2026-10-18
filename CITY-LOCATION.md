@@ -12,6 +12,11 @@ database errors can show another city. Treat the result as an estimate.
 
 ## Setup
 
+If the live Devices page shows a migration error instead of previously enrolled
+laptops, follow [Render device recovery](RENDER-DEVICE-RECOVERY.md). A failed
+dashboard query is not an empty database. This fix also keeps core monitoring
+available when only the optional city schema is pending.
+
 1. Deploy the updated backend and frontend. Apply the additive migration and
    regenerate/build:
 

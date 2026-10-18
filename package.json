@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node server/dev.js",
     "build": "prisma generate && vite build --config client/vite.config.js",
+    "build:render": "prisma migrate deploy && npm run build",
     "start": "node server/server.js",
     "seed": "node prisma/seed.js",
     "prisma:generate": "prisma generate",
@@ -14,6 +15,7 @@
     "test:devices": "node --test server/test/device-buttons.test.js server/test/device-buttons.browser.test.js server/test/device-uuid.browser.test.js",
     "test:usage": "node --test server/test/application-usage.test.js server/test/device-buttons.browser.test.js",
     "test:city": "node --test --test-concurrency=1 server/test/endpoint-city.test.js server/test/endpoint-city-api.test.js server/test/endpoint-city.browser.test.js",
+    "test:city-migration": "node --test --test-concurrency=1 server/test/endpoint-city-migration.test.js server/test/endpoint-city-migration.browser.test.js",
     "test:startup": "node --test server/test/server-startup.test.js",
     "test:enrollment": "node --test agent/test/enrollment.test.js agent/test/windows-enrollment-input.test.js server/test/enrollment.test.js",
     "agent:build:windows": "powershell -NoProfile -File agent/packaging/windows/build.ps1",

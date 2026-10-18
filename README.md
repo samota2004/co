@@ -2,6 +2,16 @@
 
 React/Vite security console, Express/Prisma/PostgreSQL policy enforcement, Python Random Forest/SHAP inference, and a separate JavaScript endpoint agent. [OpenAPI](server/openapi.json) describes the active API; [research instructions](ml/research/README.md) explain reproducible comparisons.
 
+## Render database updates and existing endpoint devices
+
+Render must apply migrations as well as generate Prisma. For this repository-root
+deployment, use Build Command `npm ci && npm run build:render` and keep Start
+Command `npm start`. This applies the additive database updates before building.
+For the existing deployed city-feature commit, the equivalent command is
+`npm ci && npm run prisma:migrate && npm run build`. Keep the existing production
+database URL and device enrollments. Follow [existing-device recovery](RENDER-DEVICE-RECOVERY.md)
+if the dashboard displays a database migration error instead of the saved list.
+
 ## Assigned administrator access
 
 In **Employee monitoring → Add/Edit Employee**, select a manager when adding an employee, or an administrator when adding a manager. Both selections are required. Employees inherit their manager's administrator automatically. Moving a manager to another administrator also moves their employees. The main administrator can assign or move anyone within the company. A regular administrator can create people under their own account and can manage only their assigned people. Employee and manager activity, endpoint devices, incidents, risk data, audit entries and live updates follow that assignment. The main administrator sees the whole company.
