@@ -41,12 +41,36 @@ available when only the optional city schema is pending.
    reserves its free trial for development/testing. Select an appropriate plan
    for a deployment; no subscription or charge is created by this code.
 
-3. If hosting behind a proxy, configure the existing `TRUST_PROXY` with verified
-   immediate proxy IPs. `server/server.js` supports explicit IPs or `loopback`;
-   keep the configured trust limited to the actual deployment's proxy. Do not
-   trust arbitrary `X-Forwarded-For` senders. Ask the hosting operator for the
-   correct proxy addresses. A private/unavailable source address produces a
-   clear status instead of locating the backend's egress IP.
+3. Configure the backend's ingress proxy policy. For a **Render public web
+   service**, after deploying the proxy-policy update, set:
+
+   ```text
+   TRUST_PROXY=render
+   ```
+
+   This is an explicit opt-in, accepted only with Render's own `RENDER=true` and
+   `RENDER_SERVICE_TYPE=web` environment. Do not add or fake those platform
+   variables on another host. The preset trusts Render's private/local ingress
+   and Cloudflare's published IPv4/IPv6 proxy ranges. It assumes private ingress
+   is controlled by the service operator, with no untrusted clients connecting
+   directly over that network. For other network topologies, use only verified
+   explicit proxy IPs/CIDRs instead. The existing `loopback` setting continues
+   to work for a same-host proxy; by itself it does not cover a chain containing
+   Render's other private hops.
+
+   Express walks the chain from the socket right to left, stopping at the first
+   untrusted peer. Forged leftmost addresses, request-body IPs, `True-Client-IP`
+   and `CF-Connecting-IP` are not used to override that result. Trust-all
+   settings and numeric hop counts are rejected. A selected address that still
+   belongs to a trusted public proxy is not geolocated as the employee laptop.
+   With no policy configured the application remains in direct-connection mode.
+
+   Sources: [Render ingress and client IP
+   guidance](https://render.com/articles/how-render-handles-ddos-attacks),
+   [Express proxy trust](https://expressjs.com/en/guide/behind-proxies/), and
+   [Cloudflare proxy ranges](https://www.cloudflare.com/ips/). The bundled
+   Cloudflare list was checked 19 October 2026 and must be reviewed when the
+   provider changes its ranges; it is not silently fetched on each request.
 
 4. Open **Devices → Installed endpoint agents**. Find the enrolled assigned
    laptop and click **Enable city estimate** under the company's disclosed
@@ -110,6 +134,40 @@ On the deployed backend, enable the provider and the specific enrolled device,
 then confirm a new observation timestamp after a heartbeat. Test disable/pause
 and confirm estimates clear. Check the actual device's egress network/VPN when
 the estimate differs. No existing agent kit needs to be replaced.
+
+### Connected device says "Public laptop IP unavailable"
+
+This means the authenticated heartbeat was accepted, but a public client address
+could not be resolved for the lookup. It does not require re-enrollment. A common
+Render cause is `TRUST_PROXY=loopback`: the first proxy is accepted, but Express
+stops at a further private hop. Deploy this update and change only that backend
+setting to `TRUST_PROXY=render`, then **Save, rebuild, and deploy**. Keep the
+existing database, enrollment credentials, city opt-in and provider key.
+
+The startup log should show `[trusted-proxy-policy]` with `mode: "render"`.
+Wait for a new heartbeat (normally 30 seconds) and dashboard refresh (normally
+15 seconds). Verify a new city observation timestamp on the assigned device.
+If the status changes to a provider error, address resolution has progressed but
+the provider/key/rate limit needs separate verification.
+
+For an unresolved address, `[endpoint-city-ip]` logs at most one safe diagnostic
+per minute after an authenticated, opted-in heartbeat. It records only policy,
+public/non-public/invalid address classes, bounded hop counts and header status.
+It does not log employee IPs, raw headers, credentials, keys or device IDs.
+Share that diagnostic if the public-IP error persists after redeployment; an
+unknown ingress topology needs verified proxy ranges rather than trust-all.
+
+Regression command: `npm run test:proxy`. It covers actual Express chain
+resolution, IPv4/IPv6, forged prefixes, untrusted peers, missing/invalid chains,
+proxy-only chains, redacted diagnostics and unchanged agent HTTP heartbeats
+which transition from the private-IP error to a stored dashboard city. Provider
+responses and network peers are synthetic; real Render recovery must still be
+verified after deployment.
+
+Executed for the proxy update: **31 passed, zero failed/skipped**, including
+proxy-policy security, city unit/API/browser, pending migration compatibility,
+server startup/production serving, HTTP security, enrollment, application usage,
+macOS backend, agent core and Windows release checks. No kit files changed.
 
 ## Verification in this workspace — 18 October 2026
 

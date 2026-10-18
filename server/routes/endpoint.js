@@ -4,9 +4,7 @@ import { requireAuth, requireSecurityAdmin } from '../middleware/auth.js';
 import { EndpointService, EndpointError } from '../services/endpoint-service.js';
 import { endpointRequestContext, endpointFailure } from '../middleware/endpoint-errors.js';
 import { sseManager } from '../services/sse.js';
-function appProxySetting(req) {
-  return req.app.get('trust proxy');
-}
+import {cityAddressDiagnostics,cityRequestAddress} from '../services/proxy-policy.js';
 const router = express.Router();
 const service = new EndpointService(prisma);
 const attempts = new Map();
@@ -19,9 +17,7 @@ router.use((req, res, next) => {
   console.warn('[endpoint-https-check]', JSON.stringify({
     secure: req.secure,
     encrypted: Boolean(req.socket.encrypted),
-    remoteAddress: req.socket.remoteAddress,
-    forwardedProto: req.get('x-forwarded-proto'),
-    trustProxy: appProxySetting(req)
+    ...cityAddressDiagnostics(req)
   }));
 }
   if (!req.secure && !(process.env.NODE_ENV !== 'production' && process.env.ENDPOINT_ALLOW_LOOPBACK_HTTP === 'true' && loopback)) return res.status(426).json({ error: 'HTTPS required. Local development on loopback requires ENDPOINT_ALLOW_LOOPBACK_HTTP=true and a backend restart.' });
@@ -55,7 +51,7 @@ router.post('/ingest', handle(async req => {
   return { acceptedEventIds: result.acceptedEventIds };
 }));
 router.post('/heartbeat', handle(async req => {
-  const result = await service.heartbeat(credential(req), req.body,req.ip);
+  const result = await service.heartbeat(credential(req), req.body,cityRequestAddress(req),cityAddressDiagnostics(req));
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
   return { config: result.config, accountControl: result.accountControl };
 }));

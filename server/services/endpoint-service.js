@@ -3,6 +3,7 @@ import { audit, userScope } from './security-common.js';
 import { DEFAULT_CONFIG, validateConfig, validateEvent, validateHealth, validateEnrollment } from '../../agent/shared/contract.js';
 import {cityLookup,cityView} from './endpoint-city.js';
 import {coreDeviceSelect,cityDeviceSelect,citySchemaReady,withCitySchema,invalidateCitySchema,isMissingCityColumn} from './endpoint-city-schema.js';
+import {reportCityAddress} from './proxy-policy.js';
 export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
@@ -125,7 +126,7 @@ export class EndpointService {
       return { acceptedEventIds: body.events.map(e => e.eventId), companyId: d.companyId, userId: d.userId, deviceId: d.id };
     });
   }
-  async heartbeat(secret, body, address) {
+  async heartbeat(secret, body, address, addressDiagnostics) {
     try { validateHealth(body.health); } catch (e) { throw new EndpointError(400, e.message); }
     if (typeof body.agentVersion !== 'string' || body.agentVersion.length > 40) throw new EndpointError(400, 'Invalid version');
     const result=await withCitySchema(this.prisma,cityAvailable=>this.prisma.$transaction(async tx => {
@@ -150,6 +151,7 @@ export class EndpointService {
       if(!d.config.paused&&!body.health.paused&&d.user.status==='ACTIVE') {
         try{estimate={...await this.locator.lookup(address),observedAt:observedAt.toISOString()};}
         catch{estimate={status:'lookup-unavailable'};}
+        if(estimate.status==='public-ip-unavailable')reportCityAddress(addressDiagnostics);
       }
       try{await this.prisma.endpointDevice.updateMany({where:{id:d.id,revokedAt:null,credentialHash:hashSecret(secret),ipCityEnabled:true,ipCityGeneration:generation,config:{equals:d.config}},data:{ipCity:estimate}});}
       catch(error){if(isMissingCityColumn(error))invalidateCitySchema(this.prisma);console.warn('Endpoint city estimate could not be stored; authenticated heartbeat remains accepted.');}

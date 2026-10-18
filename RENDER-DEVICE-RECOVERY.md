@@ -44,6 +44,31 @@ verify the signed-in administrator/company scope and that Render still points at
 the original database. Record deletion cannot be inferred from a failed query.
 Production row counts must be verified against that production database.
 
+## Build stops with P1012: DATABASE_URL protocol
+
+If `prisma migrate deploy` reports that the URL must start with `postgresql://`
+or `postgres://`, validation failed before migrations ran. Correct the value in
+the existing backend service's **Environment** settings. The key is
+`DATABASE_URL`; its value must be the original production PostgreSQL connection
+URL alone, with no surrounding quote characters, `DATABASE_URL=` prefix, `psql`
+command, or leading/trailing whitespace. Preserve its host, database, credentials
+and query parameters. Do not substitute a local URL or a new empty database.
+
+The backend's `server/models/prisma.js` removes surrounding quote characters
+before constructing its Prisma client, whereas the Prisma CLI reads the raw
+environment variable. Thus an accidentally quoted Render value can explain why
+the old backend connected but the migration command now fails. The log alone
+does not prove which formatting mistake is present. Quotes used as syntax in a
+local `.env` file are different from literal quotes in Render's value field.
+
+Choose **Save, rebuild, and deploy** after correcting the existing value; keep
+the migration build command above. See [Render's environment variable
+instructions](https://render.com/docs/configure-environment-variables). Never
+paste the connection URL into chat or expose it in screenshots. Verify the next
+deploy reaches migration execution and then starts the backend before checking
+the device dashboard. The npm audit summary and Prisma deprecation warning in
+this log are separate from the P1012 failure.
+
 ## Code hardening included in this fix
 
 - Core queries explicitly select the original endpoint columns. Enrollment,

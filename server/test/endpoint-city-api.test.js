@@ -4,7 +4,8 @@ import express from 'express';
 import {randomUUID} from 'node:crypto';
 import {deviceFixture} from './device-fixture.js';
 import {EndpointService} from '../services/endpoint-service.js';
-import {cityLookup} from '../services/endpoint-city.js';
+import {cityLookup,CityLookup} from '../services/endpoint-city.js';
+import {configureProxy} from '../services/proxy-policy.js';
 import {expireCityEstimates} from '../services/endpoint-retention.js';
 import {DEFAULT_CONFIG} from '../../agent/shared/contract.js';
 const health={queueEvents:0,queueBytes:0,droppedEvents:0,paused:false,helperLastSeen:null,collectors:{}};
@@ -43,9 +44,26 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
     const app=express();app.use(express.json());app.use('/api/endpoint',router);
     server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
     const origin=`http://127.0.0.1:${server.address().port}`;
-    const post=async()=>fetch(origin+'/api/endpoint/heartbeat',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${e.credential}`,'X-Forwarded-For':'1.1.1.1'},body:JSON.stringify({...heartbeat,ip:'9.9.9.9',deviceId:'wrong'})});
+    const post=async(xff='1.1.1.1')=>fetch(origin+'/api/endpoint/heartbeat',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${e.credential}`,'X-Forwarded-For':xff,'X-Forwarded-Proto':'https'},body:JSON.stringify({...heartbeat,ip:'9.9.9.9',deviceId:'wrong'})});
     let r=await post();assert.equal(r.status,200);assert.equal(lastAddress,'127.0.0.1');assert.deepEqual(Object.keys(await r.json()).sort(),['success','config','accountControl'].sort());
     app.set('trust proxy',['loopback']);r=await post();assert.equal(r.status,200);assert.equal(lastAddress,'1.1.1.1');
+    // Reproduce the deployed failure: loopback accepts the local TLS proxy but
+    // stops at a private downstream hop. Switching to the explicit Render
+    // policy must make the unchanged agent heartbeat update its dashboard city.
+    let providerCalls=0;
+    const provider=new CityLookup({env:{ENDPOINT_CITY_ENABLED:'true',IPAPI_API_KEY:'synthetic-key',NODE_ENV:'production'},fetcher:async url=>{
+      providerCalls++;assert.equal(url.pathname,'/8.8.8.8/json/');
+      return new Response(JSON.stringify({ip:'8.8.8.8',city:'Render proxy fixture city',region:'Fixture Region',country_name:'India',country_code:'IN'}));
+    }});
+    cityLookup.lookup=address=>provider.lookup(address);
+    const chain='9.9.9.9, 8.8.8.8, 172.64.1.10, 10.60.0.8';
+    configureProxy(app,{TRUST_PROXY:'loopback'});
+    r=await post(chain);assert.equal(r.status,200);assert.equal((await saved()).ipCity.status,'public-ip-unavailable');assert.equal(providerCalls,0);
+    configureProxy(app,{TRUST_PROXY:'render',RENDER:'true',RENDER_SERVICE_TYPE:'web'});
+    r=await post(chain);assert.equal(r.status,200);assert.equal(providerCalls,1);
+    let displayed=(await service.dashboard(f.admin)).devices.find(device=>device.id===a.deviceId);
+    assert.equal(displayed.ipCity.city,'Render proxy fixture city');assert.equal(displayed.ipCity.stale,false);assert.equal(displayed.connectionStatus,'CONNECTED');
+    cityLookup.lookup=locator.lookup;
     const auth=(await import('../middleware/auth.js')).generateJwtToken;
     const control=(user,enabled)=>fetch(origin+`/api/endpoint/${a.deviceId}/city-estimate`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${auth(user,true)}`},body:JSON.stringify({enabled})});
     assert.equal((await control(f.otherAdmin,false)).status,404);assert.equal((await control(f.admin,false)).status,200);assert.deepEqual((await saved()).ipCity,{status:'disabled'});

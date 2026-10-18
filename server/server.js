@@ -3,7 +3,6 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "node:http";
-import {isIP} from 'node:net';
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 
@@ -11,6 +10,7 @@ import apiRouter from "./routes/index.js";
 import {securityHttp,allowedOrigins} from './middleware/security-http.js';
 import {securityErrorHandler} from './services/security-common.js';
 import { endpointRequestContext, endpointPayloadError } from './middleware/endpoint-errors.js';
+import {configureProxy} from './services/proxy-policy.js';
 import {
   notFoundHandler,
   errorHandler
@@ -34,12 +34,7 @@ app.use((req, res, next) => {
   if (ready) return next();
   res.set('Retry-After', '1').status(503).json({ success: false, error: 'Server is starting. Retry shortly.' });
 });
-// Explicitly trust only a same-host TLS reverse proxy when configured.
-if(process.env.TRUST_PROXY){
- const proxies=process.env.TRUST_PROXY.split(',').map(x=>x.trim());
- if(proxies.some(x=>x!=='loopback'&&!isIP(x)))throw new Error('TRUST_PROXY must contain loopback or explicit trusted proxy IP addresses.');
- app.set('trust proxy',proxies);
-}
+console.info('[trusted-proxy-policy]',JSON.stringify(configureProxy(app)));
 app.use(securityHttp);
 // CORS
 app.use(
