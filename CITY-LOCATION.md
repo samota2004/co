@@ -203,6 +203,22 @@ are extracted from ipapi.is; coordinates, postcode and other returned fields
 are excluded. An actual city and fresh observation timestamp on the live
 dashboard are still required to confirm recovery.
 
+Provider update verification completed: **37 passed, zero failed/skipped**, across
+the provider unit/API/browser, proxy-policy, pending migration, startup/production
+serving, HTTP security, enrollment, application usage, macOS backend, agent core
+and Windows release checks. The production frontend build passed. Provider
+responses in those tests are synthetic; these results do not confirm a real
+employee city or Render's live provider/key configuration.
+
+On 20 October 2026, the local `.env` provider was set explicitly to `ipapi.is`
+(it had been omitted, selecting the compatibility default `ipapi.co`). Existing
+credentials were preserved. A single real HTTPS lookup of the public test IP
+`8.8.8.8` using the configured local key returned `available`. Only the provider
+and success status were printed; no key or employee IP was logged. This confirms
+local provider authentication and parsing, not Render configuration or a live
+employee location. Local `.env` settings are not automatically deployed to Render:
+configure the backend Environment there and verify its next device heartbeat.
+
 ## Verification in this workspace — 18 October 2026
 
 - Production frontend build passed and the single additive migration was applied
