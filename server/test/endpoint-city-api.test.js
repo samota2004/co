@@ -6,6 +6,7 @@ import {deviceFixture} from './device-fixture.js';
 import {EndpointService} from '../services/endpoint-service.js';
 import {cityLookup,CityLookup} from '../services/endpoint-city.js';
 import {configureProxy} from '../services/proxy-policy.js';
+import {createCityFetcher} from '../services/city-network.js';
 import {expireCityEstimates} from '../services/endpoint-retention.js';
 import {DEFAULT_CONFIG} from '../../agent/shared/contract.js';
 const health={queueEvents:0,queueBytes:0,droppedEvents:0,paused:false,helperLastSeen:null,collectors:{}};
@@ -76,6 +77,16 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
     assert.equal(displayed.ipCityProvider,'ipapi.is');assert.equal(displayed.ipCity.provider,'ipapi.is');assert.equal(displayed.ipCity.city,'IPAPI IS fixture city');
     assert.equal('latitude' in displayed.ipCity,false);assert.equal('longitude' in displayed.ipCity,false);
     assert.equal((await saved()).credentialHash,original.credentialHash);assert.equal((await saved()).mappedIdentity,original.mappedIdentity);
+    const recovery=new CityLookup({env:{ENDPOINT_CITY_ENABLED:'true',IPAPI_PROVIDER:'ipapi.is',IPAPI_API_KEY:'synthetic-is-key'},fetcher:createCityFetcher({
+      warn:()=>{},fetcher:async()=>{throw new TypeError('fetch failed',{cause:Object.assign(new Error('Sensitive transport details'),{code:'ENETUNREACH'})});},
+      ipv4Request:async(url,options)=>{assert.equal(url.hostname,'api.ipapi.is');assert.equal(JSON.parse(options.body).q,'8.8.8.8');return new Response(JSON.stringify({ip:'8.8.8.8',location:{city:'Recovered network fixture',country:'India',country_code:'IN'}}));}
+    })});
+    cityLookup.lookup=address=>recovery.lookup(address);r=await post(chain);assert.equal(r.status,200);assert.equal((await saved()).ipCity.city,'Recovered network fixture');
+    const unavailable=new CityLookup({env:{ENDPOINT_CITY_ENABLED:'true',IPAPI_PROVIDER:'ipapi.is',IPAPI_API_KEY:'synthetic-is-key'},warn:()=>{},fetcher:async()=>{throw new TypeError('fetch failed',{cause:Object.assign(new Error('Sensitive transport details'),{code:'EAI_AGAIN'})});}});
+    cityLookup.lookup=address=>unavailable.lookup(address);r=await post(chain);assert.equal(r.status,200);
+    const networkFailure=(await saved()).ipCity;assert.equal(networkFailure.reason,'dns-error');assert.deepEqual(networkFailure.networkCodes,['EAI_AGAIN']);
+    assert.equal((await service.dashboard(f.admin)).devices.find(device=>device.id===a.deviceId).connectionStatus,'CONNECTED');
+    assert.equal(JSON.stringify(networkFailure).includes('Sensitive transport details'),false);
     cityLookup.lookup=locator.lookup;
     const auth=(await import('../middleware/auth.js')).generateJwtToken;
     const control=(user,enabled)=>fetch(origin+`/api/endpoint/${a.deviceId}/city-estimate`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${auth(user,true)}`},body:JSON.stringify({enabled})});

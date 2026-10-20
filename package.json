@@ -14,7 +14,7 @@
     "agent:test": "node --test --test-concurrency=1 agent/test/*.test.js",
     "test:devices": "node --test server/test/device-buttons.test.js server/test/device-buttons.browser.test.js server/test/device-uuid.browser.test.js",
     "test:usage": "node --test server/test/application-usage.test.js server/test/device-buttons.browser.test.js",
-    "test:city": "node --test --test-concurrency=1 server/test/endpoint-city.test.js server/test/endpoint-city-api.test.js server/test/endpoint-city.browser.test.js",
+    "test:city": "node --test --test-concurrency=1 server/test/city-network.test.js server/test/endpoint-city.test.js server/test/endpoint-city-api.test.js server/test/endpoint-city.browser.test.js",
     "test:proxy": "node --test --test-concurrency=1 server/test/proxy-policy.test.js server/test/endpoint-city-api.test.js",
     "test:city-migration": "node --test --test-concurrency=1 server/test/endpoint-city-migration.test.js server/test/endpoint-city-migration.browser.test.js",
     "test:startup": "node --test server/test/server-startup.test.js",

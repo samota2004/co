@@ -1,4 +1,5 @@
 import {BlockList,isIP} from 'node:net';
+import {cityFetcher,cityNetworkFailure} from './city-network.js';
 
 const excluded=new BlockList(),globalV6=new BlockList();
 for(const [ip,bits] of [['0.0.0.0',8],['10.0.0.0',8],['100.64.0.0',10],['127.0.0.0',8],['169.254.0.0',16],['172.16.0.0',12],['192.0.0.0',24],['192.0.2.0',24],['192.88.99.0',24],['192.168.0.0',16],['198.18.0.0',15],['198.51.100.0',24],['203.0.113.0',24],['224.0.0.0',3]])excluded.addSubnet(ip,bits,'ipv4');
@@ -39,7 +40,7 @@ function providerFailure(provider,httpStatus,data) {
   return {...failure,reason:httpStatus>=400?'provider-http-error':'provider-rejected-query'};
 }
 export class CityLookup {
-  constructor({fetcher=fetch,env=process.env,now=Date.now,warn=message=>console.warn(message)}={}) {
+  constructor({fetcher=cityFetcher,env=process.env,now=Date.now,warn=message=>console.warn(message)}={}) {
     this.fetcher=fetcher;this.env=env;this.now=now;this.warn=warn;this.cache=new Map();this.pending=new Map();this.calls=0;this.window=0;
     this.generation=0;this.settings=null;this.blockedUntil=0;this.nextDiagnostic=0;
   }
@@ -68,7 +69,7 @@ export class CityLookup {
       this.cache.set(ip,{value,until:this.now()+(value.status==='available'?300000:60000)});
       if(value.status!=='available'&&this.now()>=this.nextDiagnostic){
         this.nextDiagnostic=this.now()+60000;
-        this.warn('[endpoint-city-provider] '+JSON.stringify({provider:settings.provider,status:value.status,reason:value.reason,...(value.httpStatus?{httpStatus:value.httpStatus}:{})}));
+        this.warn('[endpoint-city-provider] '+JSON.stringify({provider:settings.provider,status:value.status,reason:value.reason,...(value.httpStatus?{httpStatus:value.httpStatus}:{}),...(value.networkCodes?{networkCodes:value.networkCodes}:{})}));
       }
       return value;
     }).finally(()=>{if(this.pending.get(ip)===task)this.pending.delete(ip);});
@@ -103,7 +104,7 @@ export class CityLookup {
       if(!location)return {status:'lookup-unavailable',provider,reason:'location-unavailable'};
       if(!/^[A-Z]{2}$/.test(location.country_code))return {status:'lookup-unavailable',provider,reason:'invalid-response'};
       return {status:'available',source:'heartbeat-public-ip',provider,city:clean(location.city),region:clean(location.state),country:clean(location.country),countryCode:location.country_code,resolvedAt:new Date(this.now()).toISOString()};
-    }catch(error){return {status:'lookup-unavailable',provider:settings.provider,reason:['TimeoutError','AbortError'].includes(error?.name)||error?.cause?.code==='UND_ERR_CONNECT_TIMEOUT'?'timeout':error instanceof SyntaxError?'invalid-response':'network-error'};}
+    }catch(error){return {status:'lookup-unavailable',provider:settings.provider,...cityNetworkFailure(error)};}
   }
 }
 export const cityLookup=new CityLookup();

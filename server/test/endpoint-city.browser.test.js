@@ -49,6 +49,12 @@ test('unchanged agents on all three platforms show estimated city, timestamp, st
       await f.prisma.endpointDevice.update({where:{id:a.deviceId},data:{ipCity:{status:'lookup-unavailable',provider,reason,httpStatus:403}}});
       await b.evaluate("window.dispatchEvent(new Event('cyberorbit-endpoint-updated'))");
       await waitUntil(b,`${cityPanel}?.textContent.includes(${JSON.stringify(message)}) && ${cityPanel}.textContent.includes('HTTP 403') && !${cityPanel}.textContent.includes('Fixture Delhi')`,'actionable provider/key error without an obsolete city');
+      if(platform==='darwin') {
+        await f.prisma.endpointDevice.update({where:{id:a.deviceId},data:{ipCity:{status:'lookup-unavailable',provider,reason:'dns-error',networkCodes:['ENOTFOUND','secret-fixture-detail']}}});
+        await b.evaluate("window.dispatchEvent(new Event('cyberorbit-endpoint-updated'))");
+        await waitUntil(b,`${cityPanel}?.textContent.includes('Backend DNS could not resolve') && ${cityPanel}.textContent.includes('Connection diagnostic: ENOTFOUND')`,'safe actionable network failure');
+        assert.equal(await b.evaluate(`${cityPanel}.textContent.includes('secret-fixture-detail')`),false);
+      }
       await f.prisma.endpointDevice.update({where:{id:a.deviceId},data:{ipCity:{status:'provider-not-configured'}}});
       await b.evaluate("window.dispatchEvent(new Event('cyberorbit-endpoint-updated'))");
       await waitUntil(b,`${cityPanel}?.textContent.includes('Location API is not configured') && !${cityPanel}.textContent.includes('Fixture Delhi')`,'honest provider status');

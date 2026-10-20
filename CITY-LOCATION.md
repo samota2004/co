@@ -219,6 +219,59 @@ local provider authentication and parsing, not Render configuration or a live
 employee location. Local `.env` settings are not automatically deployed to Render:
 configure the backend Environment there and verify its next device heartbeat.
 
+### Provider selected correctly, but backend cannot reach it
+
+`network-error` means the outbound HTTPS request failed without a usable HTTP
+response. It does not establish whether the cause is DNS, a network route,
+certificate validation, a connection reset or provider-side blocking. Do not
+change enrollment, the database, the key's issuer or proxy trust to work around
+this separate transport failure.
+
+The network update extracts only allowlisted error codes from Node fetch's
+nested `cause` / `AggregateError`. Dashboard messages and
+`[endpoint-city-provider]` now distinguish DNS, TLS, connection refusal,
+unreachable route, timeout and interrupted connections. No raw exception,
+address, request URL/body, certificate details or credentials are copied.
+
+For recognized DNS/pre-response connection failures, the backend makes at most
+one IPv4 HTTPS attempt to the **same configured provider**, within the original
+five-second deadline. The IP being looked up and provider remain unchanged;
+IPv6 employee addresses are still supported. This addresses an unusable outbound
+address family or transient DNS/connect path when an IPv4 route is available.
+It does not assume that every Render network failure has that cause.
+
+TLS verification, hostname verification and TLS 1.2 minimum remain enforced.
+Redirects are not followed. No retry is made for an HTTP response (including
+403/429), a certificate error, ambiguous socket reset, body-read failure or an
+expired deadline. The response is bounded to 64 KiB. No new dependency, global
+DNS setting, alternate provider/region or employee kit change is introduced.
+`[endpoint-city-transport]` reports a safe `retry-ipv4` diagnostic at most once
+per minute when this recovery is attempted.
+
+Deploy this code with the existing `IPAPI_PROVIDER=ipapi.is`, valid
+`IPAPI_API_KEY`, `ENDPOINT_CITY_ENABLED=true` and `TRUST_PROXY=render` settings.
+After a new heartbeat, verify an actual city and a fresh observation timestamp.
+If unavailable, share the displayed **Connection diagnostic** or the new
+`[endpoint-city-provider]` line, without secrets. For a persistent reset/refusal,
+verify provider availability and Render's outbound access with the provider;
+do not disable certificate validation or use a different IP to bypass a block.
+
+Relevant references: [Node HTTPS](https://nodejs.org/api/https.html),
+[Render outbound networking](https://render.com/docs/outbound-ip-addresses) and
+[ipapi.is endpoint documentation](https://ipapi.is/developers.html).
+
+A local real HTTPS probe using a simulated initial `ENETUNREACH` and the public
+test IP `8.8.8.8` returned `available` through the IPv4 recovery path on 20 October
+2026. It used the configured key without printing it. This is evidence for the
+local recovery implementation, not the Render network or an employee city.
+
+Network-update validation: **42 tests passed, zero failed/skipped**. This includes
+safe network-error extraction, bounded same-provider IPv4 recovery, TLS/refusal/
+quota safeguards, HTTP heartbeat/dashboard recovery, browser diagnostic display,
+existing proxy/provider/migration checks, startup, enrollment and agent release
+compatibility. The production build also passed with its existing chunk-size
+warning. Agent source and distribution kits were not modified.
+
 ## Verification in this workspace — 18 October 2026
 
 - Production frontend build passed and the single additive migration was applied

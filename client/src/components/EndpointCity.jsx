@@ -14,6 +14,11 @@ const reasons={
   'quota-exceeded':'Location provider quota exceeded. Requests are paused temporarily before retrying.',
   timeout:'Location provider timed out. Monitoring continues; a later heartbeat will retry.',
   'network-error':'Backend could not reach the location provider. A later heartbeat will retry.',
+  'dns-error':'Backend DNS could not resolve the location provider. Check the hosting network or provider availability.',
+  'tls-error':'Backend could not verify or establish the provider HTTPS connection. Check certificates and hosting connectivity.',
+  'connection-refused':'Location provider refused the backend connection. Check provider availability and outbound access.',
+  'network-unreachable':'Backend has no usable network route to the location provider. Check hosting outbound connectivity.',
+  'connection-reset':'Location provider connection was interrupted. A later heartbeat will retry.',
   'invalid-response':'Location provider returned an invalid response. Monitoring continues.',
   'response-ip-mismatch':'Location provider returned a different IP; its location was discarded.',
   'location-unavailable':'Location provider has no location for this network.',
@@ -22,6 +27,7 @@ const reasons={
   'unsupported-provider':'Backend location provider setting is invalid. Choose ipapi.co or ipapi.is.'
 };
 const supportedProvider=value=>['ipapi.co','ipapi.is'].includes(value)?value:null;
+const networkCodes=new Set(['ENOTFOUND','EAI_AGAIN','EAI_FAIL','CERT_HAS_EXPIRED','ERR_TLS_CERT_ALTNAME_INVALID','UNABLE_TO_VERIFY_LEAF_SIGNATURE','UNABLE_TO_GET_ISSUER_CERT_LOCALLY','SELF_SIGNED_CERT_IN_CHAIN','DEPTH_ZERO_SELF_SIGNED_CERT','ERR_TLS_HANDSHAKE_TIMEOUT','ERR_SSL_WRONG_VERSION_NUMBER','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','ECONNRESET','EPIPE','UND_ERR_SOCKET']);
 export function EndpointCity({device,administrator,pending,onChange}) {
   const city=device.ipCity||{status:device.ipCityEnabled?'awaiting-heartbeat':'disabled'};
   const provider=supportedProvider(device.ipCityProvider===undefined?'ipapi.co':device.ipCityProvider);
@@ -34,6 +40,7 @@ export function EndpointCity({device,administrator,pending,onChange}) {
       <p role="status" className={stale?'text-amber-200':'text-slate-300'}>{stale?'Last known estimate; not current':'Recent network estimate'} · Last updated: {new Date(city.observedAt).toLocaleString()}</p>
       <p className="text-xs text-slate-400">IP database lookup: {new Date(city.resolvedAt).toLocaleString()}</p>
     </>:<p role="status">{reasons[city.reason]||statuses[city.status]||'City estimate unavailable'}{Number.isInteger(city.httpStatus)&&city.httpStatus>=400&&city.httpStatus<=599?` (HTTP ${city.httpStatus})`:''}</p>}
+    {!available&&Array.isArray(city.networkCodes)&&city.networkCodes.some(code=>networkCodes.has(code))&&<p className="text-xs text-slate-400">Connection diagnostic: {city.networkCodes.filter(code=>networkCodes.has(code)).slice(0,8).join(', ')}</p>}
     <p className="text-xs text-slate-400">Approximate city/region of the laptop's heartbeat network. VPNs, proxies and mobile networks can show another city. This does not confirm the employee's physical presence. Latest estimate expires after 24 hours.</p>
     {administrator&&!device.revokedAt&&<>
       <button type="button" disabled={pending||!device.enrolledAt||device.ipCitySchemaReady===false} className="text-cyan-300 disabled:opacity-50" onClick={()=>onChange(device.id,'city-estimate',{enabled:!device.ipCityEnabled})}>{device.ipCityEnabled?'Disable city estimate':'Enable city estimate'}</button>
