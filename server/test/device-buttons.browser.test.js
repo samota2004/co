@@ -7,6 +7,7 @@ import express from 'express';
 import { deviceFixture, projectRoot } from './device-fixture.js';
 import { hashSecret } from '../services/endpoint-service.js';
 import { randomUUID } from 'node:crypto';
+import { build } from 'vite';
 const browserPath=process.env.CYBERORBIT_TEST_BROWSER || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const hasBrowser=await fs.access(browserPath).then(()=>true).catch(()=>false);
 
@@ -20,6 +21,11 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
   const f=await deviceFixture();let server,b,sse,profile;const exceptions=[],consoleErrors=[],network=[];
   let failDashboard=false,slowDashboard=false;
   try{
+    profile=await fs.mkdtemp(path.join(os.tmpdir(),'orbit-buttons-browser-'));
+    const clientBuild=path.join(profile,'client-dist');
+    const nodeEnv=process.env.NODE_ENV;
+    try{await build({configFile:path.join(projectRoot,'client/vite.config.js'),root:path.join(projectRoot,'client'),logLevel:'error',build:{outDir:clientBuild,emptyOutDir:true}});}
+    finally{if(nodeEnv===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=nodeEnv;}
     const {default:api}=await import('../routes/index.js');
     const {generateJwtToken}=await import('../middleware/auth.js');
     const {db}=await import('../models/db.js');sse=(await import('../services/sse.js')).sseManager;
@@ -29,13 +35,13 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
       if(slowDashboard)await new Promise(r=>setTimeout(r,500));
       if(failDashboard){res.status(503).json({success:false,error:'Database temporarily unavailable (test outage).'});return;}next();
     });
-    app.use('/api',api);app.use(express.static(path.join(projectRoot,'client/dist')));app.get('*',(req,res)=>res.sendFile(path.join(projectRoot,'client/dist/index.html')));
+    app.use('/api',api);app.use(express.static(clientBuild));app.get('*',(req,res)=>res.sendFile(path.join(clientBuild,'index.html')));
     server=await new Promise(r=>{const s=app.listen(0,'127.0.0.1',()=>r(s));});const origin=`http://127.0.0.1:${server.address().port}`;
-    profile=await fs.mkdtemp(path.join(os.tmpdir(),'orbit-buttons-browser-'));b=await browser(profile);
+    b=await browser(path.join(profile,'chrome-profile'));
     b.listeners.push(m=>{
       if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
       if(m.method==='Runtime.consoleAPICalled' && m.params.type==='error')consoleErrors.push(m.params.args.map(a=>a.value || a.description || '').join(' '));
-      if(m.method==='Network.responseReceived'&&m.params.response.url.startsWith(`${origin}/api/`))network.push({path:new URL(m.params.response.url).pathname,status:m.params.response.status});
+      if(m.method==='Network.responseReceived'&&m.params.response.url.startsWith(`${origin}/api/`)){const url=new URL(m.params.response.url);network.push({path:url.pathname,search:url.search,status:m.params.response.status});}
     });
     await b.command('Runtime.enable');await b.command('Network.enable');await b.command('Page.enable');
     // Typography is external to the button flow. Avoid stylesheet requests
@@ -85,20 +91,36 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
     const timelineRow=(type,name,age)=>({version:1,eventId:randomUUID(),deviceId:stored.id,companyId:'A',userId:f.employee2.id,type,occurredAt:new Date(Date.now()-age*1000),metadata:{pid:42,name,sessionId:'1',...(type==='APPLICATION_USAGE'?{durationSeconds:10}:{})}});
     const usageRows=[timelineRow('APPLICATION_USAGE','Notepad',700),timelineRow('APPLICATION_USAGE','brave',600)];
     await f.prisma.endpointEvent.createMany({data:[...usageRows,...Array.from({length:180},(_,i)=>timelineRow('PROCESS_RUNNING','fixture-process',i))]});
-    await click(b,'Refresh');await waitUntil(b,usageRows.map(e=>`${panel}.querySelector('[data-event-id="${e.eventId}"]')`).join(' && '),'both usage rows rendered despite process flood');
-    assert.equal(await b.evaluate(`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length`),2);
+    const usageResponse=await fetch(`${origin}/api/endpoint/dashboard?eventType=APPLICATION_USAGE`,{headers:{Authorization:`Bearer ${token}`}});
+    assert.equal(usageResponse.status,200);
+    const usageDashboard=await usageResponse.json();
+    assert.deepEqual(new Set(usageDashboard.events.map(e=>e.eventId)),new Set(usageRows.map(e=>e.eventId)),'database filtering returns both usage events before the process-event limit');
+    assert.equal(usageDashboard.events.length,2);
+    await click(b,'Refresh');
+    await waitUntil(b,`${panel}.querySelector('[aria-label="Show Notepad usage"]') && ${panel}.querySelector('[aria-label="Show Brave usage"]')`,'application summaries rendered from filtered response');
+    assert.equal(await b.evaluate(`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length`),0,'summary view intentionally hides detail rows until an application is selected');
+    assert.ok(await b.evaluate(`${panel}.querySelector('[aria-label="Show Notepad usage"]').textContent.includes('1 recorded observations')`));
+    await b.evaluate(`${panel}.querySelector('[aria-label="Show Notepad usage"]').click()`);
+    await waitUntil(b,`${panel}.querySelector('[data-event-id="${usageRows[0].eventId}"]')`,'Notepad detail row');
+    assert.equal(await b.evaluate(`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length`),1);
     assert.equal(await b.evaluate(`${panel}.querySelector('[data-event-id="${usageRows[0].eventId}"] strong').textContent`),'Notepad');
-    assert.equal(await b.evaluate(`${panel}.querySelector('[data-event-id="${usageRows[1].eventId}"] strong').textContent`),'Brave');
     assert.ok(await b.evaluate(`${panel}.querySelector('[data-event-id="${usageRows[0].eventId}"]').innerText.includes('10 seconds foreground usage')`));
     assert.equal(await b.evaluate(`${panel}.querySelector('[data-event-id="${usageRows[0].eventId}"] details').open`),false);
-    await value(b,'Application filter','notepad');
-    await waitUntil(b,`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length===1 && ${panel}.querySelector('[data-event-id="${usageRows[0].eventId}"]')`,'Notepad filter');
+    await b.evaluate(`${panel}.querySelector('[aria-label="Application details"] button').click()`);
+    await value(b,'Find an application','notepad');
+    await waitUntil(b,`${panel}.querySelector('[aria-label="Show Notepad usage"]') && !${panel}.querySelector('[aria-label="Show Brave usage"]')`,'application summary search filter');
+    await b.evaluate(`${panel}.querySelector('[aria-label="Show Notepad usage"]').click()`);
+    await waitUntil(b,`${panel}.querySelector('[data-event-id="${usageRows[0].eventId}"]')`,'filtered Notepad detail');
+    await b.evaluate(`${panel}.querySelector('[aria-label="Application details"] button').click()`);
+    await value(b,'Find an application','');
+    await waitUntil(b,`${panel}.querySelector('[aria-label="Show Brave usage"]')`,'all application summaries restored');
     await b.evaluate(`${panel}.querySelector('[aria-label="Show Brave usage"]').click()`);
-    await waitUntil(b,`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length===1 && ${panel}.querySelector('[data-event-id="${usageRows[1].eventId}"]')`,'Brave summary selection');
-    await value(b,'Application filter','');
-    await waitUntil(b,`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length===2`,'all applications restored');
+    await waitUntil(b,`${panel}.querySelector('[data-event-id="${usageRows[1].eventId}"]')`,'Brave detail row');
+    assert.equal(await b.evaluate(`${panel}.querySelector('[data-event-id="${usageRows[1].eventId}"] strong').textContent`),'Brave');
+    await b.evaluate(`${panel}.querySelector('[aria-label="Application details"] button').click()`);
     await value(b,'Activity type','');await waitUntil(b,`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length===150 && ${contains('Older events remain stored.')}`,'all activity retained and result limit visible');
-    await value(b,'Activity type','APPLICATION_USAGE');await waitUntil(b,usageRows.map(e=>`${panel}.querySelector('[data-event-id="${e.eventId}"]')`).join(' && '),'switch back to usage view');
+    await value(b,'Activity type','APPLICATION_USAGE');await waitUntil(b,`${panel}.querySelector('[aria-label="Show Notepad usage"]') && ${panel}.querySelector('[aria-label="Show Brave usage"]')`,'switch back to application summary view');
+    assert.ok(network.some(r=>r.path==='/api/endpoint/dashboard'&&r.search.includes('eventType=APPLICATION_USAGE')&&r.status===200),'browser uses the server-side activity filter');
     assert.equal(await b.evaluate(`${panel}.textContent.includes('[object Object]')`),false);
     await b.evaluate("localStorage.setItem('zero_trust_token','expired-test-token')");await click(b,'Issue Enrollment Token');
     await waitUntil(b,"!document.querySelector('[aria-label=\"Installed endpoint agents\"]') && !localStorage.getItem('zero_trust_token')",'expired authentication returns to sign-in after refresh fails');
