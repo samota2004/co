@@ -9049,6 +9049,46 @@
         }
       }
     },
+    "/api/simulation/custom": {
+      "post": {
+        "summary": "Assess a validated custom synthetic context",
+        "description": "Company security/system administrator only. Accepts a bounded synthetic scenario schema, marks the persisted event as simulation data, and runs the existing contextual risk/policy pipeline. This does not invoke or bypass the CERT aggregate model-inference guard.",
+        "operationId": "post_simulation_custom",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["userId", "downloadVolumeMB", "failedAuthCount", "isOffHours", "isPrivilegeEscalation"],
+                "properties": {
+                  "userId": {"type": "string", "minLength": 1, "maxLength": 128},
+                  "resourceId": {"type": "string", "minLength": 1, "maxLength": 128},
+                  "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
+                  "downloadVolumeMB": {"type": "number", "minimum": 0, "maximum": 1000000},
+                  "failedAuthCount": {"type": "integer", "minimum": 0, "maximum": 100},
+                  "isOffHours": {"type": "boolean"},
+                  "isPrivilegeEscalation": {"type": "boolean"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Synthetic contextual assessment completed; persisted events remain marked synthetic."},
+          "400": {"description": "Invalid custom simulation fields or employee selection."},
+          "401": {"description": "Missing, expired or revoked administrator session."},
+          "403": {"description": "Security administrator permission required."},
+          "404": {"description": "Selected employee, device or resource is outside the authorized scope."}
+        }
+      }
+    },
     "/api/copilot/chat": {
       "post": {
         "summary": "Company-scoped advisory explanation",
@@ -11261,6 +11301,15 @@
               "enum": [
                 "APPLICATION_USAGE"
               ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "readinessDate",
+            "description": "Optional UTC calendar day for scoped endpoint telemetry readiness; defaults to today. Future and malformed dates are rejected.",
+            "schema": {
+              "type": "string",
+              "format": "date"
             }
           }
         ],

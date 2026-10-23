@@ -3,6 +3,18 @@ import {prisma} from '../models/prisma.js';
 import {securityService} from '../services/security-service.js';
 import {api,SecurityError,scopedUser} from '../services/security-common.js';
 const router=Router();
+const CUSTOM_INPUT_FIELDS=new Set(['userId','resourceId','deviceId','downloadVolumeMB','failedAuthCount','isOffHours','isPrivilegeEscalation']);
+function customInput(raw){
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new SecurityError(400,'INVALID_SIMULATION_INPUT','A custom simulation object is required.');
+ const unexpected=Object.keys(raw).filter(key=>!CUSTOM_INPUT_FIELDS.has(key));
+ if(unexpected.length)throw new SecurityError(400,'INVALID_SIMULATION_INPUT','Custom simulations accept only the documented synthetic context fields.');
+ if(typeof raw.userId!=='string'||!raw.userId.trim()||raw.userId.length>128)throw new SecurityError(400,'INVALID_SIMULATION_INPUT','Select a valid employee demo account.');
+ for(const key of ['resourceId','deviceId'])if(raw[key]!==undefined&&(typeof raw[key]!=='string'||!raw[key].trim()||raw[key].length>128))throw new SecurityError(400,'INVALID_SIMULATION_INPUT',`${key} must be a valid identifier when provided.`);
+ if(typeof raw.downloadVolumeMB!=='number'||!Number.isFinite(raw.downloadVolumeMB)||raw.downloadVolumeMB<0||raw.downloadVolumeMB>1000000)throw new SecurityError(400,'INVALID_SIMULATION_INPUT','Download MB must be a finite number from 0 to 1,000,000.');
+ if(!Number.isInteger(raw.failedAuthCount)||raw.failedAuthCount<0||raw.failedAuthCount>100)throw new SecurityError(400,'INVALID_SIMULATION_INPUT','Failed authentications must be an integer from 0 to 100.');
+ for(const key of ['isOffHours','isPrivilegeEscalation'])if(typeof raw[key]!=='boolean')throw new SecurityError(400,'INVALID_SIMULATION_INPUT',`${key} must be a boolean.`);
+ return raw;
+}
 const SCENARIOS = {
   "scenario-1-normal": {
     name: "Scenario 1: Baseline Normal Access",
@@ -192,6 +204,14 @@ const SCENARIOS = {
 };
 
 router.get('/scenarios',api(async()=>({scenarios:Object.entries(SCENARIOS).map(([id,s])=>({id,name:s.name,eventType:s.eventType,synthetic:true}))})));
+router.post('/custom',api(async req=>{
+ const input=customInput(req.body);
+ const user=await scopedUser(prisma,req.user,input.userId);
+ if(['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(user.roleCode))throw new SecurityError(400,'EMPLOYEE_REQUIRED','Select an employee demo account.');
+ const event={userId:user.id,...(input.resourceId?{resourceId:input.resourceId}:{}),...(input.deviceId?{deviceId:input.deviceId}:{}),eventType:input.isPrivilegeEscalation?'PRIVILEGE_CHANGE':'FILE_DOWNLOAD',source:'synthetic-custom-scenario',downloadVolumeMB:input.downloadVolumeMB,failedAuthCount:input.failedAuthCount,isOffHours:input.isOffHours,isPrivilegeEscalation:input.isPrivilegeEscalation,metadata:{synthetic:true,simulationKind:'custom-context'}};
+ const result=await securityService.evaluate(req.user,event,{ip:req.ip,simulation:true});
+ return{...result,scenario:'Custom synthetic context',synthetic:true};
+}));
 router.post('/scenario/:scenarioId',api(async req=>{
  const scenario=SCENARIOS[req.params.scenarioId];
  if(!scenario)throw new SecurityError(400,'UNKNOWN_SCENARIO','Select an existing scenario.');
@@ -199,7 +219,7 @@ router.post('/scenario/:scenarioId',api(async req=>{
  const user=await scopedUser(prisma,req.user,req.body.userId);
  if(['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(user.roleCode))throw new SecurityError(400,'EMPLOYEE_REQUIRED','Select an employee demo account.');
  const event={...scenario.defaults,...req.body,userId:user.id,eventType:scenario.eventType,source:'synthetic-scenario',metadata:{...scenario.defaults.metadata,...req.body.metadata,synthetic:true,scenarioId:req.params.scenarioId}};
- const result=await securityService.evaluate(req.user,event,{ip:req.ip});
+ const result=await securityService.evaluate(req.user,event,{ip:req.ip,simulation:true});
  return{...result,scenario:scenario.name,synthetic:true};
 }));
 export default router;

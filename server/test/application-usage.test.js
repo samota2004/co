@@ -42,13 +42,27 @@ test('usage filtering precedes timeline limit and preserves employee/company iso
     assert.equal(admin.data.ml.dataReadiness.status,'INSUFFICIENT_FOR_MODEL');
     assert.equal(admin.data.ml.dataReadiness.featureCount,21);
     assert.equal(admin.data.ml.dataReadiness.compatibleFeatureCount,0);
+    assert.equal(admin.data.ml.dataReadiness.version,'cyberorbit-live-rf-readiness/v1');
+    assert.equal(admin.data.ml.dataReadiness.window.timezone,'UTC');
+    assert.equal(admin.data.ml.dataReadiness.scopes.length,1);
+    assert.equal(admin.data.ml.dataReadiness.scopes[0].deviceId,device.id);
+    assert.equal(admin.data.ml.dataReadiness.scopes[0].totalEventCount,223);
+    assert.equal(admin.data.ml.dataReadiness.scopes[0].attributedEventCount,222);
+    assert.equal(admin.data.ml.dataReadiness.scopes[0].unattributedEventCount,1);
+    assert.equal(admin.data.ml.dataReadiness.scopes[0].inferenceAllowed,false);
+    assert.ok(!JSON.stringify(admin.data.ml.dataReadiness).includes('fixture-process'));
     assert.ok(admin.data.ml.dataReadiness.features.some(feature=>feature.name==='email_size_total'&&feature.status==='MISSING_COMPATIBLE_SOURCE'));
     const foreign=await call(f.otherAdmin,'?eventType=APPLICATION_USAGE');assert.ok(foreign.data.events.every(e=>e.companyId==='B'));
+    assert.ok(foreign.data.ml.dataReadiness.scopes.every(scope=>scope.deviceId!==device.id));
+    assert.equal((await call(f.otherAdmin,`?deviceId=${device.id}`)).status,404);
     await assert.rejects(service.dashboard(f.employee2,f.employee.id,'APPLICATION_USAGE'),{status:403});
     assert.equal((await call(f.admin,'?eventType=PROCESS_RUNNING')).status,400);
     assert.equal((await call(f.admin,'?eventType=APPLICATION_USAGE&eventType=APPLICATION_USAGE')).status,400);
+    assert.equal((await call(f.admin,'?readinessDate=not-a-date')).status,400);
+    assert.equal((await call(f.admin,'?readinessDate=2999-01-01')).status,400);
     await f.prisma.endpointEvent.createMany({data:Array.from({length:160},(_,i)=>row('APPLICATION_USAGE','fixture-app',i))});
     const limited=await service.dashboard(f.employee,undefined,'APPLICATION_USAGE');assert.equal(limited.events.length,150);
     assert.equal(limited.timeline.hasMore,true);
+    assert.equal(await f.prisma.mlPrediction.count(),0,'endpoint observation fixtures must not trigger RF inference');
   }finally{if(sse)clearInterval(sse.heartbeatInterval);if(server)await new Promise(r=>server.close(r));await f.close();}
 });

@@ -43,6 +43,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
   const [appSearch,setAppSearch]=useState('');
   const [lastRefreshed,setLastRefreshed]=useState(null);
   const [selectedDeviceId,setSelectedDeviceId]=useState('');
+  const [readinessDate,setReadinessDate]=useState(()=>new Date().toISOString().slice(0,10));
   const timelineList=useRef(null);
   const applications=useMemo(()=>{
     const groups=new Map();
@@ -68,14 +69,14 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
   const refresh=useCallback(async({notify=false}={})=>{
     const id=++sequence.current; setRefreshing(true); setRefreshError('');
     try {
-      const query=new URLSearchParams();if(employeeId)query.set('userId',employeeId);if(eventType)query.set('eventType',eventType);if(selectedDeviceId)query.set('deviceId',selectedDeviceId);
+      const query=new URLSearchParams();if(employeeId)query.set('userId',employeeId);if(eventType)query.set('eventType',eventType);if(selectedDeviceId)query.set('deviceId',selectedDeviceId);query.set('readinessDate',readinessDate);
       const result=await request(`/dashboard${query.size?`?${query}`:''}`);
       if(!Array.isArray(result.devices) || !Array.isArray(result.employees) || !Array.isArray(result.events) || !Array.isArray(result.incidents)) throw new Error('The backend returned an invalid device list.');
       if(mounted.current && id===sequence.current){setData(result);setLastRefreshed(new Date());if(notify)setNotice('Device list refreshed.');}
       return result;
     }catch(e){if(mounted.current && id===sequence.current)setRefreshError(e.message);throw e;}
     finally{if(mounted.current && id===sequence.current)setRefreshing(false);}
-  },[employeeId,eventType,selectedDeviceId]);
+  },[employeeId,eventType,selectedDeviceId,readinessDate]);
   useImperativeHandle(ref,()=>({refresh:()=>refresh()}),[refresh]);
   useEffect(()=>{
     mounted.current=true;const run=()=>refresh().catch(()=>{});run();
@@ -158,7 +159,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
       {administrator&&!d.revokedAt&&<div className="space-y-1"><button type="button" disabled={Boolean(pending)} className="text-cyan-300" onClick={()=>action(d.id,'config',{config:{...d.config,browserTitles:!d.config.browserTitles}})}>{d.config.browserTitles?'Disable':'Enable'} browser titles</button><p className="text-xs text-slate-400">Optional active-tab window titles only. Requires local browserTitles approval and an updated agent with desktop permissions. Titles may contain sensitive page names or search terms. macOS requires non-private window confirmation from the browser companion; unsupported browsers report unavailable. No page contents or browsing history.</p></div>}
     </article>)}
     <p className="text-sm text-amber-200">Endpoint ML assessment unavailable: {data.ml.reason || 'incomplete model feature coverage'}. Existing application risk, trust and incidents remain available. FREEZE also controls the mapped local OS account only on devices with locally approved account control; check the device report for confirmation.</p>
-    {data.ml.dataReadiness&&<details className="rounded-lg border border-amber-300/20 p-3"><summary>Why the 21-feature model is not ready</summary><p className="mt-2 text-sm">{data.ml.dataReadiness.compatibleFeatureCount} of {data.ml.dataReadiness.featureCount} features currently have notebook-compatible live sources. The calendar fields can be derived from a declared UTC day; that alone is not a complete input.</p><ul className="mt-2 list-disc pl-5 text-sm">{data.ml.dataReadiness.features.filter(feature=>feature.status==='MISSING_COMPATIBLE_SOURCE').map(feature=><li key={feature.name}><code>{feature.name}</code> — {feature.source}</li>)}</ul><p className="mt-2 text-xs text-slate-400">No missing values are zero-filled. Endpoint process and file-change events are not treated as CERT file, HTTP, or email records.</p></details>}
+    {data.ml.dataReadiness&&<details className="rounded-lg border border-amber-300/20 p-3"><summary>ML feature readiness ({data.ml.dataReadiness.version})</summary><p className="mt-2 text-sm">Selected UTC day: <strong>{data.ml.dataReadiness.window?.date}</strong> ({data.ml.dataReadiness.window?.state}). Readiness is scoped to enrolled devices visible to this account. {data.ml.dataReadiness.compatibleFeatureCount} of {data.ml.dataReadiness.featureCount} model features have compatible live sources; no RF inference is performed from current endpoint events.</p><div className="mt-2 space-y-2">{(data.ml.dataReadiness.scopes||[]).map(scope=><p key={scope.deviceId} className="text-sm"><strong>{data.devices.find(d=>d.id===scope.deviceId)?.name||'Assigned device'}:</strong> {scope.status.replaceAll('_',' ').toLowerCase()}, {scope.attributedEventCount} employee-attributed observations, {scope.unattributedEventCount} unattributed; calendar {scope.derivableCalendarValues.day_of_week}/{scope.derivableCalendarValues.is_weekend}. Endpoint event counts are diagnostics only.</p>)}</div><p className="mt-2 text-sm">The calendar fields can be derived from the declared UTC day; source-specific logon/device/file/HTTP/email features remain unavailable.</p><ul className="mt-2 list-disc pl-5 text-sm">{data.ml.dataReadiness.features.filter(feature=>feature.status==='MISSING_COMPATIBLE_SOURCE').map(feature=><li key={feature.name}><code>{feature.name}</code> — {feature.source}</li>)}</ul><p className="mt-2 text-xs text-slate-400">No missing values are zero-filled. Endpoint process, USB, file-change, and network-connection events are not treated as CERT logon, device, file/content, HTTP, or email records. Raw event metadata is not used for readiness.</p></details>}
     <h3 className="font-semibold">Real activity timeline</h3>
     <div className="rounded-lg border border-cyan-300/20 bg-slate-900/50 p-3 space-y-1" aria-live="polite">
       <p className="text-sm">Dashboard refreshed: {lastRefreshed?lastRefreshed.toLocaleTimeString():'waiting for first response'} ? Auto-refresh every 15 seconds</p>
@@ -182,6 +183,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
     <div className="flex flex-wrap gap-4">
       <label className="flex items-center gap-3 text-sm">Show activity<select aria-label="Activity type" value={eventType} disabled={refreshing} className="bg-slate-900 rounded p-2" onChange={e=>{setApplication('');setData(d=>({...d,events:[],timeline:undefined}));setEventType(e.target.value);}}><option value="">All activity</option><option value="APPLICATION_USAGE">Application usage</option><option value="PROCESS_ACTIVITY">Background use</option></select></label>
       {data.devices.length>1&&<label className="flex items-center gap-3 text-sm">Device<select aria-label="Activity device" value={selectedDeviceId} disabled={refreshing} className="bg-slate-900 rounded p-2" onChange={e=>{setData(d=>({...d,events:[],timeline:undefined}));setSelectedDeviceId(e.target.value);}}><option value="">All assigned devices</option>{data.devices.map(d=><option key={d.id} value={d.id}>{d.name} — {d.user.name}</option>)}</select></label>}
+      <label className="flex items-center gap-3 text-sm">ML readiness day (UTC)<input aria-label="ML readiness day (UTC)" type="date" max={new Date().toISOString().slice(0,10)} value={readinessDate} disabled={refreshing} className="bg-slate-900 rounded p-2" onChange={e=>setReadinessDate(e.target.value)}/></label>
       {eventType&&<label className="flex items-center gap-3 text-sm">Application<select aria-label="Application filter" value={application} className="bg-slate-900 rounded p-2" onChange={e=>setApplication(e.target.value)}><option value="">All applications</option>{applications.map(a=><option key={a.key} value={a.key}>{applicationLabel(a.name)}</option>)}{application&&!applications.some(a=>a.key===application)&&<option value={application}>{applicationLabel(application)}</option>}</select></label>}
     </div>
     {!selectedDeviceId&&data.devices.some(d=>d.revokedAt)&&<p className="text-sm text-slate-400">All assigned devices is selected, so older activity from revoked laptops remains in this timeline. Select a device to view only its events.</p>}

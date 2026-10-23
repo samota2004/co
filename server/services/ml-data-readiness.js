@@ -28,8 +28,25 @@ const SOURCE_BY_FEATURE = Object.freeze({
 });
 
 const CALENDAR_FEATURES = new Set(['day_of_week', 'is_weekend']);
+export const LIVE_READINESS_VERSION = 'cyberorbit-live-rf-readiness/v1';
 
-export function createLiveModelDataReadiness() {
+export function parseReadinessDate(value, now = new Date()) {
+  const date = value === undefined ? now.toISOString().slice(0, 10) : value;
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new TypeError('readinessDate must be a UTC calendar date in YYYY-MM-DD format.');
+  }
+  const start = new Date(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(start.getTime()) || start.toISOString().slice(0, 10) !== date) {
+    throw new TypeError('readinessDate is not a valid calendar date.');
+  }
+  const today = now.toISOString().slice(0, 10);
+  if (date > today) throw new TypeError('readinessDate cannot be in the future.');
+  const end = new Date(start.getTime() + 86400000);
+  const dayOfWeek = (start.getUTCDay() + 6) % 7; // Notebook/pandas convention: Monday=0.
+  return Object.freeze({ date, start, end, state: date === today ? 'OPEN' : 'CLOSED', dayOfWeek, isWeekend: Number(dayOfWeek >= 5) });
+}
+
+export function createLiveModelDataReadiness({ window = null, scopes = [] } = {}) {
   const features = featureSchema.feature_names.map(name => ({
     name,
     source: SOURCE_BY_FEATURE[name] || 'unmapped training source',
@@ -39,6 +56,7 @@ export function createLiveModelDataReadiness() {
       : 'The enrolled-device/application telemetry does not provide the notebook-equivalent source field and aggregation.',
   }));
   return {
+    version: LIVE_READINESS_VERSION,
     status: 'INSUFFICIENT_FOR_MODEL',
     complete: false,
     featureCount: featureSchema.feature_names.length,
@@ -46,6 +64,8 @@ export function createLiveModelDataReadiness() {
     derivableFeatureCount: features.filter(feature => feature.status === 'DERIVABLE_FROM_DECLARED_DATE').length,
     missingCompatibleFeatureCount: features.filter(feature => feature.status === 'MISSING_COMPATIBLE_SOURCE').length,
     features,
+    ...(window ? { window } : {}),
+    scopes,
     requiredSources: ['logon.csv', 'device.csv', 'file.csv', 'http.csv', 'email.csv'],
     nextSteps: [
       'Provide reviewed source integrations or an authorized complete user-day aggregate that follows the saved model schema.',

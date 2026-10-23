@@ -4,7 +4,8 @@ import { DEFAULT_CONFIG, validateConfig, validateEvent, validateHealth, validate
 import {cityLookup,cityView} from './endpoint-city.js';
 import {coreDeviceSelect,cityDeviceSelect,citySchemaReady,withCitySchema,invalidateCitySchema,isMissingCityColumn} from './endpoint-city-schema.js';
 import {reportCityAddress} from './proxy-policy.js';
-import {createLiveModelDataReadiness} from './ml-data-readiness.js';
+import {createLiveModelDataReadiness,parseReadinessDate} from './ml-data-readiness.js';
+import {featureSchema} from './ml-service.js';
 export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
@@ -173,10 +174,13 @@ export class EndpointService {
     });
     return {success:true};
   }
-  async dashboard(user, employeeId, eventType, deviceId) {
+  async dashboard(user, employeeId, eventType, deviceId, readinessDate) {
     if (employeeId !== undefined && (typeof employeeId !== 'string' || !employeeId.trim() || employeeId.length > 128)) throw new EndpointError(400, 'Invalid employee filter');
     if (eventType !== undefined && !['APPLICATION_ACTIVITY','APPLICATION_USAGE','PROCESS_ACTIVITY'].includes(eventType)) throw new EndpointError(400, 'Invalid activity filter');
     if (deviceId !== undefined && (typeof deviceId !== 'string' || !deviceId.trim() || deviceId.length > 128)) throw new EndpointError(400, 'Invalid device filter');
+    let readinessWindow;
+    try { readinessWindow = parseReadinessDate(readinessDate); }
+    catch (error) { throw new EndpointError(400, error.message, 'INVALID_READINESS_DATE', { field: 'readinessDate', reason: 'invalid_utc_date' }); }
     if (employeeId && !isEndpointAdmin(user) && employeeId !== user.id) {
       const report = user.roleCode === 'MANAGER' && await this.prisma.user.findFirst({ where: { id: employeeId, managerId: user.id, assignedAdminId: user.assignedAdminId || null, companyId: user.companyId }, select: { id: true } });
       if (!report) throw new EndpointError(403, 'Employee access denied');
@@ -191,6 +195,38 @@ export class EndpointService {
     // A device filter must resolve inside the already-scoped company/employee
     // list. This keeps the dashboard filter from becoming an IDOR.
     if (deviceId && !devices.some(d => d.id === deviceId)) throw new EndpointError(404, 'Device not found');
+    const readinessDevices = devices.filter(d => !deviceId || d.id === deviceId);
+    const readinessGroups = readinessDevices.length ? await this.prisma.endpointEvent.groupBy({
+      by: ['deviceId', 'type', 'userId'],
+      where: { companyId: user.companyId, deviceId: { in: readinessDevices.map(d => d.id) }, occurredAt: { gte: readinessWindow.start, lt: readinessWindow.end } },
+      _count: { _all: true },
+    }) : [];
+    const supportedDiagnosticTypes = new Set(['PROCESS_START','PROCESS_STOP','PROCESS_RUNNING','APPLICATION_FOREGROUND','APPLICATION_USAGE','SESSION_LOGIN','SESSION_LOGOUT','SESSION_LOCK','SESSION_UNLOCK','SESSION_STATE','USB_CONNECTED','USB_REMOVED','FILE_CHANGE','NETWORK_CONNECTION']);
+    const readinessScopes = readinessDevices.map(device => {
+      const groups = readinessGroups.filter(group => group.deviceId === device.id);
+      const eventCounts = Object.fromEntries([...supportedDiagnosticTypes].map(type => [type, 0]));
+      let attributedEventCount = 0, unattributedEventCount = 0, unsupportedEventCount = 0;
+      for (const group of groups) {
+        const count = group._count._all;
+        if (group.userId === device.userId) attributedEventCount += count;
+        else unattributedEventCount += count;
+        if (supportedDiagnosticTypes.has(group.type)) eventCounts[group.type] += count;
+        else unsupportedEventCount += count;
+      }
+      const totalEventCount = attributedEventCount + unattributedEventCount;
+      return {
+        employeeId: device.userId,
+        deviceId: device.id,
+        window: { date: readinessWindow.date, timezone: 'UTC', startInclusive: readinessWindow.start.toISOString(), endExclusive: readinessWindow.end.toISOString(), state: readinessWindow.state },
+        status: totalEventCount ? 'OBSERVATIONS_PRESENT_BUT_INCOMPATIBLE' : 'NO_ENDPOINT_EVENTS',
+        totalEventCount, attributedEventCount, unattributedEventCount, unsupportedEventCount, eventCounts,
+        derivableCalendarValues: { day_of_week: readinessWindow.dayOfWeek, is_weekend: readinessWindow.isWeekend },
+        compatibleModelFeatureCount: 0,
+        missingModelFeatures: featureSchema.feature_names.filter(name => !['day_of_week','is_weekend'].includes(name)),
+        inferenceAllowed: false,
+        reason: 'Endpoint observation types are not verified equivalents of the model training logs; event counts are readiness diagnostics only.',
+      };
+    });
     // Admin sees unattributed device activity, employees see only verified personal observations.
     // Filter in PostgreSQL BEFORE the limit. Filtering a mixed result in React
     // loses foreground usage whenever a process snapshot fills the 150 rows.
@@ -213,7 +249,7 @@ export class EndpointService {
     }
     const incidents = isEndpointAdmin(user)||user.roleCode==='MANAGER' ? await this.prisma.incident.findMany({ where: { user: userScope(user), ...(userId ? { userId } : {}) }, take: 30, orderBy: { createdAt: 'desc' } }) : [];
     const employees = isEndpointAdmin(user) ? await this.prisma.user.findMany({ where: { ...userScope(user), status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } }, select: { id: true, employeeId: true, name: true }, orderBy: { name: 'asc' } }) : [];
-    return { devices: devices.map(d => ({ ...d,ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: {...ML_AVAILABILITY, dataReadiness:createLiveModelDataReadiness()} };
+    return { devices: devices.map(d => ({ ...d,ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: {...ML_AVAILABILITY, dataReadiness:createLiveModelDataReadiness({window:{date:readinessWindow.date,timezone:'UTC',startInclusive:readinessWindow.start.toISOString(),endExclusive:readinessWindow.end.toISOString(),state:readinessWindow.state},scopes:readinessScopes})} };
   }
   async change(admin, id, body, revoke = false) {
     if (!admin || !isEndpointAdmin(admin) || admin.status !== 'ACTIVE' || !admin.companyId) throw new EndpointError(403, 'Active administrator required');
