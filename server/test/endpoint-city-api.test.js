@@ -2,11 +2,13 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import {randomUUID} from 'node:crypto';
+import {access} from 'node:fs/promises';
 import {deviceFixture} from './device-fixture.js';
 import {EndpointService} from '../services/endpoint-service.js';
 import {cityLookup,CityLookup} from '../services/endpoint-city.js';
 import {configureProxy} from '../services/proxy-policy.js';
 import {createCityFetcher} from '../services/city-network.js';
+import {LocalCityLookup,verifiedCityReader,cityDatabasePath} from '../services/local-city.js';
 import {expireCityEstimates} from '../services/endpoint-retention.js';
 import {DEFAULT_CONFIG} from '../../agent/shared/contract.js';
 const health={queueEvents:0,queueBytes:0,droppedEvents:0,paused:false,helperLastSeen:null,collectors:{}};
@@ -14,7 +16,7 @@ const health={queueEvents:0,queueBytes:0,droppedEvents:0,paused:false,helperLast
 const heartbeat={agentVersion:'1.1.0',health};
 const estimate={status:'available',source:'heartbeat-public-ip',provider:'ipapi.co',city:'Fixture City',region:'Fixture Region',country:'India',countryCode:'IN',resolvedAt:new Date().toISOString()};
 
-test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, trusted IPs, expiry and safe control races',{skip:!process.env.DATABASE_URL,timeout:90000},async()=>{
+test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, trusted IPs, expiry and safe control races',{skip:!process.env.DATABASE_URL,timeout:90000},async(t)=>{
   const f=await deviceFixture();let server,sse;const oldLookup=cityLookup.lookup;
   try {
     let calls=0,lastAddress;const locator={lookup:async address=>{calls++;lastAddress=address;return estimate;}};
@@ -77,6 +79,21 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
     assert.equal(displayed.ipCityProvider,'ipapi.is');assert.equal(displayed.ipCity.provider,'ipapi.is');assert.equal(displayed.ipCity.city,'IPAPI IS fixture city');
     assert.equal('latitude' in displayed.ipCity,false);assert.equal('longitude' in displayed.ipCity,false);
     assert.equal((await saved()).credentialHash,original.credentialHash);assert.equal((await saved()).mappedIdentity,original.mappedIdentity);
+    // Read the actual pinned MMDB through an authenticated old-agent HTTP
+    // heartbeat. No external location API is allowed on this path.
+    await t.test('real local database city reaches assigned dashboard through old-agent HTTP heartbeat',{skip:!(await access(cityDatabasePath).then(()=>true).catch(()=>false))},async()=>{
+    const localDb=await verifiedCityReader();
+    const localProvider=new CityLookup({env:{ENDPOINT_CITY_ENABLED:'true',IPAPI_PROVIDER:'db-ip-lite',NODE_ENV:'production'},local:new LocalCityLookup({load:async()=>localDb}),fetcher:()=>assert.fail('Local mode contacted an external provider')});
+    const expected=await localProvider.lookup('8.8.8.8');assert.equal(expected.status,'available');
+    cityLookup.lookup=address=>localProvider.lookup(address);
+    r=await post(chain);assert.equal(r.status,200);
+    displayed=(await new EndpointService(f.prisma,localProvider).dashboard(f.admin)).devices.find(device=>device.id===a.deviceId);
+    assert.equal(displayed.ipCityProvider,'db-ip-lite');assert.equal(displayed.ipCity.provider,'db-ip-lite');
+    assert.equal(displayed.ipCity.city,expected.city);assert.equal(displayed.ipCity.stale,false);assert.equal(displayed.connectionStatus,'CONNECTED');
+    assert.ok(Date.now()-Date.parse(displayed.ipCity.observedAt)<5000);assert.equal(displayed.ipCity.databaseRelease,expected.databaseRelease);
+    assert.equal((await saved()).credentialHash,original.credentialHash);assert.equal((await saved()).mappedIdentity,original.mappedIdentity);
+    assert.equal((await service.dashboard(f.otherAdmin)).devices.length,0);
+    });
     const recovery=new CityLookup({env:{ENDPOINT_CITY_ENABLED:'true',IPAPI_PROVIDER:'ipapi.is',IPAPI_API_KEY:'synthetic-is-key'},fetcher:createCityFetcher({
       warn:()=>{},fetcher:async()=>{throw new TypeError('fetch failed',{cause:Object.assign(new Error('Sensitive transport details'),{code:'ENETUNREACH'})});},
       ipv4Request:async(url,options)=>{assert.equal(url.hostname,'api.ipapi.is');assert.equal(JSON.parse(options.body).q,'8.8.8.8');return new Response(JSON.stringify({ip:'8.8.8.8',location:{city:'Recovered network fixture',country:'India',country_code:'IN'}}));}

@@ -106,6 +106,7 @@ test('persisted approved-model predictions outside the activity window remain av
   assert.equal(result.ml.available, true);
   assert.equal(result.ml.status, 'RECORDED_PREDICTION');
   assert.equal(result.ml.probability, 0);
+  assert.match(result.ml.scoreMeaning,/Uncalibrated positive-class Random Forest score/);
   assert.equal(result.ml.timestamp, timestamp);
   assert.ok(result.history.every(point => point.mlProb === null));
 });

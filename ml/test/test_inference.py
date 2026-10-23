@@ -1,8 +1,13 @@
 import unittest
+import json
+import os
+from pathlib import Path
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from ml.src.app import app
-from ml.src.inference import FEATURE_NAMES, predict
+from ml.src.inference import FEATURE_NAMES, MODEL_DIR, PROJECT_ROOT, predict, resolve_model_dir
 from ml.src.xai import explain
+from ml.test.test_research import test_directory
 
 
 class InferenceTests(unittest.TestCase):
@@ -20,6 +25,18 @@ class InferenceTests(unittest.TestCase):
         reasons = explain(self.features)
         self.assertEqual(len(reasons), 5)
         self.assertTrue(all(r['feature'] in FEATURE_NAMES for r in reasons))
+
+    def test_active_schema_order_and_project_relative_model_overrides(self):
+        schema = json.loads((MODEL_DIR / 'multi_source_feature_schema.json').read_text(encoding='utf-8'))
+        self.assertEqual(schema['feature_count'], 21)
+        self.assertEqual(FEATURE_NAMES, schema['feature_names'])
+        self.assertEqual(resolve_model_dir('custom-models', Path('C:/project')).as_posix(),
+                         (Path('C:/project') / 'custom-models').resolve().as_posix())
+        with test_directory() as directory:
+            root = Path(directory)
+            (root / '.env').write_text('CYBERORBIT_MODEL_DIR="artifacts/model-a"\n', encoding='utf-8')
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(resolve_model_dir(project_root=root), (root / 'artifacts/model-a').resolve())
 
     def test_schema_values_and_no_missing_value_fabrication(self):
         for value in (None, '3', float('nan'), float('inf'), -1, True):

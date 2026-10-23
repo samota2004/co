@@ -12,6 +12,47 @@ database errors can show another city. Treat the result as an estimate.
 
 ## Setup
 
+### Local database option for the confirmed API connection failure
+
+The live log on 20 October showed `ECONNREFUSED` for both HTTPS attempts to
+ipapi.is. A separate local database mode is now available: it does not contact
+the blocked API and does not need a new employee kit or enrollment.
+
+Deploy all updated source files and `package-lock.json`. In the existing Render
+backend **Environment**, set these before rebuilding:
+
+```text
+ENDPOINT_CITY_ENABLED=true
+IPAPI_PROVIDER=db-ip-lite
+TRUST_PROXY=render
+```
+
+Keep the existing database URL and credentials. The API key can remain saved;
+local mode does not use it. Keep the existing Build Command:
+`npm ci && npm run prisma:migrate && npm run build` and Start Command `npm start`.
+The build prepares the real verified DB-IP Lite release; look for
+`Verified local city database ready` (or `already prepared`) before deployment.
+The database is downloaded at build time, not on each heartbeat. A download or
+validation failure fails the build and needs attention; no invented location is
+substituted. The default remains ipapi.co when no provider is specified, and
+existing explicitly selected API modes continue to work unchanged.
+
+After deployment, Devices shows `Configured provider: db-ip-lite`. Leave the
+assigned device's city estimate enabled. Wait for a new authenticated heartbeat
+and dashboard refresh, then verify the displayed city **and fresh Last updated
+timestamp**. A previous API error is replaced by the next result. No re-enrollment
+or city toggle is needed. I cannot confirm an employee's live city until that
+deployed result has been observed.
+
+Local results show DB-IP attribution and database release. Only the approximate
+city/region/country is saved; no IP, coordinates or travel history. This mode
+uses about 121 MB for the read-only database plus backend overhead. Refresh the
+pinned release monthly; data older than 90 days is rejected. See
+[data preparation and licensing](server/data/README.md). The city lookup is
+local; the initial build needs access to DB-IP's official download host.
+
+### Existing API provider setup
+
 If the live Devices page shows a migration error instead of previously enrolled
 laptops, follow [Render device recovery](RENDER-DEVICE-RECOVERY.md). A failed
 dashboard query is not an empty database. This fix also keeps core monitoring
@@ -271,6 +312,79 @@ quota safeguards, HTTP heartbeat/dashboard recovery, browser diagnostic display,
 existing proxy/provider/migration checks, startup, enrollment and agent release
 compatibility. The production build also passed with its existing chunk-size
 warning. Agent source and distribution kits were not modified.
+
+### Confirmed Render refusal after IPv4 recovery — 20 October 2026
+
+The supplied production log includes:
+
+```text
+[endpoint-city-transport] {"action":"retry-ipv4","provider":"api.ipapi.is","networkCodes":["ECONNREFUSED"]}
+[endpoint-city-provider] {"provider":"ipapi.is","status":"lookup-unavailable","reason":"connection-refused","networkCodes":["ECONNREFUSED"]}
+```
+
+The adjacent heartbeat completed with HTTP 200 at `2026-10-20T10:57:23.284Z`.
+Device dashboard and ingest requests also returned 200. Thus the updated code
+is deployed and the IPv4 attempt also failed; this is not evidence that the fix
+was omitted or that existing enrollment/data needs to be replaced.
+
+`ECONNREFUSED` establishes a refused connection before an HTTP API response.
+It does not establish which endpoint/firewall refused it, whether DNS selected
+an unexpected destination, or whether the provider blocked Render. It also
+does not establish that the API key was accepted or rejected on Render.
+The earlier local-key probe confirms only the local route. Another blind
+redeploy, key replacement, provider-region/IP rotation or disabled certificate
+validation is not a verified remedy.
+
+Next, inspect connectivity from the **running Render service**. If a Dashboard
+Shell is available, a credential-free check is:
+
+```sh
+curl -4 -I --connect-timeout 5 --max-time 10 https://api.ipapi.is/
+```
+
+An HTTP response (even 4xx/405 for HEAD) establishes TCP/TLS reachability for this
+check, not a successful API lookup. A curl connection-refused result reproduces
+the transport failure independently of the application and API key. Run it on
+Render, not the employee laptop or local development computer. Render's
+[shell documentation](https://render.com/docs/ssh) says free web services have
+no Dashboard Shell/SSH; do not assume a paid shell is available or required.
+
+Open the existing Render service's **Connect -> Outbound** tab and collect its
+outbound IP ranges, as described in [Render's outbound IP
+documentation](https://render.com/docs/outbound-ip-addresses). Ask
+[ipapi.is support](https://ipapi.is/contact.html) and, if necessary, Render
+support to check destination health, DNS and access/firewall rules for that
+service's route.
+
+The user supplied `74.220.52.0/24` and `74.220.60.0/24` as this Render service's
+outbound ranges and asked us to proceed. On 20 October 2026 the prepared request
+was submitted to the official `info@ipapi.is` support address using the project's
+existing Mailjet sender. Mailjet accepted it for processing. Inbox delivery,
+a provider response and restored network access are not yet confirmed.
+The exact submitted text is in
+[support/ipapi-is-render-request.json](support/ipapi-is-render-request.json);
+the acceptance receipt is in
+[support/ipapi-is-render-receipt.json](support/ipapi-is-render-receipt.json).
+No API key, employee IP, device ID or raw authentication log was sent.
+Provider replies can go to the configured `MAILJET_FROM_EMAIL` mailbox. Do not
+resend blindly: the one-time sender records attempts and accepted receipts to
+prevent duplicate submissions.
+
+Original support template (the actual request above includes the supplied ranges
+and omits the unconfirmed service region):
+
+> Our CYBERORBIT backend runs on a Render public web service in [region], with
+> outbound IP ranges [ranges]. HTTPS connections to api.ipapi.is on port 443
+> fail with ECONNREFUSED, including an explicit IPv4 attempt. One recorded
+> failure was 2026-10-20 10:57:23 UTC. There is no HTTP status from your API.
+> The same provider/key combination succeeded from our local development
+> network using a public test IP. Please verify endpoint health and whether
+> these outbound ranges are blocked or need approved access. We can provide
+> further connection diagnostics securely. No API key or employee IP is included.
+
+After the route is restored, a new normal heartbeat can retry automatically.
+Confirm an actual device-city observation with a fresh timestamp before marking
+live location monitoring recovered. Employee kits and enrollment remain unchanged.
 
 ## Verification in this workspace — 18 October 2026
 

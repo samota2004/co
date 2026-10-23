@@ -12,7 +12,7 @@ class PredictionRequest(BaseModel):
 class PredictionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user: str
-    threat_probability: float = Field(ge=0.0, le=1.0)
+    threat_probability: float = Field(ge=0.0, le=1.0, description="Legacy wire name for an uncalibrated Random Forest positive-class score; not a validated threat probability.")
     predicted_class: Literal[0, 1]
     operating_threshold: float = Field(ge=0.0, le=1.0)
     model_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")

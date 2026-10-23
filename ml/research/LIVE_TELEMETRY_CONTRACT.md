@@ -1,0 +1,50 @@
+# Proposed live telemetry contract for the existing 21-feature model
+
+This document defines the minimum evidence required before a source integration may claim compatibility with `multi_source_feature_schema.json`. It does not authorize new collection, establish that a source is equivalent to CERT r4.2, or make endpoint observations eligible for RF inference. Until source semantics, privacy scope, identity mapping, and timestamp behavior are reviewed, the active endpoint path reports model data as incomplete.
+
+## Current boundary
+
+The enrolled agent currently emits process, application, session, USB, file-change, and network-connection observations. Its authenticated device credential establishes the enrolled device; the server associates a user only where the configured mapped OS identity is verified for supported event types. These observations do not establish CERT `logon.csv`, `device.csv`, `file.csv`, `http.csv`, or `email.csv` rows. In particular, process start is not a user logon; USB connection is not a CERT device activity record; a file change is not a file read/content record; a socket connection is not an HTTP URL/content record; and there is no email source.
+
+The only model inputs calculable from a declared calendar date are `day_of_week` and `is_weekend`. The present readiness response intentionally counts **zero** live features as fully compatible and reports the remaining 19 as unavailable. Date-derived fields alone cannot form a model input.
+
+## Candidate source review
+
+| Candidate | Availability evidence | Legitimate model-source coverage now | Remaining requirements |
+|---|---|---|---|
+| Enrolled CYBERORBIT endpoint agent | Shared event contract, OS collectors, enrollment and persisted endpoint-event service are present and tested. Device identity is credential-bound; employee attribution is conditional on the enrolled mapped OS identity and event type. Events use UTC `occurredAt` and server `receivedAt`. | None of the five notebook source families is established. Existing process/session/USB/file-change/socket events lack the required source definitions or fields. | A separately reviewed source-specific collection contract, additional approved event semantics, and independently mapped user/device/time fields. Current product authorization does not itself approve collecting new categories. |
+| Enterprise audit-log integration (for example, a tenant-authorized identity, mail, file, or web audit source) | No Graph, Google Workspace Admin SDK, SIEM, tenant credentials, connector configuration, or source-specific ingestion adapter was found in the project configuration/code search. | None verified. A product name or possible API is not evidence the tenant has licensed, enabled, or authorized it. | Owner approval, licenses/permissions, tenant and identity mapping, retention/privacy review, source schemas, timestamp guarantees, and connector credentials in managed configuration. Evaluate each source mapping individually before implementation. |
+| Official CERT r4.2 | The repository has the notebook and provisional parser, but checked input locations do not contain `logon.csv` or `answers.tar.bz2`; release documentation and remaining raw logs were not verified locally. | Notebook-derived feature formulas can be exercised by synthetic fixtures only. No real CERT rows or labels are available for validation. | Lawfully obtained release files, official README/terms, authorized answer archive, checksums, and reviewed answer-key-to-user-day mapping. |
+
+**Selected source:** none for live RF aggregation. The enrolled agent is available for endpoint visibility and contextual analysis, but no source currently provides a verified notebook-compatible feature family. The synthetic raw-log fixture described below is only a parser-to-schema compatibility harness.
+
+## Source contract required for a future reviewed integration
+
+Each accepted record must have a source-specific, documented event type; immutable event identifier; authenticated tenant; server-resolved employee identity; server-resolved device identity; occurrence timestamp with explicit offset; ingestion timestamp; and source/schema version. The adapter must reject ambiguous timestamps, unknown schema versions, malformed required fields, and identity values supplied only as untrusted display names. Normalize accepted instants to UTC, then group by the UTC calendar date only if a data-governance review establishes that this matches the training date convention. The notebook uses date-derived calendar features, but the original CERT timestamp timezone semantics and live source parity still require confirmation against the official release documentation.
+
+Retries must be idempotent using a source-issued stable event identifier scoped to its source and tenant. Conflicting payloads for one identifier must be rejected and audited. This differs from the notebook's visible row-count aggregation, which does not perform event-ID deduplication; equivalence must be reviewed before production use. Never silently count a retransmission as a new behavior event or silently discard a conflict.
+
+| Source | Required event fields and semantics | Model features supported by the notebook formulas | Current agent compatibility |
+|---|---|---|---|
+| Logon | Actual interactive or system authentication event, outcome/activity, source PC/device, user, event ID, timestamp. A process/application event is insufficient. | `logon_count` = event rows; `logon_unique_pc_count` = distinct source `pc`. | None. `SESSION_LOGIN` is a session state event and does not provide the notebook's verified logon source semantics. |
+| Device | Source-defined device activity record with source PC and activity/event fields. A USB attach/remove event must not be substituted without proof the definitions match. | `device_event_count` = event rows; `device_unique_pc_count` = distinct source `pc`. | None. `USB_CONNECTED`/`USB_REMOVED` currently identify peripheral metadata, not CERT device rows. |
+| File | Source-defined file event with source PC, filename and content-presence field. Event meaning (read, write, copy, etc.) must be specified by the approved collector. | `file_event_count` = event rows; `file_unique_pc_count` = distinct `pc`; `unique_files` = distinct filename; `file_content_events` = rows with non-null content. | None. `FILE_CHANGE` describes a change and path fragment; it does not establish read activity or the notebook content field. |
+| HTTP | Actual HTTP request/log record with source PC, URL and content field, with collection minimization and sensitive-data controls. | `http_event_count` = event rows; `http_unique_pc_count` = distinct `pc`; `unique_urls` = distinct URL; `unique_http_content` = distinct non-null content. | None. `NETWORK_CONNECTION` has protocol/address/port/state but no HTTP URL, response/content, or verified HTTP request semantics. |
+| Email | Actual email activity record with source PC, recipient `to`, numeric size, numeric attachment count, event ID and timestamp. `cc`/`bcc` are not used by the notebook's `unique_recipients` formula. | `email_event_count` = event rows; `email_unique_pc_count` = distinct `pc`; `unique_recipients` = distinct `to`; `email_size_total` = sum(size); `attachments_total` = sum(attachments). | None. No email collector or email activity fields exist in the agent event contract. |
+
+The notebook's derived features must be computed only from those reviewed source rows: `day_of_week` uses pandas Monday=0 through Sunday=6; `is_weekend` is 1 for days 5 and 6; `total_activity` is the sum of the five event counts; `cross_source_activity` is the number of source families with at least one row. Missing source coverage is **unknown**, not zero. A complete user-day is only available after its full agreed observation window has closed; it must not be used to claim an earlier online decision.
+
+## Privacy, authorization, and data quality requirements
+
+- Collection requires an approved purpose, employee notice/authority, retention limit, and access policy. Do not collect message bodies, file contents, browser titles, or full URLs unless separately justified and approved; the notebook feature names do not by themselves authorize collection of raw content.
+- Enforce tenant and employee scope in the server, derived from authenticated source credentials and reviewed identity mapping. Never accept a client-supplied employee, department, role, risk, or trust value as authoritative.
+- Keep raw telemetry restricted. Model requests and dashboard responses should expose aggregate features or minimized explanations only, under existing administrator authorization.
+- Distinguish `NO_EVENTS` from `SOURCE_UNAVAILABLE`, `PARTIAL_WINDOW`, `INVALID_RECORDS`, and `COMPLETE`. Only `COMPLETE` source coverage for all required families can be considered for a schema-compatible aggregate. Missing values must not be zero-filled.
+- Preserve source manifests, schema version, time normalization, deduplication counts, rejected-record reasons, and feature code version. Do not write raw source data or answer-key files to Git.
+- Keep inference fail-closed. If any feature or source cannot be established, return readiness diagnostics and do not create an ML prediction, risk update, incident, or normal/low-risk fallback from that incomplete model input.
+
+## Implementation state
+
+The endpoint agent's authenticated ingestion, event validation, persistence, duplicate protection, and scoped dashboard remain the supported live telemetry path. These observations can support contextual endpoint visibility and risk analysis, but do not support the 21-input RF model. The legacy generic `/api/telemetry/ingest` route now returns `ML_DATA_INCOMPLETE` with readiness diagnostics before normalization, pseudo-aggregation, persistence, or inference. Complete administrator-imported aggregates remain on the separate guarded `/api/ml/predict` path.
+
+The official CERT r4.2 logs, release README, and authorized answer archive are not available in this workspace. No live or research inference compatibility is claimed by this contract.

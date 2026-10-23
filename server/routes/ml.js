@@ -5,6 +5,7 @@ import {requireSecurityAdmin} from '../middleware/auth.js';
 import {api,scopedUser,SecurityError,userScope} from '../services/security-common.js';
 import {featureSchema,modelMetadata,modelFingerprint,checkMLServiceHealth} from '../services/ml-service.js';
 import {securityService} from '../services/security-service.js';
+import {createLiveModelDataReadiness} from '../services/ml-data-readiness.js';
 const router=Router();
 router.get('/metrics',requireSecurityAdmin,api(async()=>{
  let experiment=null;
@@ -30,6 +31,7 @@ router.post('/predict',requireSecurityAdmin,api(req=>{
 router.get('/employee/:userId/analysis',api(async req=>{
  const user=await scopedUser(prisma,req.user,req.params.userId);
  const [events,latest,baseline]=await Promise.all([prisma.activityEvent.findMany({where:{userId:user.id},orderBy:{timestamp:'desc'},take:200}),prisma.riskScore.findFirst({where:{userId:user.id},orderBy:{timestamp:'desc'}}),prisma.behaviorProfile.findUnique({where:{userId:user.id}})]);
- return{employee:{id:user.id,name:user.name,riskScore:user.riskScore,trustScore:user.trustScore,riskLevel:user.riskLevel},analysis:{hasActivity:events.length>0,latestDate:events[0]?.timestamp||null,features:null,ml:{available:false,reason:'The live sources do not cover all CERT user-day file-content, HTTP-content and email features. No missing features have been filled in.',requiredFeatures:featureSchema.feature_names},behavior:{totalEvents:events.length,failedLogins:events.reduce((n,e)=>n+e.failedAttempts,0),downloadVolumeMB:events.reduce((n,e)=>n+e.downloadSizeMB,0),offHoursEvents:events.filter(e=>e.isOffHours).length},risk:latest,baseline}};
+ const dataReadiness=createLiveModelDataReadiness();
+ return{employee:{id:user.id,name:user.name,riskScore:user.riskScore,trustScore:user.trustScore,riskLevel:user.riskLevel},analysis:{hasActivity:events.length>0,latestDate:events[0]?.timestamp||null,features:null,ml:{available:false,status:'AWAITING_COMPLETE_USER_DAY',reason:'Live application and enrolled-device telemetry cannot construct the notebook-equivalent 21-feature user-day. No missing features have been filled in.',requiredFeatures:featureSchema.feature_names,dataReadiness},behavior:{totalEvents:events.length,failedLogins:events.reduce((n,e)=>n+e.failedAttempts,0),downloadVolumeMB:events.reduce((n,e)=>n+e.downloadSizeMB,0),offHoursEvents:events.filter(e=>e.isOffHours).length},risk:latest,baseline}};
 }));
 export default router;

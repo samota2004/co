@@ -117,13 +117,13 @@ export const AiRiskAnalysisPage = ({
   const hasTelemetry = analysis?.hasTelemetry === true;
   const riskScore = analysis?.riskScore ?? null;
   const trustScore = analysis?.trustScore ?? null;
-  const rfProbability = analysis?.ml?.probability ?? null;
+  const rfScore = analysis?.ml?.probability ?? null;
   const riskFactors = (analysis?.contributingFactors || []).map(factor => ({
     name: factor.factor, score: factor.scoreImpact, description: factor.description,
   }));
   const riskHistory = analysis?.history || [];
   const formatScore = value => typeof value === "number" && Number.isFinite(value) ? value.toFixed(Number.isInteger(value) ? 0 : 1) : "N/A";
-  const formatProbability = value => typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "N/A";
+  const formatRfScore = value => typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)} / 100` : "N/A";
   // ======================================================
   // MAIN PAGE
   // ======================================================
@@ -332,12 +332,12 @@ export const AiRiskAnalysisPage = ({
             </span>
           </div>
 
-          {/* 3. Recorded supervised-model probability or explicit input status */}
+          {/* 3. Recorded uncalibrated supervised-model score or explicit input status */}
 
           <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
             <div className="flex items-start justify-between">
               <span className="max-w-[180px] text-[12px] font-medium leading-4 tracking-[0.12em] text-[#A7B0BA]">
-                ML THREAT PROBABILITY
+                RF SCORE (UNCALIBRATED)
               </span>
 
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
@@ -346,11 +346,11 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <div className="mt-5 text-4xl font-light tracking-[-0.04em]">
-              {analysis?.ml?.available ? formatProbability(rfProbability) : <span className="text-2xl">Awaiting inputs</span>}
+              {analysis?.ml?.available ? formatRfScore(rfScore) : <span className="text-2xl">Awaiting inputs</span>}
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              {analysis?.ml?.available ? `Recorded model prediction · ${new Date(analysis.ml.timestamp).toLocaleString()}` : analysis?.ml?.reason}
+              {analysis?.ml?.available ? `Recorded uncalibrated RF score · ${new Date(analysis.ml.timestamp).toLocaleString()}` : analysis?.ml?.reason}
             </span>
           </div>
 
@@ -563,7 +563,7 @@ export const AiRiskAnalysisPage = ({
                     strokeWidth={1.5}
                     fillOpacity={1}
                     fill="url(#aiGoldArea)"
-                    name="Model threat probability %"
+                    name="Uncalibrated RF score × 100"
                   />}
                 </AreaChart>
               </ResponsiveContainer>}

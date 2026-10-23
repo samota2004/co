@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 export class SecurityError extends Error {
-  constructor(status,code,message){super(message);this.status=status;this.code=code;}
+  constructor(status,code,message,details=null){super(message);this.status=status;this.code=code;if(details)this.details=details;}
 }
 export const isAdmin=user=>['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(user?.roleCode);
 export const userScope=user=>({companyId:user.companyId,deletedAt:null,...(isAdmin(user)?(user.isMainAdmin===true?{}:{OR:[{id:user.id},{assignedAdminId:user.id}]}):user.roleCode==='MANAGER'?{OR:[{id:user.id},{managerId:user.id,assignedAdminId:user.assignedAdminId||null}]}:{id:user.id})});
@@ -16,7 +16,7 @@ export function securityErrorHandler(e,req,res,next){
   const code=e instanceof SecurityError?e.code:status===409?'RECORD_CONFLICT':invalidFields?'INVALID_INPUT':status===400?'INVALID_JSON':status===413?'PAYLOAD_TOO_LARGE':'SERVICE_UNAVAILABLE';
   const requestId=req.requestId||randomUUID();
   console.error(JSON.stringify({timestamp:new Date().toISOString(),requestId,method:req.method,endpoint:req.path,status,code,category:typeof e.code==='string'?e.code:e.name}));
-  res.status(status).json({success:false,error:{code,message:e instanceof SecurityError?e.message:status===409?'A record conflicts with an existing identifier or related record.':status===400?'Invalid request fields or JSON.':status===413?'Request exceeds the allowed size.':'Unable to complete this operation. Check server configuration and try again.',requestId}});
+  res.status(status).json({success:false,error:{code,message:e instanceof SecurityError?e.message:status===409?'A record conflicts with an existing identifier or related record.':status===400?'Invalid request fields or JSON.':status===413?'Request exceeds the allowed size.':'Unable to complete this operation. Check server configuration and try again.',requestId,...(e instanceof SecurityError&&e.details?{details:e.details}:{})}});
 }
 export function text(value,label,max=256){if(typeof value!=='string'||!value.trim()||value.length>max)throw new SecurityError(400,'INVALID_INPUT',`${label} is required and must be at most ${max} characters.`);return value.trim();}
 export const publicUser=u=>{const{passwordHash,...safe}=u;return{...safe,role:u.roleCode,department:u.departmentCode,currentRiskScore:u.riskScore,currentTrustScore:u.trustScore,currentRiskLevel:u.riskLevel};};

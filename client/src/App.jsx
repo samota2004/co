@@ -778,7 +778,7 @@ export default function App() {
                       payload.data?.decision || ev.policyAction || "ALLOW"
                     }`,
                     type:
-                      risk >= 75 ? "danger" : risk >= 50 ? "warning" : "info",
+                      ['HIGH','VERY_HIGH','CRITICAL'].includes(payload.data?.riskLevel) || risk >= 60 ? "danger" : risk >= 40 ? "warning" : "info",
                     timestamp: new Date().toLocaleTimeString(),
                   });
                 }

@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG, validateConfig, validateEvent, validateHealth, validate
 import {cityLookup,cityView} from './endpoint-city.js';
 import {coreDeviceSelect,cityDeviceSelect,citySchemaReady,withCitySchema,invalidateCitySchema,isMissingCityColumn} from './endpoint-city-schema.js';
 import {reportCityAddress} from './proxy-policy.js';
+import {createLiveModelDataReadiness} from './ml-data-readiness.js';
 export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
@@ -212,7 +213,7 @@ export class EndpointService {
     }
     const incidents = isEndpointAdmin(user)||user.roleCode==='MANAGER' ? await this.prisma.incident.findMany({ where: { user: userScope(user), ...(userId ? { userId } : {}) }, take: 30, orderBy: { createdAt: 'desc' } }) : [];
     const employees = isEndpointAdmin(user) ? await this.prisma.user.findMany({ where: { ...userScope(user), status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } }, select: { id: true, employeeId: true, name: true }, orderBy: { name: 'asc' } }) : [];
-    return { devices: devices.map(d => ({ ...d,ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: ML_AVAILABILITY };
+    return { devices: devices.map(d => ({ ...d,ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: {...ML_AVAILABILITY, dataReadiness:createLiveModelDataReadiness()} };
   }
   async change(admin, id, body, revoke = false) {
     if (!admin || !isEndpointAdmin(admin) || admin.status !== 'ACTIVE' || !admin.companyId) throw new EndpointError(403, 'Active administrator required');

@@ -80,9 +80,9 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     assert.equal(initialAnalysis.analysis.trustBasis, 'ACCOUNT_BASELINE');
     assert.ok((await b.evaluate(card('TRUST SCORE'))).includes(String(f.employee.trustScore)));
     assert.ok((await b.evaluate(card('TRUST SCORE'))).includes('Stored account baseline'));
-    assert.ok((await b.evaluate(card('ML THREAT PROBABILITY'))).includes('Awaiting inputs'));
+    assert.ok((await b.evaluate(card('RF SCORE (UNCALIBRATED)'))).includes('Awaiting inputs'));
     assert.ok(!(await b.evaluate(card('TRUST SCORE'))).includes('N/A'));
-    assert.ok(!(await b.evaluate(card('ML THREAT PROBABILITY'))).includes('N/A'));
+    assert.ok(!(await b.evaluate(card('RF SCORE (UNCALIBRATED)'))).includes('N/A'));
     const newUsage = { ...usage, eventId: randomUUID(), occurredAt: new Date().toISOString(), metadata: { ...usage.metadata, name: 'brave', durationSeconds: 12 } };
     const accepted = await fetch(`${origin}/api/endpoint/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${enrolled.credential}` }, body: JSON.stringify({ events: [newUsage] }) });
     assert.equal(accepted.status, 200);
@@ -122,13 +122,13 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     await f.prisma.mlPrediction.create({ data: { userId: f.employee.id, modelVersionId: otherModel.id, featureVector: {}, anomalyScore: 0.99, isAnomalous: true, riskScore: 20, attributions: [] } });
     await refresh();
     await waitUntil(b, settled, 'different model result checked');
-    assert.ok((await b.evaluate(card('ML THREAT PROBABILITY'))).includes('Awaiting inputs'), 'An arbitrary anomaly score must not become a supervised threat probability');
+    assert.ok((await b.evaluate(card('RF SCORE (UNCALIBRATED)'))).includes('Awaiting inputs'), 'An arbitrary anomaly score must not become a supervised threat probability');
     const { registerModel } = await import('../services/ml-service.js');
     const model = await registerModel(f.prisma);
     await f.prisma.mlPrediction.create({ data: { userId: f.employee.id, modelVersionId: model.id, featureVector: {}, anomalyScore: 0.37, isAnomalous: false, riskScore: 20, attributions: [], timestamp: new Date(Date.now() - 48 * 3600000) } });
     await refresh();
-    await waitUntil(b, `${settled} && ${card('ML THREAT PROBABILITY')}.includes('37.0%')`, 'stored approved model prediction');
-    assert.ok(!(await b.evaluate(card('ML THREAT PROBABILITY'))).includes('Awaiting inputs'));
+    await waitUntil(b, `${settled} && ${card('RF SCORE (UNCALIBRATED)')}.includes('37.0 / 100')`, 'stored approved model prediction');
+    assert.ok(!(await b.evaluate(card('RF SCORE (UNCALIBRATED)'))).includes('Awaiting inputs'));
     assert.ok(!responses.some(r => r.status === 404));
   } finally {
     if (previousTimezone === undefined) delete process.env.SECURITY_TIMEZONE; else process.env.SECURITY_TIMEZONE = previousTimezone;

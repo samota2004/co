@@ -2973,8 +2973,8 @@
         }
       },
       "post": {
-        "summary": "Import approved contextual event",
-        "description": "Company security/system administrator; main-admin protection applies.",
+    "summary": "Reject unsupported generic model telemetry",
+    "description": "Company security/system administrator; main-admin protection applies. This legacy generic-event route returns ML_DATA_INCOMPLETE readiness diagnostics and never aggregates, persists, or infers. Use the authenticated endpoint-agent ingestion route for supported observations and the guarded ML aggregate-import route only for complete reviewed aggregates.",
         "operationId": "post_activity",
         "security": [
           {
@@ -2983,24 +2983,8 @@
         ],
         "parameters": [],
         "responses": {
-          "200": {
-            "description": "Successful operation; company and employee scope are derived from authentication.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "const": true
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
           "400": {
-            "description": "Invalid request/schema",
+        "description": "ML_DATA_INCOMPLETE with per-feature and source readiness diagnostics; no prediction or risk update is made.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3086,16 +3070,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Activity"
               }
             }
           }
@@ -5671,7 +5645,7 @@
     "/api/resources/{id}/access": {
       "post": {
         "summary": "Enforce RBAC and contextual policy before returning resource view",
-        "description": "Employee identity/device derived from session. Complete approval or fresh step-up as directed.",
+        "description": "Protected data is assessed only for the authenticated principal using server-observed context. Request-supplied user, role, trust, risk and approval fields are ignored. Use /api/resources/test-access for administrator scenarios; that route never returns protected data. Complete approval or fresh step-up as directed.",
         "operationId": "post_resources__id__access",
         "security": [
           {
@@ -5803,7 +5777,9 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResourceAccess"
+                "type": "object",
+                "description": "No request fields are authoritative for protected-data access; send an empty object.",
+                "additionalProperties": true
               }
             }
           }
@@ -12163,7 +12139,9 @@
           "mlWeight": {
             "type": "number",
             "minimum": 0,
-            "maximum": 100
+            "maximum": 100,
+            "deprecated": true,
+            "description": "Legacy stored-policy field. Ignored by the current RF evidence mapping."
           },
           "largeDownloadThresholdMB": {
             "type": "number",

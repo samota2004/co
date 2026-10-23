@@ -17,3 +17,4 @@ __pycache__/
 *.pyc
 
 /CYBERORBIT-mac-source.zip
+/server/data/geoip/

@@ -107,7 +107,7 @@ const getInitials = (name = "") =>
     .toUpperCase() || "U";
 
 const getRiskClasses = (risk) => {
-  if (risk >= 70) {
+  if (risk >= 60) {
     return {
       text: "text-red-300",
       bar: "bg-red-400",
@@ -115,7 +115,7 @@ const getRiskClasses = (risk) => {
     };
   }
 
-  if (risk >= 50) {
+  if (risk >= 40) {
     return {
       text: "text-amber-300",
       bar: "bg-amber-400",

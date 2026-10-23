@@ -1,0 +1,21 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {featureSchema} from '../services/ml-service.js';
+import {createLiveModelDataReadiness} from '../services/ml-data-readiness.js';
+
+test('live employee telemetry reports incomplete notebook-compatible model coverage without zero filling',()=>{
+  const readiness=createLiveModelDataReadiness();
+  assert.equal(readiness.status,'INSUFFICIENT_FOR_MODEL');
+  assert.equal(readiness.complete,false);
+  assert.equal(readiness.featureCount,21);
+  assert.equal(readiness.compatibleFeatureCount,0);
+  assert.deepEqual(readiness.features.map(feature=>feature.name),featureSchema.feature_names);
+  assert.equal(readiness.derivableFeatureCount,2);
+  assert.equal(readiness.missingCompatibleFeatureCount,19);
+  for(const name of ['file_content_events','unique_http_content','unique_recipients','email_size_total','attachments_total']) {
+    const feature=readiness.features.find(item=>item.name===name);
+    assert.equal(feature.status,'MISSING_COMPATIBLE_SOURCE',name);
+    assert.ok(feature.source,name);
+  }
+  assert.match(readiness.nextSteps[1],/Do not infer/);
+});

@@ -2,6 +2,16 @@
 
 React/Vite security console, Express/Prisma/PostgreSQL policy enforcement, Python Random Forest/SHAP inference, and a separate JavaScript endpoint agent. [OpenAPI](server/openapi.json) describes the active API; [research instructions](ml/research/README.md) explain reproducible comparisons.
 
+### Active risk and trust policy
+
+The live backend scores observed context by taking the strongest factor in each category (time, resource, device, volume, authentication, privilege, transfer, location, history), summing those factors and capping at 100. The deployed RF output is **not independently calibrated**. Its saved operating threshold maps to the MFA boundary (60 by default), with a piecewise linear score from 0 to 100. The final current-event risk is the larger of contextual and model evidence, rounded and bounded to 0–100. This avoids summing correlated RF and context evidence; it is a policy heuristic, not a threat probability or scientifically optimized rule. A recent elevated assessment can hold a higher score for 15 minutes; the explanation records that hold. A missing model or unobserved device is missing coverage, not malicious evidence. The obsolete `mlWeight` setting is retained in stored policies for compatibility but has no effect.
+
+Default actions are 0–39 allow/log, 40–59 monitor, 60–74 fresh MFA and alert, 75–89 reviewed approval, and 90–100 freeze if enabled (otherwise configured restriction). Company policy can customize boundaries. The protected-data access route binds the assessment to the authenticated principal; administrator scenario submissions use `/resources/test-access` and cannot return protected data. The server uses persisted user identity, role, resource sensitivity, current trust and incident state for every protected resource access. Trust is a separate history gate: below 60, sensitive resources require recent reviewed approval; below 30, other otherwise allowed access requires fresh MFA. An active frozen/disabled account or unresolved critical incident cannot be bypassed by trust or approval. Restricted/investigating status requires administrative review and restoration. Trust recovery is at most the configured increment per hour and requires an active account, no unresolved incident or elevated assessment in the last day, and assessed benign authorized resource access on three distinct prior UTC days **after the latest elevated assessment or incident review**, within the last seven days. Synthetic demo and scenario-test activity do not qualify. Recovery never deletes incidents, holds or audit history. The application records policy and trust changes in PostgreSQL audit logs; MFA and approvals require the configured application workflows and are not substitutes for an external enterprise identity provider. Employee console login is currently disabled, so employee access decisions are exercised through server-side evaluation and tests rather than a production employee session.
+
+Automatic recovery additionally requires the current request to be a server-validated, same-principal protected-resource access within a five-minute clock tolerance. Backdated imports, administrator scenario submissions, synthetic events and unvalidated historical rows cannot trigger recovery. Because employee console login is disabled, automatic employee recovery is not reachable in production; an authorized review/restoration remains the available path until a real employee identity and resource gateway are integrated. The current trust thresholds are policy defaults, not empirically optimized values.
+
+A reviewed approval can satisfy an approval risk gate, but cannot grant a resource role that the principal does not hold. Changing a person's role therefore does not make an old approval a role override.
+
 ## Render database updates and existing endpoint devices
 
 Render must apply migrations as well as generate Prisma. For this repository-root
@@ -37,12 +47,15 @@ After migrations, restart your **existing** VS Code backend terminal: Ctrl+C, th
 
 For local endpoint enrollment, explicitly set `ENDPOINT_ALLOW_LOOPBACK_HTTP=true` in `.env`. For local MFA without sending email, explicitly set `DEV_MFA_MODE=true`; codes are returned only to loopback clients outside production, never logged. These exceptions do not work in production. Normal email delivery uses the Mailjet HTTPS API; configure the four MAILJET variables described below. `SECURITY_TIMEZONE` controls office-hour comparisons; daily baseline and research windows remain UTC.
 
-Start/restart the existing Python ML terminal with:
+Start/restart the Python inference service from the project root with:
 
 ```powershell
-python -m pip install -r ml\requirements.txt
-python -m uvicorn ml.src.app:app --host 127.0.0.1 --port 8000
+npm run ml:serve
 ```
+
+For a fresh Python environment only, install its declared packages once with `python -m pip install -r ml\requirements.txt`.
+
+Both Node and Python resolve `CYBERORBIT_MODEL_DIR` from the project root when it is relative, or use an absolute path unchanged; either process environment or the root `.env` can set it. Keep the active model, feature schema and metadata together in that directory. The service health check compares the live model/schema/metadata fingerprint, feature count and threshold with the backend configuration before reporting healthy.
 
 The active 21-feature user-day model is retained. Endpoint metadata cannot provide every required email, content or URL feature. Its timeline therefore remains visible with ML assessment explicitly unavailable; no missing features are filled with zeros.
 
@@ -62,10 +75,10 @@ This creates 100 explicitly named synthetic employees, 10 managers, resources an
 
 ## Verify the workflow
 
-1. Administrator: Employees → create an employee with department, manager and password; configure thresholds in Policies. Selecting the employee opens Security Profile without replacing the administrator's login identity.
-2. Employee: log in, complete the actual one-time challenge, open Resources and request access. The backend derives identity and logical browser from the session. Access is checked before private resource data is returned.
+1. Administrator: Employees → create a monitoring identity with department and manager; configure thresholds in Policies. Employee passwords are deliberately rejected by the current API. Selecting an employee opens Security Profile without replacing the administrator's login identity.
+2. Administrator: use a verified MFA session to access a protected resource assigned to that principal. `/resources/:id/access` derives identity from the server-validated session and returns private data only after an allowed decision. Employee login and a production employee resource gateway are not implemented.
 3. Administrator: Simulator → choose a **demo employee** and a labelled scenario. Decisions, risk/trust history, incidents, requests and audits are persisted. A recent elevated assessment remains effective for 15 minutes; clean retries cannot bypass MFA/approval. Fresh MFA or an authorized approval satisfies the relevant requirement. Critical accounts are frozen and active sessions revoked.
-4. Manager: review direct-report requests. High-risk/highly-sensitive requests require security administration; nobody may approve their own request. Administrator: investigate, add resolution notes and restore an account after review. Restoration invalidates old sessions; the employee signs in again. Application FREEZE does not lock Windows.
+4. Administrator: review access requests, investigate, add resolution notes and restore an account after review. The manager review route exists but manager console login is disabled. Restoration invalidates old sessions. Application FREEZE does not lock Windows.
 5. Devices: existing assignment/enrollment/usage filters remain supported. Logical Trust/Untrust/Revoke uses the real posture endpoint. OS endpoint enrollment has its own separate device credential and revocation control.
 
 ```powershell

@@ -90,7 +90,7 @@ export function analyzeRiskWindow({ user, activeEvents, counts, securityEvents, 
     source: strongest.source,
     baselineBasis: profile ? 'Learned historical access hours' : 'Configured access hours',
     trustScore, trustBasis, trustTimestamp: useStoredTrust ? user.trustUpdatedAt ?? null : trust.timestamp,
-    ml: { available: Boolean(latestMl), status: latestMl ? 'RECORDED_PREDICTION' : 'AWAITING_INPUTS', probability: latestMl?.probability ?? null, timestamp: latestMl?.timestamp ?? null, reasons: latestMl?.reasons ?? [], reason: latestMl ? 'Latest recorded approved model prediction; original timestamp retained.' : 'No approved model prediction is recorded. Complete daily login, device, file, web and email inputs are required.' },
+    ml: { available: Boolean(latestMl), status: latestMl ? 'RECORDED_PREDICTION' : 'AWAITING_INPUTS', probability: latestMl?.probability ?? null, scoreMeaning: 'Uncalibrated positive-class Random Forest score; not a calibrated threat probability.', timestamp: latestMl?.timestamp ?? null, reasons: latestMl?.reasons ?? [], reason: latestMl ? 'Latest recorded approved model score; original timestamp retained.' : 'No approved model prediction is recorded. Complete daily login, device, file, web and email inputs are required.' },
     coverage: { status: 'Partial', truncated, endpointEvents: endpointCount, securityEvents: securityCount, verifiedEvents: verifiedCount, deviceWideEvents: endpointCount - verifiedCount, interactiveEvents: activeEvents.length, offHoursEvents: offHours.length, observedVectors: vectors.filter(vector => vector.status === 'Observed').length },
     vectors, history,
   };
@@ -107,7 +107,7 @@ export async function getRiskAnalysis(db, actor, id, at = new Date()) {
     db.activityEvent.findMany({ where: activityScope, select: { timestamp: true, type: true, riskContribution: true, metadata: true }, orderBy: [{ timestamp: 'desc' }, { id: 'desc' }], take: LIMIT + 1 }),
     db.activityEvent.count({ where: activityScope }),
     db.trustHistory.findFirst({ where: { userId: user.id }, orderBy: { timestamp: 'desc' }, select: { timestamp: true, trustScore: true } }),
-    // anomalyScore stores the supervised probability for this registered model.
+    // anomalyScore stores the uncalibrated positive-class score for this registered model.
     // Other models' anomaly scores must not be presented as threat probabilities.
     db.mlPrediction.findFirst({ where: { userId: user.id, modelVersion: { is: { modelName: modelMetadata.model_name } } }, orderBy: { timestamp: 'desc' }, select: { timestamp: true, anomalyScore: true, attributions: true } }),
     db.behaviorProfile.findUnique({ where: { userId: user.id } }),

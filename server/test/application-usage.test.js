@@ -38,6 +38,11 @@ test('usage filtering precedes timeline limit and preserves employee/company iso
     const admin=await call(f.admin,`?eventType=APPLICATION_USAGE&userId=${f.employee.id}`);
     assert.equal(admin.status,200);assert.ok(admin.data.events.some(e=>e.metadata.name==='Notepad'));
     assert.ok(admin.data.events.every(e=>e.companyId==='A'));
+    assert.equal(admin.data.ml.available,false);
+    assert.equal(admin.data.ml.dataReadiness.status,'INSUFFICIENT_FOR_MODEL');
+    assert.equal(admin.data.ml.dataReadiness.featureCount,21);
+    assert.equal(admin.data.ml.dataReadiness.compatibleFeatureCount,0);
+    assert.ok(admin.data.ml.dataReadiness.features.some(feature=>feature.name==='email_size_total'&&feature.status==='MISSING_COMPATIBLE_SOURCE'));
     const foreign=await call(f.otherAdmin,'?eventType=APPLICATION_USAGE');assert.ok(foreign.data.events.every(e=>e.companyId==='B'));
     await assert.rejects(service.dashboard(f.employee2,f.employee.id,'APPLICATION_USAGE'),{status:403});
     assert.equal((await call(f.admin,'?eventType=PROCESS_RUNNING')).status,400);

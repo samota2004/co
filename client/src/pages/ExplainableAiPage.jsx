@@ -95,7 +95,7 @@ export const ExplainableAiPage = ({ users = [], events = [], fetchJson = request
             <div className="mt-5 grid gap-5 sm:grid-cols-3">
               <div><p className={`text-xs uppercase tracking-wide ${muted}`}>Observed risk · Last 24 hours</p><p className="mt-2 text-2xl text-[#D4AF37]">{analysis.riskScore === null ? 'Not assessed' : `${formatNumber(analysis.riskScore)} / 100 · ${analysis.riskLevel}`}</p></div>
               <div><p className={`text-xs uppercase tracking-wide ${muted}`}>Trust score</p><p className="mt-2 text-2xl">{analysis.trustScore === null ? 'Unassessed' : `${formatNumber(analysis.trustScore)} / 100`}</p><p className={`mt-1 text-xs ${muted}`}>{analysis.trustBasis === 'ACCOUNT_BASELINE' ? 'Stored account baseline' : 'Recorded account trust'}</p></div>
-              <div><p className={`text-xs uppercase tracking-wide ${muted}`}>CERT model threat probability</p><p className="mt-2 text-2xl text-cyan-400">{probabilityRecorded ? `${(probability * 100).toFixed(1)}%` : 'Awaiting inputs'}</p>{probabilityRecorded && <p className={`mt-1 text-xs ${muted}`}>Prediction recorded: {new Date(analysis.ml.timestamp).toLocaleString()}</p>}</div>
+              <div><p className={`text-xs uppercase tracking-wide ${muted}`}>RF positive-class score (uncalibrated)</p><p className="mt-2 text-2xl text-cyan-400">{probabilityRecorded ? `${(probability * 100).toFixed(1)} / 100` : 'Awaiting inputs'}</p>{probabilityRecorded && <p className={`mt-1 text-xs ${muted}`}>Prediction recorded: {new Date(analysis.ml.timestamp).toLocaleString()}</p>}</div>
             </div>
             {lastUpdated && <p className={`mt-5 text-xs ${muted}`}>Last refreshed: {lastUpdated.toLocaleString()}. Updates as new observations arrive.</p>}
           </section>

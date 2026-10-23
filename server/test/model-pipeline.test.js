@@ -25,12 +25,19 @@ test('real Python model -> checked aggregate -> versioned prediction, SHAP and e
   server=await new Promise(r=>{const s=app.listen(0,'127.0.0.1',()=>r(s));});
   const origin='http://127.0.0.1:'+server.address().port;
   const call=async(path,body)=>{const response=await fetch(origin+'/api'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+generateJwtToken(f.admin,true),'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return{status:response.status,data:await response.json()};};
+  const health=await call('/ml/health');assert.equal(health.status,200);assert.equal(health.data.model_fingerprint,modelFingerprint);assert.equal(health.data.feature_count,21);
   const day=new Date(Date.now()-86400000),weekday=(day.getUTCDay()+6)%7;
   // Complete, explicitly synthetic unit-test aggregate. This is not an agent
   // observation and no missing real source fields are filled for live users.
   const features=Object.fromEntries(featureSchema.feature_names.map(name=>[name,0]));features.day_of_week=weekday;features.is_weekend=Number(weekday>=5);
   const body={userId:f.employee.id,aggregationDate:day.toISOString().slice(0,10),features};
-  assert.equal((await call('/ml/predict',{...body,features:{logon_count:1}})).status,400);
+  const incompleteFeatures={day_of_week:weekday,is_weekend:Number(weekday>=5),logon_count:1};
+  const incomplete=await call('/ml/predict',{...body,features:incompleteFeatures});
+  assert.equal(incomplete.status,400);
+  assert.equal(incomplete.data.error.code,'ML_DATA_INCOMPLETE');
+  assert.equal(incomplete.data.error.details.status,'INCOMPLETE');
+  assert.equal(incomplete.data.error.details.requiredFeatureCount,21);
+  assert.deepEqual(incomplete.data.error.details.missingFeatures,featureSchema.feature_names.filter(name=>!Object.hasOwn(incompleteFeatures,name)));
   assert.equal(await f.prisma.mlPrediction.count(),0);
   const result=await call('/ml/predict',body);assert.equal(result.status,200);
   assert.equal(result.data.event.type,'MODEL_ASSESSMENT');assert.equal(result.data.ml.model_fingerprint,modelFingerprint);
