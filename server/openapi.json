@@ -7436,8 +7436,8 @@
     },
     "/api/dashboard/summary": {
       "get": {
-        "summary": "Actual company dashboard summary",
-        "description": "Company administrator.",
+        "summary": "Administrator-only dashboard summary and details",
+        "description": "Company- and administrator-scope filtering is applied in database queries. Includes administrator accounts, administrator-associated risk, authentication activity, alerts, and incidents.",
         "operationId": "get_dashboard_summary",
         "security": [
           {
@@ -7447,7 +7447,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful operation; company and employee scope are derived from authentication.",
+            "description": "Successful operation; administrator role and company scope are applied in database queries.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7557,8 +7557,8 @@
     },
     "/api/dashboard/risk-distribution": {
       "get": {
-        "summary": "Actual company dashboard risk-distribution",
-        "description": "Company administrator.",
+        "summary": "Administrator-only dashboard risk distribution",
+        "description": "Risk distribution includes only administrator identities in the authenticated company and authorized scope.",
         "operationId": "get_dashboard_risk_distribution",
         "security": [
           {
@@ -7568,7 +7568,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful operation; company and employee scope are derived from authentication.",
+            "description": "Successful operation; administrator role and company scope are applied in database queries.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7678,8 +7678,8 @@
     },
     "/api/dashboard/risk-trends": {
       "get": {
-        "summary": "Actual company dashboard risk-trends",
-        "description": "Company administrator.",
+        "summary": "Administrator-only dashboard risk trends",
+        "description": "Risk history includes only administrator identities in the authenticated company and authorized scope.",
         "operationId": "get_dashboard_risk_trends",
         "security": [
           {
@@ -7689,7 +7689,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful operation; company and employee scope are derived from authentication.",
+            "description": "Successful operation; administrator role and company scope are applied in database queries.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7799,8 +7799,8 @@
     },
     "/api/dashboard/recent-alerts": {
       "get": {
-        "summary": "Actual company dashboard recent-alerts",
-        "description": "Company administrator.",
+        "summary": "Administrator-associated dashboard alerts",
+        "description": "Incidents include only administrator identities in the authenticated company and authorized scope.",
         "operationId": "get_dashboard_recent_alerts",
         "security": [
           {
@@ -7810,7 +7810,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful operation; company and employee scope are derived from authentication.",
+            "description": "Successful operation; administrator role and company scope are applied in database queries.",
             "content": {
               "application/json": {
                 "schema": {

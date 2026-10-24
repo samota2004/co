@@ -30,12 +30,21 @@ test('console routes render with real company records; alerts open the selected 
    await b.command('Page.navigate',{url:origin+'/'+route});
    await waitUntil(b,`document.querySelector('.console-workspace[data-page="${route}"]')`,'console route '+route);
    await waitUntil(b,"document.querySelector('#cyberorbit-sidebar').textContent.includes('Device test administrator')",'authenticated actor');
+   if(route==='dashboard'){
+    await waitUntil(b,"document.querySelector('main')?.textContent.includes('Administrator Intelligence')",'administrator-only dashboard');
+    const dashboardText=await b.evaluate("document.querySelector('main').innerText");
+    assert.equal(dashboardText.includes(f.employee.name),false,'employee identity must not appear on administrator dashboard');
+    assert.equal(dashboardText.includes('Unusual download review'),false,'employee incident must not appear on administrator dashboard');
+    assert.equal(dashboardText.includes('No administrator activity available.'),true,'empty administrator-only sections show an explicit empty state');
+    assert.equal(dashboardText.includes('Employee Intelligence'),false);
+    assert.equal(dashboardText.includes('Administrator Intelligence'),true);
+   }
    if(['incidents','alerts'].includes(route))await waitUntil(b,"document.querySelector('main')?.textContent.includes('Unusual download review')",'incident from PostgreSQL');
    assert.equal(await b.evaluate("document.body.textContent.includes('This page could not be displayed')"),false,route);
    if(['incidents','ml-analytics','dashboard'].includes(route)){
     if(route==='ml-analytics')await waitUntil(b,"document.querySelector('.model-summary')",'saved model report');
-    await fs.mkdir(path.join(projectRoot,'agent/local'),{recursive:true});
-    const shot=await b.command('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(projectRoot,'agent/local/console-'+route+'.png'),Buffer.from(shot.data,'base64'));
+    await fs.mkdir(path.join(profile,'screenshots'),{recursive:true});
+    const shot=await b.command('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(profile,'screenshots/console-'+route+'.png'),Buffer.from(shot.data,'base64'));
    }
   }
   await b.command('Page.stopLoading');
@@ -63,7 +72,7 @@ test('console routes render with real company records; alerts open the selected 
   await b.command('Page.stopLoading');
   await b.command('Page.navigate',{url:origin+'/incidents'});
   await waitUntil(b,"document.querySelector('main')?.textContent.includes('Unusual download review')",'mobile incident list');
-  const shot=await b.command('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(projectRoot,'agent/local/console-mobile.png'),Buffer.from(shot.data,'base64'));
+  const shot=await b.command('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(profile,'screenshots/console-mobile.png'),Buffer.from(shot.data,'base64'));
   assert.equal(await b.evaluate('document.documentElement.scrollWidth > window.innerWidth'),false,'No viewport horizontal overflow');
   assert.deepEqual(exceptions,[]);assert.deepEqual(failed,[]);
  } finally {

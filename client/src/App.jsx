@@ -169,7 +169,7 @@ const tabToPath = (tab) => {
 const pageTitles = {
   resources: "Enterprise Resources",
   "access-requests": "Access Requests and Reviews",
-  "security-profile": "Employee Security Profile",
+  "security-profile": "Employee Monitoring",
   dashboard: "SOC Executive Dashboard",
 
   "admin-management": "Administrator Account Management",
@@ -1328,9 +1328,6 @@ export default function App() {
             <PageErrorBoundary key={activeTab}>
             {activeTab === "dashboard" && isCurrentUserAdmin && (
               <DashboardPage
-                users={users}
-                incidents={incidents}
-                recentEvents={recentEvents}
                 onSelectUser={(userId) => {
                   setCurrentUserId(userId);
 

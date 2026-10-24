@@ -33,12 +33,12 @@ const usageDuration = seconds => {
   const minutes=Math.floor(value/60), remaining=Math.floor(value%60);
   return minutes<60?`${minutes} min ${remaining} sec`:`${Math.floor(minutes/60)} hr ${minutes%60} min ${remaining} sec`;
 };
-export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId, administrator=false }, ref) {
+export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId, administrator=false, initialEventType='APPLICATION_USAGE' }, ref) {
   const [data,setData]=useState({devices:[],employees:[],events:[],incidents:[],ml:{available:false}});
   const [error,setError]=useState(''), [refreshError,setRefreshError]=useState(''), [notice,setNotice]=useState('');
   const [token,setToken]=useState(null), [copied,setCopied]=useState(false), [refreshing,setRefreshing]=useState(false), [pending,setPending]=useState('');
   const [assignment,setAssignment]=useState({deviceId:'',userId:'',name:'',platform:'win32',mappedIdentity:''}), [savedDevice,setSavedDevice]=useState(null);
-  const [eventType,setEventType]=useState('APPLICATION_USAGE');
+  const [eventType,setEventType]=useState(initialEventType);
   const [application,setApplication]=useState('');
   const [appSearch,setAppSearch]=useState('');
   const [lastRefreshed,setLastRefreshed]=useState(null);
@@ -146,7 +146,7 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
     {administrator&&selectedDevice&&<div aria-label="Selected device assignment" className="rounded border border-cyan-300/25 p-3 space-y-2"><p className="font-medium">Saved device: {selectedDevice.name}</p><DeviceUuid key={selectedDevice.id} deviceId={selectedDevice.id}/></div>}
     {token&&<div aria-label="Enrollment details" className="rounded border border-amber-500/30 p-3 space-y-3"><DeviceUuid key={token.deviceId} deviceId={token.deviceId}/><p>Single-use enrollment token; expires {new Date(token.expiresAt).toLocaleString()}. Enter this at the hidden enrollment-token prompt after the device UUID. Issuing another token invalidates the previous one.</p><div><code aria-label="Enrollment token" className="break-all select-all">{token.enrollmentToken}</code><button type="button" className="ml-4 text-cyan-300" onClick={async()=>{try{await navigator.clipboard.writeText(token.enrollmentToken);setCopied(true);}catch{setError('Clipboard copy failed. Select and copy the displayed token.');}}}>{copied?'Copied':'Copy token'}</button><button type="button" className="ml-4 text-cyan-300" onClick={()=>{setToken(null);setCopied(false);}}>Dismiss token</button></div></div>}
     {refreshing&&<p className="text-slate-400">Loading devices…</p>}
-    {!refreshing&&!refreshError&&!data.devices.length&&<p className="text-slate-400">No laptops assigned.</p>}
+    {!refreshing&&!refreshError&&!data.devices.length&&<p role="status" className="text-slate-400">{employeeId?'No endpoint agent assigned to this employee.':'No laptops assigned.'}</p>}
     {data.devices.map(d=><article key={d.id} className="rounded border border-white/10 p-3 space-y-2">
       <p><strong>{d.name}</strong> · {d.user.name} · {d.connectionStatus}</p>
       <p className="text-sm text-slate-300">{d.platform} · agent {d.agentVersion || 'not enrolled'} · last seen {d.lastSeen?new Date(d.lastSeen).toLocaleString():'never'} · OS mapping {d.mappedIdentity || 'unverified'}</p>

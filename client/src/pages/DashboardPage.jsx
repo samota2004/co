@@ -303,9 +303,6 @@ const EmptyState = ({ message, isDark }) => (
 // ============================================================
 
 export const DashboardPage = ({
-  users = [],
-  incidents = [],
-  recentEvents = [],
   onSelectUser,
   onSelectIncident,
   onNavigateToSimulator,
@@ -335,11 +332,15 @@ export const DashboardPage = ({
     }
     return [...days.values()].map(d=>({date:d.date,risk:d.total/d.count}));
   },[overview]);
+  const administrators=overview?.administrators||[];
+  const incidents=overview?.incidents||[];
+  const recentAlerts=(overview?.alerts||[]).slice(0,6);
+  const authenticationEvents=overview?.authenticationActivity||[];
   /* =======================================================
      CORE METRICS
   ======================================================= */
 
-  const totalEmployees = overview?.summary.users ?? "—";
+  const totalAdministrators = overview?.summary.users ?? "—";
   const onlineUsers = overview?.summary.activeUsers ?? "—";
   const highRisk = overview?.summary.highRiskUsers ?? "—";
   const mediumRisk = overview?.summary.restrictedAccounts ?? "—";
@@ -347,22 +348,22 @@ export const DashboardPage = ({
   const criticalIncidents = overview?.summary.criticalAlerts ?? "—";
 
   const avgTrustScore =
-    users.length > 0
+    administrators.length > 0
       ? Math.round(
-          users.reduce(
-            (sum, user) => sum + Number(user.currentTrustScore ?? 0),
+          administrators.reduce(
+            (sum, user) => sum + Number(user.trustScore ?? 0),
             0,
-          ) / users.length,
+          ) / administrators.length,
         )
       : null;
 
   const avgRiskScore =
-    users.length > 0
+    administrators.length > 0
       ? Math.round(
-          users.reduce(
-            (sum, user) => sum + Number(user.currentRiskScore ?? 0),
+          administrators.reduce(
+            (sum, user) => sum + Number(user.riskScore ?? 0),
             0,
-          ) / users.length,
+          ) / administrators.length,
         )
       : null;
 
@@ -381,16 +382,6 @@ export const DashboardPage = ({
      EVENT ANALYSIS
   ======================================================= */
 
-  const recentAlerts = recentEvents
-    .filter(
-      (event) =>
-        event.isAnomalous ||
-        Number(event.riskContribution || 0) >= 50 ||
-        event.severity === "CRITICAL" ||
-        event.severity === "HIGH",
-    )
-    .slice(0, 6);
-
   const activeIncidents = incidents
     .filter((incident) => incident.status !== "RESOLVED")
     .slice(0, 6);
@@ -399,43 +390,7 @@ export const DashboardPage = ({
      DEPARTMENTS - REAL DATA ONLY
   ======================================================= */
 
-  const departments = useMemo(() => {
-    const map = {};
-
-    users.forEach((user) => {
-      const department = user.department || "Unassigned";
-
-      if (!map[department]) {
-        map[department] = {
-          name: department,
-          users: [],
-        };
-      }
-
-      map[department].users.push(user);
-    });
-
-    return Object.values(map)
-      .map((department) => {
-        const scores = department.users.map((user) =>
-          Number(user.currentRiskScore || 0),
-        );
-
-        const avg =
-          scores.length > 0
-            ? Math.round(
-                scores.reduce((sum, score) => sum + score, 0) / scores.length,
-              )
-            : 0;
-
-        return {
-          ...department,
-          count: department.users.length,
-          risk: avg,
-        };
-      })
-      .sort((a, b) => b.risk - a.risk);
-  }, [users]);
+  const departments = overview?.departments||[];
 
   /* =======================================================
      THREAT CATEGORIES - REAL INCIDENT DATA
@@ -498,11 +453,11 @@ export const DashboardPage = ({
      ======================================================= */
 
   const authenticationData = useMemo(() => {
-    if (!recentEvents.length) return [];
+    if (!authenticationEvents.length) return [];
 
     const buckets = {};
 
-    recentEvents.forEach((event) => {
+    authenticationEvents.forEach((event) => {
       if (!event.timestamp) return;
 
       const date = new Date(event.timestamp);
@@ -519,26 +474,19 @@ export const DashboardPage = ({
         };
       }
 
-      const eventType = String(event.eventType || "").toLowerCase();
-
-      if (
-        eventType.includes("login") ||
-        eventType.includes("authentication") ||
-        eventType.includes("auth")
-      ) {
-        buckets[label].logins += 1;
-      }
+      // The API filters this collection to authentication audit actions.
+      buckets[label].logins += 1;
     });
 
     return Object.values(buckets).sort((a, b) => a.time.localeCompare(b.time));
-  }, [recentEvents]);
+  }, [authenticationEvents]);
 
   /* =======================================================
      REAL POSTURE DATA
   ======================================================= */
 
   const postureData = useMemo(() => {
-    if (!users.length) return [];
+    if (!administrators.length) return [];
 
     return [
       {
@@ -547,7 +495,7 @@ export const DashboardPage = ({
         trust: avgTrustScore ?? 0,
       },
     ];
-  }, [users, avgRiskScore, avgTrustScore]);
+  }, [administrators, avgRiskScore, avgTrustScore]);
 
   /* =======================================================
      TOOLTIP STYLE
@@ -743,9 +691,9 @@ export const DashboardPage = ({
 
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
           <MetricCard
-            label="Total Users"
-            value={totalEmployees}
-            description="Monitored identities"
+            label="Total Administrators"
+            value={totalAdministrators}
+            description="Administrator identities"
             icon={Users}
             accent="neutral"
             isDark={isDark}
@@ -807,7 +755,7 @@ export const DashboardPage = ({
           <SectionHeader
             eyebrow="Posture Intelligence"
             title="Risk & Trust Overview"
-            description="Current organization-wide behavioral risk and trust posture derived from monitored identities."
+            description="Risk and trust posture for administrator identities only."
             isDark={isDark}
             rightContent={
               <div className="flex gap-6">
@@ -906,7 +854,7 @@ export const DashboardPage = ({
             </div>
           ) : (
             <EmptyState
-              message="Risk and trust telemetry will appear as monitored identities are available."
+              message="Risk and trust telemetry will appear as administrator records are available."
               isDark={isDark}
             />
           )}
@@ -916,7 +864,7 @@ export const DashboardPage = ({
           <SectionHeader
             eyebrow="Risk Classification"
             title="Risk Distribution"
-            description="Current employee distribution by behavioral risk tier."
+            description="Administrator distribution by behavioral risk tier."
             isDark={isDark}
           />
 
@@ -955,7 +903,7 @@ export const DashboardPage = ({
                     </span>
 
                     <span className="text-3xl font-light tracking-tight">
-                      {totalEmployees}
+                      {totalAdministrators}
                     </span>
                   </div>
                 </div>
@@ -969,8 +917,8 @@ export const DashboardPage = ({
               >
                 {riskDistData.map((item) => {
                   const percentage =
-                    users.length > 0
-                      ? Math.round((item.value / users.length) * 100)
+                    administrators.length > 0
+                      ? Math.round((item.value / administrators.length) * 100)
                       : 0;
 
                   return (
@@ -1005,7 +953,7 @@ export const DashboardPage = ({
             </>
           ) : (
             <EmptyState
-              message="No employee risk data available."
+              message="No administrator activity available."
               isDark={isDark}
             />
           )}
@@ -1016,7 +964,7 @@ export const DashboardPage = ({
         <h2 className="text-xl text-cyan-200">Recorded risk trend</h2>
         {overviewError&&<p role="alert" className="text-red-400">{overviewError}</p>}
         <p className="text-sm text-slate-400">Mean recorded assessment risk per UTC day, from at most 2,000 events in the last 30 days.</p>
-        {trend.length?<div className="h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={trend}><XAxis dataKey="date"/><YAxis domain={[0,100]}/><Tooltip contentStyle={tooltipStyle}/><Line dataKey="risk" stroke="#67E8F9"/></LineChart></ResponsiveContainer></div>:<p>No recorded risk history yet.</p>}
+        {trend.length?<div className="h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={trend}><XAxis dataKey="date"/><YAxis domain={[0,100]}/><Tooltip contentStyle={tooltipStyle}/><Line dataKey="risk" stroke="#67E8F9"/></LineChart></ResponsiveContainer></div>:<p>No administrator activity available.</p>}
       </Panel>
 
       {/* =====================================================
@@ -1028,7 +976,7 @@ export const DashboardPage = ({
           <SectionHeader
             eyebrow="Access Intelligence"
             title="Authentication Activity"
-            description="Observed authentication events from the available telemetry stream."
+            description="Authentication events for administrator accounts only."
             isDark={isDark}
             rightContent={
               <div className="flex items-center gap-2 text-[12px] font-mono uppercase text-[#7F8A96]">
@@ -1085,7 +1033,7 @@ export const DashboardPage = ({
             </div>
           ) : (
             <EmptyState
-              message="Authentication history will appear as telemetry events are received."
+              message="No administrator activity available."
               isDark={isDark}
             />
           )}
@@ -1101,7 +1049,7 @@ export const DashboardPage = ({
           <SectionHeader
             eyebrow="Organizational Exposure"
             title="Department Risk Intelligence"
-            description="Average behavioral risk calculated from monitored users within each department."
+            description="Average recorded risk for administrators in each department."
             isDark={isDark}
           />
 
@@ -1117,7 +1065,7 @@ export const DashboardPage = ({
 
                       <span className="ml-2 text-[12px] font-mono text-[#7F8A96]">
                         {department.count}{" "}
-                        {department.count === 1 ? "user" : "users"}
+                        {department.count === 1 ? "administrator" : "administrators"}
                       </span>
                     </div>
 
@@ -1172,7 +1120,7 @@ export const DashboardPage = ({
             </div>
           ) : (
             <EmptyState
-              message="No department identities are currently available."
+              message="No administrator activity available."
               isDark={isDark}
             />
           )}
@@ -1220,7 +1168,7 @@ export const DashboardPage = ({
             </div>
           ) : (
             <EmptyState
-              message="No categorized incidents are currently available."
+              message="No administrator activity available."
               isDark={isDark}
             />
           )}
@@ -1228,7 +1176,7 @@ export const DashboardPage = ({
       </section>
 
       {/* =====================================================
-          EMPLOYEE TABLE
+          ADMINISTRATOR TABLE
       ===================================================== */}
 
       <section className="mt-5">
@@ -1236,22 +1184,22 @@ export const DashboardPage = ({
           <div className="p-6 sm:p-8 pb-5">
             <SectionHeader
               eyebrow="Identity Governance"
-              title="Employee Intelligence"
-              description="Initial baseline: risk 0, trust 100 before assessment. These are not proof of observed activity. Assessed risk and trust are calculated separately."
+              title="Administrator Intelligence"
+              description="Administrator role, status, recorded risk and trust, policy trust state, latest completed MFA login, and current session state."
               isDark={isDark}
               rightContent={
                 <div className="text-right">
                   <span className="block text-[12px] font-mono uppercase text-[#7F8A96]">
-                    Monitored
+                    Administrators
                   </span>
 
-                  <span className="text-2xl">{totalEmployees}</span>
+                  <span className="text-2xl">{totalAdministrators}</span>
                 </div>
               }
             />
           </div>
 
-          {users.length > 0 ? (
+          {administrators.length > 0 ? (
             <div className="overflow-x-auto rounded-xl border border-white/5">
               <table className="w-full min-w-[950px] text-left">
                 <thead>
@@ -1270,9 +1218,9 @@ export const DashboardPage = ({
                       }
                     `}
                   >
-                    <th className="px-6 py-4">Employee</th>
+                    <th className="px-6 py-4">Administrator</th>
 
-                    <th className="px-4 py-4">Department</th>
+                    <th className="px-4 py-4">Role</th>
 
                     <th className="px-4 py-4">Risk</th>
 
@@ -1280,19 +1228,18 @@ export const DashboardPage = ({
 
                     <th className="px-4 py-4">Status</th>
 
-                    <th className="px-4 py-4">Agent last seen</th>
+                    <th className="px-4 py-4">Last login</th>
 
                     <th className="px-4 py-4">Trust State</th>
 
-                    <th className="px-6 py-4">Agent connection</th>
+                    <th className="px-6 py-4">Session state</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {users.map((user) => {
-                    const risk = Number(user.currentRiskScore ?? 0);
-
-                    const trust = Number(user.currentTrustScore ?? 0);
+                  {administrators.map((user) => {
+                    const risk = Number(user.riskScore ?? 0);
+                    const trust = Number(user.trustScore ?? 0);
 
                     const initials =
                       user.name
@@ -1338,7 +1285,7 @@ export const DashboardPage = ({
 
                             <div>
                               <div className="text-sm font-medium">
-                                {user.name || "Unnamed Employee"}
+                                {user.name || "Unnamed Administrator"}
                               </div>
 
                               <div className="mt-0.5 text-[12px] font-mono text-[#7F8A96]">
@@ -1352,7 +1299,7 @@ export const DashboardPage = ({
 
                         <td className="px-4 py-4">
                           <span className="text-xs text-[#A7B0BA]">
-                            {user.department || "Unassigned"}
+                            {user.roleCode === "SYSTEM_ADMIN" ? "System Administrator" : "Security Administrator"}
                           </span>
                         </td>
 
@@ -1401,8 +1348,8 @@ export const DashboardPage = ({
 
                         <td className="px-4 py-4">
                           <span className="text-[12px] font-mono text-[#7F8A96]">
-                            {user.agentLastSeen
-                              ? new Date(user.agentLastSeen).toLocaleString([], {
+                            {user.lastLoginAt
+                              ? new Date(user.lastLoginAt).toLocaleString([], {
                                   dateStyle: "medium",
                                   timeStyle: "short",
                                 })
@@ -1411,7 +1358,9 @@ export const DashboardPage = ({
                         </td>
 
                         <td className="px-4 py-4">
-                          {user.assessmentStatus === "NOT_ASSESSED" ? <span className="text-xs text-[#7F8A96]">Not assessed</span> : <RiskBadge score={risk} level={user.currentRiskLevel} />}
+                          <span className="text-xs text-[#7F8A96]">
+                            {{NOT_ASSESSED:"Not assessed",FRESH_MFA_REQUIRED:"Fresh MFA required",SENSITIVE_APPROVAL_REQUIRED:"Approval required for sensitive resources",STANDARD:"Standard"}[user.trustState]||"Unknown"}
+                          </span>
                         </td>
 
                         <td className="px-6 py-4">
@@ -1420,13 +1369,13 @@ export const DashboardPage = ({
                               className={`
                                 w-1.5 h-1.5 rounded-full
                                 ${
-                                  user.agentConnectionStatus === "CONNECTED" ? "bg-emerald-400" : "bg-gray-500"
+                                user.sessionState === "ACTIVE" ? "bg-emerald-400" : "bg-gray-500"
                                 }
                               `}
                             />
 
                             <span className="text-[12px] font-mono text-[#7F8A96]">
-                              {({CONNECTED:"Connected", STALE:"Contact delayed", OFFLINE:"Offline", UNENROLLED:"Not enrolled", REVOKED:"Revoked", NOT_ASSIGNED:"Not assigned"})[user.agentConnectionStatus] || "Unknown"}
+                              {user.sessionState === "ACTIVE" ? "Active session" : "No active session"}
                             </span>
                           </div>
                         </td>
@@ -1439,7 +1388,7 @@ export const DashboardPage = ({
           ) : (
             <div className="px-6 pb-8">
               <EmptyState
-                message="No monitored employees are currently available."
+                message="No administrator accounts available."
                 isDark={isDark}
               />
             </div>
@@ -1458,7 +1407,7 @@ export const DashboardPage = ({
           <SectionHeader
             eyebrow="Anomaly Stream"
             title="Recent Alerts"
-            description="Highest-priority events from the available telemetry stream."
+            description="Highest-priority security events associated with administrators."
             isDark={isDark}
             rightContent={
               <span
@@ -1540,7 +1489,7 @@ export const DashboardPage = ({
 
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                           <span className="text-[12px] font-mono text-[#7F8A96]">
-                            {event.userName || "Unknown user"}
+                            {event.userName || "Unknown administrator"}
                             {event.userDepartment
                               ? ` · ${event.userDepartment}`
                               : ""}
@@ -1558,7 +1507,7 @@ export const DashboardPage = ({
             </div>
           ) : (
             <EmptyState
-              message="No active threat alerts in the current queue."
+              message="No administrator activity available."
               isDark={isDark}
             />
           )}
@@ -1638,7 +1587,7 @@ export const DashboardPage = ({
                         </h4>
 
                         <p className="mt-1 text-[12px] font-mono text-[#7F8A96]">
-                          {incident.userName || "Unknown user"}
+                          {incident.userName || "Unknown administrator"}
                           {incident.userDepartment
                             ? ` · ${incident.userDepartment}`
                             : ""}
@@ -1687,7 +1636,7 @@ export const DashboardPage = ({
             </div>
           ) : (
             <EmptyState
-              message="No open security incidents. All monitored incidents are currently resolved."
+              message="No administrator activity available."
               isDark={isDark}
             />
           )}
