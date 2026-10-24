@@ -75,6 +75,58 @@
 .console-workspace > div > :is(section,form) > p { color: #a4b4cd; line-height: 1.7; }
 .console-workspace [role=alert] { border-left: 3px solid #fb7185; background: #fb71850d; padding: 14px 16px; border-radius: 8px; }
 .console-workspace [role=status] { border-left: 3px solid #67e8f9; padding: 14px 16px; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
+  align-items: end;
+  gap: 16px;
+  padding: clamp(20px, 3vw, 32px);
+  background: linear-gradient(145deg, #111f33, #0e1829);
+  border-color: #2b405e;
+  box-shadow: 0 12px 36px #00000020;
+}
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(h2, p, textarea, button) { grid-column: 1 / -1; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > h2 { margin: 0; font-size: 22px; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > p { margin: 0; max-width: 1000px; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > select,
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > label { width: 100%; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > label { display: grid; gap: 8px; color: #c4d2e5; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(select, input, textarea) { padding: 12px 14px; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea {
+  height: 260px;
+  min-height: 200px;
+  resize: vertical;
+  line-height: 1.6;
+  tab-size: 2;
+}
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button {
+  justify-self: start;
+  min-height: 46px;
+  padding: 11px 20px;
+  border: 1px solid #67e8f94d;
+  background: #0e5667;
+  font-weight: 650;
+}
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button:hover:not(:disabled) { background: #12677a; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button:disabled { cursor: not-allowed; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea:focus { border-color: #67e8f9; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > h2::before {
+  content: "ADMINISTRATOR WORKFLOW";
+  display: block;
+  margin-bottom: 8px;
+  color: #67e8f9;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) + [role="status"] { border-color: #2b6972; background: #10212c; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) + [role="status"] pre { max-height: 320px; overflow: auto; }
+.console-workspace > section.border:has(> h2 + p) { background: linear-gradient(145deg, #111f33, #0e1829); }
+@media (max-width: 700px) {
+  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(h2, p, select, label, textarea, button) { grid-column: 1; }
+  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea { height: 220px; }
+}
 /* Replace decorative billboard proportions with compact working headers.
    Retain all interactive descendants, including export and employee selectors. */
 .console-workspace .console-hero {
