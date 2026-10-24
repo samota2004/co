@@ -45,6 +45,9 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
   await b.evaluate("Array.from(document.querySelectorAll('tr[aria-label]')).find(row=>row.getAttribute('aria-label')==='View Priyanka').click()");
   await waitUntil(b,"document.querySelector('main')?.textContent.includes('Priyanka') && document.querySelector('main')?.textContent.includes('No endpoint agent assigned to this employee.') && document.querySelector('main')?.textContent.includes('192.0.2.22')",'selected employee without an agent shows the correct empty state');
   body=await b.evaluate('document.querySelector("main").innerText');
+  assert.ok(body.includes('Endpoint activity is unavailable because no endpoint agent is assigned to this employee.'),'endpoint timeline explains why this employee has no endpoint activity');
+  assert.equal(body.includes('Select one assigned device to check its last contact'),false,'empty device state does not instruct the admin to select a nonexistent device');
+  assert.equal(body.includes('No application observations received yet.'),false,'empty device state does not show a generic contradictory activity message');
   assert.equal(body.includes('Nine'),false,'Priyanka view excludes Nine data');
   assert.equal(body.includes('192.0.2.11'),false,'Priyanka view excludes Nine sessions');
   assert.equal(body.includes('192.0.2.99'),false,'Priyanka view excludes administrator sessions');
