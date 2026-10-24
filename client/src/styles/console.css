@@ -19,6 +19,12 @@
 #cyberorbit-sidebar button { border-radius: 10px; }
 #cyberorbit-sidebar button:hover { background-color: #17253b; }
 .console-workspace { padding: 24px; font-size: 14px; line-height: 1.6; }
+.employee-dashboard-content { font-size: 15px; line-height: 1.65; }
+.employee-dashboard-content > .console-hero { margin-bottom: 4px; }
+.employee-dashboard-content [aria-label="Installed endpoint agents"] { margin-top: 8px; }
+.endpoint-monitor-panel { font-size: 15px; line-height: 1.65; }
+.endpoint-monitor-panel :is(p,dd,dt,button,summary) { line-height: 1.6; }
+.endpoint-monitor-panel [class*="text-xs"] { font-size: 13px; }
 .console-workspace > div { padding: 0; background: transparent; }
 .console-workspace > div > div:has(> .console-hero) { padding-inline: 0; }
 .console-workspace :is(h1,h2,h3,h4) { text-wrap: balance; }

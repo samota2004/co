@@ -195,10 +195,8 @@ useEffect(() => {
   // ======================================================
 
   return (
-    <div className="mx-auto w-full max-w-[1500px] space-y-5 px-5 pb-10 sm:px-8 lg:px-12">
+    <div className="employee-dashboard-content mx-auto w-full max-w-[1500px] space-y-6 px-5 pb-10 sm:px-8 lg:px-12">
       {historyError&&<p role="alert" className="text-red-400">{historyError}</p>}
-      {!history.length&&<p>No recorded risk/trust trend yet.</p>}
-      {currentUser?.id && <EndpointMonitor employeeId={currentUser.id} />}
       {/* Editorial Profile Header */}
       <div className="console-hero group relative min-h-[210px] overflow-hidden rounded-2xl border border-[#67E8F9]/55 bg-[#050A10] shadow-[0_18px_60px_rgba(0,0,0,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/85 hover:shadow-[0_22px_70px_rgba(103,232,249,0.12)]">
         <div className="relative z-10 flex min-h-[210px] items-center px-6 py-7 sm:px-8 lg:px-9">
@@ -390,6 +388,7 @@ useEffect(() => {
           </div>
 
           <div className="h-64 w-full">
+            {!trendData.length ? <div role="status" className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/15 bg-slate-950/30 p-6 text-center text-[#A7B0BA]">No recorded risk or trust assessments are available for this employee yet.</div> :
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trendData}>
                 <defs>
@@ -449,6 +448,7 @@ useEffect(() => {
                 />
               </AreaChart>
             </ResponsiveContainer>
+            }
           </div>
         </div>
 
@@ -734,6 +734,7 @@ useEffect(() => {
         <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Access requests</h2>{monitoringData.accessRequests?.length ? monitoringData.accessRequests.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.resource?.name || 'Resource'} · {item.status} · {new Date(item.createdAt).toLocaleString()}</p>) : <p className="text-[#A7B0BA]">No access requests recorded for this employee.</p>}</section>
         <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Audit history</h2>{monitoringData.auditEvents?.length ? monitoringData.auditEvents.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.action} · {item.severity} · {new Date(item.timestamp).toLocaleString()}</p>) : <p className="text-[#A7B0BA]">No audit activity available for this employee.</p>}</section>
       </div>}
+      {currentUser?.id && <EndpointMonitor employeeId={currentUser.id} />}
     </div>
   );
 };
