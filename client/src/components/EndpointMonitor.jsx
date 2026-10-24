@@ -33,12 +33,12 @@ const usageDuration = seconds => {
   const minutes=Math.floor(value/60), remaining=Math.floor(value%60);
   return minutes<60?`${minutes} min ${remaining} sec`:`${Math.floor(minutes/60)} hr ${minutes%60} min ${remaining} sec`;
 };
-export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId, administrator=false, initialEventType='APPLICATION_USAGE' }, ref) {
+export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId, administrator=false }, ref) {
   const [data,setData]=useState({devices:[],employees:[],events:[],incidents:[],ml:{available:false}});
   const [error,setError]=useState(''), [refreshError,setRefreshError]=useState(''), [notice,setNotice]=useState('');
   const [token,setToken]=useState(null), [copied,setCopied]=useState(false), [refreshing,setRefreshing]=useState(false), [pending,setPending]=useState('');
   const [assignment,setAssignment]=useState({deviceId:'',userId:'',name:'',platform:'win32',mappedIdentity:''}), [savedDevice,setSavedDevice]=useState(null);
-  const [eventType,setEventType]=useState(initialEventType);
+  const [eventType,setEventType]=useState('APPLICATION_USAGE');
   const [application,setApplication]=useState('');
   const [appSearch,setAppSearch]=useState('');
   const [lastRefreshed,setLastRefreshed]=useState(null);

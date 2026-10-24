@@ -31,11 +31,73 @@ import {
 import { useTheme } from "../context/ThemeContext";
 import { EndpointMonitor } from '../components/EndpointMonitor.jsx';
 
-export const EmployeeDashboard = ({
+const employeeRole = user => ['EMPLOYEE', 'MANAGER'].includes(user?.roleCode || user?.role);
+
+export const EmployeeDashboard = ({ currentUser, users = [], isAdminView = false, selectedEmployeeId = '', ...props }) => {
+  const [selectedId, setSelectedId] = useState(() => isAdminView && users.some(user => user.id === selectedEmployeeId && employeeRole(user)) ? selectedEmployeeId : '');
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const employeeRows = users.filter(employeeRole);
+
+  useEffect(() => {
+    if (!isAdminView) return;
+    setSelectedId(employeeRows.some(user => user.id === selectedEmployeeId) ? selectedEmployeeId : '');
+    setDetail(null);
+    setError('');
+  }, [selectedEmployeeId, isAdminView]);
+
+  useEffect(() => {
+    if (!isAdminView || !selectedId) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setDetail(null);
+    requestApi(`/api/users/${encodeURIComponent(selectedId)}`)
+      .then(result => {
+        if (result.user?.id !== selectedId || !employeeRole(result.user)) {
+          throw new Error('The server did not return the selected employee.');
+        }
+        if (!cancelled) setDetail(result);
+      })
+      .catch(reason => { if (!cancelled) setError(reason.message || 'Unable to load this employee.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [isAdminView, selectedId]);
+
+  if (isAdminView && !selectedId) {
+    return <div className="mx-auto w-full max-w-[1500px] space-y-5 px-5 pb-10 sm:px-8 lg:px-12">
+      <header className="rounded-2xl border border-[#67E8F9]/40 bg-[#050A10] p-6">
+        <p className="text-xs uppercase tracking-[0.2em] text-[#D4AF37]">EMPLOYEE MONITORING</p>
+        <h1 className="mt-2 text-3xl font-light">Select an employee</h1>
+        <p className="mt-2 text-sm text-[#A7B0BA]">Choose an authorized employee to view their security posture, login sessions, activity, and endpoint agent.</p>
+      </header>
+      <section className="overflow-x-auto rounded-2xl border border-white/10 bg-[#050A10] p-5" aria-label="Employee list">
+        <h2 className="mb-4 text-xl">Employee List</h2>
+        {employeeRows.length ? <table className="w-full text-left"><thead><tr><th className="p-3">Name</th><th className="p-3">Employee ID</th><th className="p-3">Department</th><th className="p-3">Role</th><th className="p-3">Status</th><th className="p-3">Risk</th><th className="p-3">Trust</th></tr></thead><tbody>
+          {employeeRows.map(user => <tr key={user.id} tabIndex={0} role="button" aria-label={`View ${user.name}`} onClick={() => setSelectedId(user.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedId(user.id); } }} className="cursor-pointer border-t border-white/10 hover:bg-white/5 focus-visible:outline focus-visible:outline-cyan-300">
+            <td className="p-3">{user.name}</td><td className="p-3">{user.employeeId || '—'}</td><td className="p-3">{user.department || user.departmentCode || '—'}</td><td className="p-3">{user.roleCode || user.role}</td><td className="p-3">{user.status}</td><td className="p-3">{user.currentRiskScore ?? user.riskScore ?? '—'}</td><td className="p-3">{user.currentTrustScore ?? user.trustScore ?? '—'}</td>
+          </tr>)}
+        </tbody></table> : <p role="status">No authorized employees available.</p>}
+      </section>
+    </div>;
+  }
+
+  if (isAdminView) {
+    if (loading) return <div className="p-6"><button type="button" onClick={() => { setSelectedId(''); setDetail(null); }}>Employee List</button><p role="status" className="mt-4">Loading selected employee…</p></div>;
+    if (error || !detail) return <div className="p-6"><button type="button" onClick={() => { setSelectedId(''); setDetail(null); setError(''); }}>Employee List</button>{error && <p role="alert" className="mt-4 text-red-400">{error}</p>}</div>;
+    return <div><div className="px-5 pt-4 sm:px-8 lg:px-12"><button type="button" onClick={() => { setSelectedId(''); setDetail(null); }} className="rounded border border-cyan-700 px-3 py-2">← Employee List</button></div><EmployeeDashboardDetails {...props} currentUser={detail.user} events={detail.events || []} devices={detail.devices || []} monitoringData={detail} /></div>;
+  }
+
+  return <EmployeeDashboardDetails {...props} currentUser={currentUser} />;
+};
+
+const EmployeeDashboardDetails = ({
   currentUser,
   events = [],
   devices = [],
   onOpenAccessRequestModal,
+  monitoringData = null,
 }) => {
   const { isDark } = useTheme();
 
@@ -57,7 +119,9 @@ useEffect(() => {
 
   const loadSessions = async () => {
     try {
-      const result = await requestApi("/api/auth/sessions");
+      const result = monitoringData
+        ? { sessions: (monitoringData.sessions || []).filter(session => session.status === 'ACTIVE') }
+        : await requestApi("/api/auth/sessions");
 
       if (!cancelled) {
         setActiveSessions(result.sessions ?? []);
@@ -79,7 +143,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [currentUser?.id]);
+}, [currentUser?.id, monitoringData]);
 
   // ======================================================
   // SECURITY STATUS
@@ -119,10 +183,12 @@ useEffect(() => {
   // CHART DATA
   // ======================================================
   const[history,setHistory]=useState([]),[historyError,setHistoryError]=useState('');
-  useEffect(()=>{if(!currentUser?.id)return;const refresh=()=>requestApi('/api/users/'+currentUser.id).then(d=>{setHistory(d.trustHistory);setHistoryError('');}).catch(e=>setHistoryError(e.message));refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer);},[currentUser?.id]);
+  useEffect(()=>{if(!currentUser?.id)return;if(monitoringData){setHistory(monitoringData.trustHistory||[]);setHistoryError('');return;}const refresh=()=>requestApi('/api/users/'+currentUser.id).then(d=>{setHistory(d.trustHistory||[]);setHistoryError('');}).catch(e=>setHistoryError(e.message));refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer);},[currentUser?.id,monitoringData]);
   const trendData=history.map(h=>({time:new Date(h.timestamp).toLocaleTimeString(),trust:h.trustScore,risk:h.riskScore,logins:userEvents.filter(e=>['LOGIN','LOGIN_SUCCESS'].includes(e.eventType)&&Math.floor(new Date(e.timestamp).getTime()/60000)===Math.floor(new Date(h.timestamp).getTime()/60000)).length}));
+  const loginTrendData=monitoringData?.loginHistory?.some(row=>['AUTH_LOGIN','AUTH_FAILED'].includes(row.action))?monitoringData.loginHistory.filter(row=>['AUTH_LOGIN','AUTH_FAILED'].includes(row.action)).slice().reverse().map(row=>({time:new Date(row.timestamp).toLocaleTimeString(),logins:1})):trendData;
   const groups=new Map();for(const e of userEvents){const name=e.eventType||e.type||'Unknown';groups.set(name,(groups.get(name)||0)+1);}
-  const activityDist=[...groups].map(([name,value],i)=>({name,value,color:['#67E8F9','#D4AF37','#F59E0B','#94A3B8'][i%4]}));
+  const totalActivity=[...groups.values()].reduce((total,value)=>total+value,0);
+  const activityDist=[...groups].map(([name,value],i)=>({name,value:totalActivity?Math.round(value*100/totalActivity):0,color:['#67E8F9','#D4AF37','#F59E0B','#94A3B8'][i%4]}));
 
   // ======================================================
   // MAIN COMPONENT
@@ -164,6 +230,7 @@ useEffect(() => {
                   {currentUser?.role?.replace("_", " ") || "Main Admin"}
                 </span>
               </div>
+              {currentUser?.email && <div><span className="text-[#7F8A96]">EMAIL: </span><span className="text-current font-semibold">{currentUser.email}</span></div>}
               <div>
                 <span className="text-[#7F8A96]">SECURITY STATUS: </span>
                 <span className={`font-semibold ${status.color}`}>
@@ -471,7 +538,7 @@ useEffect(() => {
 
         <div className="h-44 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={trendData}>
+            <LineChart data={loginTrendData}>
               <XAxis
                 dataKey="time"
                 stroke={isDark ? "#4B5563" : "#9CA3AF"}
@@ -662,6 +729,11 @@ useEffect(() => {
           ))}
         </div>
       </div>
+      {monitoringData && <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Incidents</h2>{monitoringData.incidents?.length ? monitoringData.incidents.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.title} · {item.severity} · {item.status}</p>) : <p className="text-[#A7B0BA]">No incidents recorded for this employee.</p>}</section>
+        <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Access requests</h2>{monitoringData.accessRequests?.length ? monitoringData.accessRequests.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.resource?.name || 'Resource'} · {item.status} · {new Date(item.createdAt).toLocaleString()}</p>) : <p className="text-[#A7B0BA]">No access requests recorded for this employee.</p>}</section>
+        <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Audit history</h2>{monitoringData.auditEvents?.length ? monitoringData.auditEvents.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.action} · {item.severity} · {new Date(item.timestamp).toLocaleString()}</p>) : <p className="text-[#A7B0BA]">No audit activity available for this employee.</p>}</section>
+      </div>}
     </div>
   );
 };

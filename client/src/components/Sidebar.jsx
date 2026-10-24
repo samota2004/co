@@ -98,7 +98,7 @@ export const Sidebar = ({
 
   const navSections = [
     {title:'Access and security',items:[
-      {id:'security-profile',label:'Employee Monitoring',icon:UserCheck},
+      {id:'security-profile',label:'Security Profile',icon:UserCheck},
       {id:'resources',label:'Protected Resources',icon:Shield},
       {id:'access-requests',label:'Access Requests',icon:Shield}
     ]},

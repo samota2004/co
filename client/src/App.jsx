@@ -169,7 +169,7 @@ const tabToPath = (tab) => {
 const pageTitles = {
   resources: "Enterprise Resources",
   "access-requests": "Access Requests and Reviews",
-  "security-profile": "Employee Monitoring",
+  "security-profile": "Employee Security Profile",
   dashboard: "SOC Executive Dashboard",
 
   "admin-management": "Administrator Account Management",
@@ -1331,7 +1331,7 @@ export default function App() {
                 onSelectUser={(userId) => {
                   setCurrentUserId(userId);
 
-                  handleNavigate("security-profile");
+                  handleNavigate("employee-dashboard");
                 }}
                 onSelectIncident={(id) => { setFocusedIncidentId(typeof id === "object" ? id?.id || id?.incidentId : id || null); handleNavigate("incidents"); }}
                 onNavigateToSimulator={() => handleNavigate("simulator")}
@@ -1359,6 +1359,7 @@ export default function App() {
                   events={recentEvents}
                   devices={devices}
                   isAdminView={isCurrentUserAdmin}
+                  selectedEmployeeId={currentUserId}
                   onOpenAccessRequestModal={() => handleNavigate("access-requests")}
                 />
               )}
@@ -1366,7 +1367,7 @@ export default function App() {
             {activeTab === "employees" && isCurrentUserAdmin && (
               <EmployeeManagementPage
                 users={users}
-                onSelectUser={userId=>{setCurrentUserId(userId);handleNavigate('security-profile');}}
+                onSelectUser={userId=>{setCurrentUserId(userId);handleNavigate('employee-dashboard');}}
                 onAddUser={handleAddUser}
                 onUpdateUser={handleUpdateUser}
                 onDeleteUser={handleDeleteUser}
@@ -1382,7 +1383,7 @@ export default function App() {
                 onSelectUser={(userId) => {
                   setCurrentUserId(userId);
 
-                  handleNavigate("security-profile");
+                  handleNavigate("employee-dashboard");
                 }}
               />
             )}
@@ -1425,7 +1426,7 @@ export default function App() {
                 onSelectUser={(userId) => {
                   setCurrentUserId(userId);
 
-                  handleNavigate("security-profile");
+                  handleNavigate("employee-dashboard");
                 }}
                 onSelectIncident={(id) => { setFocusedIncidentId(typeof id === "object" ? id?.id || id?.incidentId : id || null); handleNavigate("incidents"); }}
               />
