@@ -20,7 +20,11 @@ export async function requestApi(url, { method='GET', body, signal } = {}) {
   const data = await response.json().catch(() => null);
   if (!response.ok || data?.success !== true) {
     const fallback = response.status === 401 ? 'Your session has expired. Sign in and complete MFA again.' : response.status === 403 ? 'Administrator permission is required.' : `Device request failed (HTTP ${response.status}).`;
-    throw new Error(apiErrorMessage(data, fallback));
+    const error = new Error(apiErrorMessage(data, fallback));
+    error.status = response.status;
+    error.code = typeof data?.code === 'string' ? data.code : typeof data?.error?.code === 'string' ? data.error.code : undefined;
+    error.requestId = typeof data?.requestId === 'string' ? data.requestId : undefined;
+    throw error;
   }
   return data;
 }

@@ -55,7 +55,7 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
     await waitUntil(b,`${panel} && ${contains('Database temporarily unavailable')}`,'initial employee fetch failure');
     assert.equal(await b.evaluate(`${panel}.querySelector('[aria-label="Employee"]').disabled`),true);
     assert.equal(await b.evaluate(`${panel}.querySelector('[aria-label="Employee"]').options[0].textContent`),'Employee list unavailable');
-    failDashboard=false;await click(b,'Refresh');
+    failDashboard=false;await click(b,'Refresh devices');
     await waitUntil(b,`${panel} && ${panel}.querySelector('[aria-label="Employee"]').options.length===3 && ${panel}.getAttribute('aria-busy')==='false'`,'real Devices page with company employees');
     await click(b,'Assign');await waitUntil(b,contains('Select an active employee'),'assignment validation');assert.equal(await f.prisma.endpointDevice.count(),0);
     await click(b,'Issue Enrollment Token');await waitUntil(b,contains('Assign a device before'),'token validation');
@@ -67,26 +67,38 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
     const issued=await b.evaluate(`${panel}.querySelector('[aria-label="Enrollment token"]').textContent`);stored=await f.prisma.endpointDevice.findUnique({where:{id:stored.id}});assert.equal(stored.enrollmentHash,hashSecret(issued));
     await b.command('Page.bringToFront');await click(b,'Copy token');await waitUntil(b,contains('Copied'),'clipboard success');assert.equal(await b.evaluate('navigator.clipboard.readText()'),issued);
     await click(b,'Dismiss token');assert.equal(await b.evaluate(`Boolean(${panel}.querySelector('[aria-label="Enrollment token"]'))`),false);
-    await click(b,'Refresh');await waitUntil(b,contains('Device list refreshed.'),'panel refresh');assert.equal(await b.evaluate(`Boolean(${panel}.querySelector('[aria-label="Enrollment token"]'))`),false);
+    await click(b,'Refresh devices');await waitUntil(b,contains('Device list refreshed.'),'panel refresh');assert.equal(await b.evaluate(`Boolean(${panel}.querySelector('[aria-label="Enrollment token"]'))`),false);
     // Actual backend validation: invalid OS identity must not produce success.
     await value(b,'Verified OS identity','invalid-sid');await click(b,'Issue Enrollment Token');await waitUntil(b,contains('Save changes to the assignment before issuing a token.'),'unsaved mapping validation');
     await click(b,'Assign');await waitUntil(b,contains('Use verified Windows SID or uid:number'),'backend validation error');
     assert.equal((await f.prisma.endpointDevice.findUnique({where:{id:stored.id}})).mappedIdentity,null);
     await value(b,'Verified OS identity','');await value(b,'Employee',f.employee2.id);await click(b,'Assign');await waitUntil(b,contains('Assigned Browser-tested laptop to Second employee.'),'existing device reassignment');
     assert.equal(await f.prisma.endpointDevice.count(),1);assert.equal((await f.prisma.endpointDevice.findUnique({where:{id:stored.id}})).userId,f.employee2.id);
+    // Synthetic browser regression: explicit MFA rejection is visible, then the authorized request persists and displays its expiring status.
+    await f.prisma.endpointDevice.update({where:{id:stored.id},data:{mappedIdentity:'S-1-5-21-11-22-33-1002',enrolledAt:new Date(),credentialHash:hashSecret(randomUUID()),lastSeen:new Date(),agentVersion:'browser-test-fixture'}});
+    await click(b,'Refresh devices');await waitUntil(b,`${panel}.querySelector('button') && ${panel}.getAttribute('aria-busy')==='false'`,'enrolled synthetic device refresh');
+    await b.evaluate("window.confirm=()=>true;window.prompt=()=> 'Approved browser regression maintenance'");
+    await b.evaluate(`window.__endpointStopOriginalFetch=window.fetch.bind(window);window.fetch=async(input,options)=>String(input).includes('/stop-agent')?new Response(JSON.stringify({success:false,error:{code:'FRESH_MFA_REQUIRED',message:'Verify administrator MFA again, then retry this device-control action.'}}),{status:403,headers:{'Content-Type':'application/json'}}):window.__endpointStopOriginalFetch(input,options)`);
+    await click(b,'Request Windows service stop');await waitUntil(b,`${panel}.querySelector('[data-stop-feedback="${stored.id}"]')?.textContent.includes('Recent administrator MFA is required')`,'visible device-specific recent-MFA error');
+    assert.equal(await f.prisma.endpointEnforcementCommand.count({where:{deviceId:stored.id,action:'STOP_AGENT'}}),0,'MFA error does not persist a command');
+    await b.evaluate('window.fetch=window.__endpointStopOriginalFetch;delete window.__endpointStopOriginalFetch');
+    await click(b,'Request Windows service stop');await waitUntil(b,contains('Stop command recorded and waiting for the agent heartbeat.'),'visible successful stop-command state');
+    const savedStop=await f.prisma.endpointEnforcementCommand.findFirst({where:{deviceId:stored.id,action:'STOP_AGENT'},orderBy:{createdAt:'desc'}});
+    assert.equal(savedStop.status,'PENDING');assert.ok(savedStop.expiresAt instanceof Date);assert.ok(network.some(r=>r.path.endsWith('/stop-agent')&&r.status===200),'authorized stop request receives success');
+    assert.ok(await b.evaluate(`${panel}.textContent.includes('waiting for authenticated agent heartbeat')`),'device history shows pending delivery state');
     // Registry Refresh reloads both stores, including a row added after initial load.
     await f.prisma.device.create({data:{deviceId:'browser-refresh-device',userId:f.employee.id,name:'Registry refresh laptop',os:'Windows',browser:'Chrome',ip:'127.0.0.1',location:'Test'}});
     slowDashboard=true;await b.evaluate('document.querySelector(\'[aria-label="Refresh device registry"]\').click()');
     await waitUntil(b,`${panel}.getAttribute('aria-busy')==='true'`,'loading indicator');
     await waitUntil(b,`document.querySelector('main').textContent.includes('Registry refresh laptop') && ${panel}.getAttribute('aria-busy')==='false'`,'registry refresh from database');slowDashboard=false;
-    failDashboard=true;await click(b,'Refresh');await waitUntil(b,contains('Database temporarily unavailable'),'refresh backend error');
+    failDashboard=true;await click(b,'Refresh devices');await waitUntil(b,contains('Database temporarily unavailable'),'refresh backend error');
     assert.equal(await b.evaluate(`${panel}.querySelectorAll('article').length`),1);
-    failDashboard=false;await click(b,'Refresh');await waitUntil(b,`${panel}.getAttribute('aria-busy')==='false' && !${contains('Database temporarily unavailable')}`,'refresh recovery');
+    failDashboard=false;await click(b,'Refresh devices');await waitUntil(b,`${panel}.getAttribute('aria-busy')==='false' && !${contains('Database temporarily unavailable')}`,'refresh recovery');
     await f.prisma.user.updateMany({where:{id:{in:[f.employee.id,f.employee2.id]}},data:{status:'DISABLED'}});
-    await click(b,'Refresh');await waitUntil(b,contains('No active employees in your company.'),'honest empty employee list');
+    await click(b,'Refresh devices');await waitUntil(b,contains('No active employees in your company.'),'honest empty employee list');
     assert.equal(await b.evaluate(`${panel}.querySelector('[aria-label="Employee"]').disabled`),true);
     await f.prisma.user.updateMany({where:{id:{in:[f.employee.id,f.employee2.id]}},data:{status:'ACTIVE'}});
-    await click(b,'Refresh');await waitUntil(b,`${panel}.querySelector('[aria-label="Employee"]').options.length===3 && ${panel}.getAttribute('aria-busy')==='false'`,'employee list recovery');
+    await click(b,'Refresh devices');await waitUntil(b,`${panel}.querySelector('[aria-label="Employee"]').options.length===3 && ${panel}.getAttribute('aria-busy')==='false'`,'employee list recovery');
     // Regression fixtures only: process noise must not hide the usage view.
     const timelineRow=(type,name,age)=>({version:1,eventId:randomUUID(),deviceId:stored.id,companyId:'A',userId:f.employee2.id,type,occurredAt:new Date(Date.now()-age*1000),metadata:{pid:42,name,sessionId:'1',...(type==='APPLICATION_USAGE'?{durationSeconds:10}:{})}});
     const usageRows=[timelineRow('APPLICATION_USAGE','Notepad',700),timelineRow('APPLICATION_USAGE','brave',600)];
@@ -96,7 +108,7 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
     const usageDashboard=await usageResponse.json();
     assert.deepEqual(new Set(usageDashboard.events.map(e=>e.eventId)),new Set(usageRows.map(e=>e.eventId)),'database filtering returns both usage events before the process-event limit');
     assert.equal(usageDashboard.events.length,2);
-    await click(b,'Refresh');
+    await click(b,'Refresh devices');
     await waitUntil(b,`${panel}.querySelector('[aria-label="Show Notepad usage"]') && ${panel}.querySelector('[aria-label="Show Brave usage"]')`,'application summaries rendered from filtered response');
     assert.equal(await b.evaluate(`${panel}.querySelectorAll('[aria-label="Endpoint activity timeline"] li').length`),0,'summary view intentionally hides detail rows until an application is selected');
     assert.ok(await b.evaluate(`${panel}.querySelector('[aria-label="Show Notepad usage"]').textContent.includes('1 recorded observations')`));
