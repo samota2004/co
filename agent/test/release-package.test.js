@@ -1,13 +1,17 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {AGENT_VERSION, DEFAULT_CONFIG} from '../shared/contract.js';
 
 // Run after building: a stale kit can consume a valid enrollment token before
 // rejecting a newer backend configuration, leaving a never-connected device.
 for (const directory of ['windows', 'install-kit']) {
   test(`${directory} release matches source and accepts the backend enrollment configuration`, async () => {
-    const root = new URL(`../dist/${directory}/`, import.meta.url);
+    const root = process.env.CYBERORBIT_RELEASE_ROOT
+      ? pathToFileURL(path.join(process.env.CYBERORBIT_RELEASE_ROOT,directory)+path.sep)
+      : new URL(`../dist/${directory}/`, import.meta.url);
     const manifest = JSON.parse(await fs.readFile(new URL('package.json', root), 'utf8'));
     const contract = await import(new URL('shared/contract.js', root));
     assert.equal(manifest.version, AGENT_VERSION, 'Rebuild the distribution before sharing it');

@@ -82,8 +82,8 @@ test('real Windows observation -> authenticated HTTP -> durable PostgreSQL -> em
     const dash=await call(`dashboard?userId=${employee.id}`,admin);assert.equal(dash.status,200);assert.equal(dash.data.devices[0].userId,employee.id);assert.equal(dash.data.ml.available,false);
     assert.equal((await call('dashboard',other)).data.devices.length,0);
     await assert.rejects(service.dashboard(otherEmployee,employee.id),e=>e.status===403);
-    assert.equal((await call(`${r.deviceId}/revoke`,other,'POST')).status,404);
-    assert.equal((await call(`${r.deviceId}/revoke`,admin,'POST')).status,200);
+    assert.equal((await call(`${r.deviceId}/revoke`,other,'POST',{reason:'Cross-company revoke denial'})).status,404);
+    assert.equal((await call(`${r.deviceId}/revoke`,admin,'POST',{reason:'Verified credential revocation'})).status,200);
     await assert.rejects(deviceTransport.post('ingest',{events:[observation]}),e=>e.status===401);
     console.log('Verified actual Windows process, enrollment, offline recovery, durable storage, employee dashboard, tenant boundaries, dedupe and revocation.');
     clearInterval(sseManager.heartbeatInterval);

@@ -80,7 +80,7 @@ backend:
 
 ```powershell
 # Existing installation: preserve enrollment, credentials, configuration and queue.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent\packaging\windows\update-installed.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent\packaging\windows\update-installed.ps1 -AllowSourceReparsePoint
 
 # Discover Windows account SIDs locally; never paste passwords into CYBERORBIT.
 Get-LocalUser | Select-Object Name, Enabled, SID
@@ -143,10 +143,22 @@ are required for upload. It defaults off. Restart the desktop helper and service
 after changing local approval. The helper prints a monitoring notice.
 
 Update the backend first (it validates the shared contract), then update existing
-agent code with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
-.\agent\packaging\windows\update-installed.ps1` from the repository root in an
-administrator terminal. This code updater preserves enrollment and queue data;
-do not reinstall or revoke. It does not change local monitoring approval.
+agent code from the repository root in an Administrator terminal. By default the
+updater rejects a reparse-point source root. If the verified repository `agent`
+folder itself is a OneDrive reparse point, explicitly pass
+`-AllowSourceReparsePoint`; this exception applies only to that source root.
+Source files are checked by their resolved final paths and must remain inside
+that resolved package root, so OneDrive-backed entries work but links escaping
+the repository are rejected. Installed code/data paths and destination links
+remain strictly rejected. The updater preserves enrollment and queue data; do
+not reinstall or revoke. It preserves the existing service state: an already
+disabled, stopped service remains disabled and stopped, while a running service
+is restarted after a successful update. It does not change local monitoring
+approval.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent\packaging\windows\update-installed.ps1 -AllowSourceReparsePoint
+```
 
 Titles appear inside APPLICATION_USAGE entries and split duration when the
 sampled title changes, including switches between tabs in the same browser.
@@ -407,5 +419,47 @@ powershell -NoProfile -File agent/packaging/windows/build.ps1
 ```
 
 The integration suite requires the configured PostgreSQL identity to CREATE/DROP a schema. It creates a random isolated `orbit_agent_test_*` schema, applies migrations there, creates test users, runs the authenticated endpoint/SSE routers, observes the actual Windows test process and its SID, verifies enrollment expiry/reuse, offline retry/queue restart, durable insertion/dedupe, correct employee dashboard data, cross-company/other-employee denial and revoked credential denial, then removes only its test schema. It does not enroll the developer laptop in the production database. See `VERIFICATION.md` for executed results and acceptance limits.
+
+### Administrator-requested Windows service stop
+
+The Devices page offers **Request Windows service stop** only to a company security
+administrator. The API requires an MFA-authenticated session no older than 15 minutes,
+an 8–500 character audit reason, and a device in that administrator's company. The
+server records a unique command with a two-minute expiry and actor/reason audit data.
+The command is delivered only in a TLS-protected heartbeat authenticated by that
+device's enrollment credential; it is bound to the device ID and mapped employee SID.
+The service agent durably records the command ID, rejects expired/mismatched/replayed
+commands, acknowledges it on a later authenticated heartbeat, and exits gracefully
+only after the server accepts that acknowledgement. The Windows service host then
+requests its own normal SCM stop. The dashboard reports **ACKNOWLEDGED** as agent
+acceptance and shutdown request, not as an independent SCM status probe. Offline
+commands expire rather than executing later without a fresh administrator request.
+Credential revocation is a separate audited action: after the server invalidates the
+credential, the service stops when its next authenticated request is rejected.
+
+On an installed Windows endpoint, an administrator can inspect the protections without
+changing them:
+
+```powershell
+sc.exe sdshow CyberOrbitAgent
+sc.exe qfailure CyberOrbitAgent
+icacls "$env:ProgramFiles\CYBERORBIT"
+icacls "$env:ProgramData\CYBERORBIT"
+Get-ScheduledTask -TaskName 'CYBERORBIT Desktop Monitor' | Get-ScheduledTaskInfo
+Get-ScheduledTask -TaskName 'CYBERORBIT Desktop Recovery' | Get-ScheduledTaskInfo
+```
+
+Run `sc.exe stop CyberOrbitAgent`, `sc.exe config CyberOrbitAgent start= disabled`,
+and `sc.exe delete CyberOrbitAgent` from a **standard employee account** only as a
+staged permission acceptance test; each must fail with Access Denied. Likewise,
+attempting to write under either protected directory or modify either scheduled task
+must fail. Do not run these denial checks on a production endpoint during work hours.
+
+For emergency recovery, use an elevated Windows Administrator session; the agent
+never asks for or stores an administrator password. Restore Automatic startup, enable
+the recovery/desktop tasks if they were administratively disabled, run
+`configure-startup.ps1`, then start the service. A local administrator or a person
+with physical device control can still stop, alter, replace, or remove software; these
+controls deter standard-user tampering and do not make the agent impossible to stop.
 
 Production release still requires reviewed/pinned runtime, Authenticode signing of host/PowerShell/package, code-signing/notarization on macOS, signed Linux distribution packaging, staged installation/upgrade testing, enterprise credential lifecycle/rotation, tenant provisioning and server retention controls. The included unsigned development ZIP is not a production-ready signed installer.

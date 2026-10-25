@@ -12,7 +12,13 @@ public class OrbitService : ServiceBase {
     worker=new Process(); worker.StartInfo=new ProcessStartInfo(Path.Combine(root,"runtime","node.exe"),"\""+Path.Combine(root,"src","cli.js")+"\" service \""+config+"\"");
     worker.StartInfo.UseShellExecute=false;worker.StartInfo.CreateNoWindow=true;worker.StartInfo.RedirectStandardOutput=true;worker.StartInfo.RedirectStandardError=true;
     worker.OutputDataReceived+=(s,e)=>Write(e.Data);worker.ErrorDataReceived+=(s,e)=>Write(e.Data);
-    worker.EnableRaisingEvents=true;worker.Exited+=(s,e)=>{if(!stopping)Environment.Exit(1);};
+    worker.EnableRaisingEvents=true;worker.Exited+=(s,e)=>{
+      if(stopping)return;
+      if(worker.ExitCode==0) {
+        try { using(var controller=new ServiceController(ServiceName)) { if(controller.Status!=ServiceControllerStatus.Stopped)controller.Stop(); } }
+        catch { Environment.Exit(1); }
+      } else Environment.Exit(1);
+    };
     worker.Start();worker.BeginOutputReadLine();worker.BeginErrorReadLine();
   }
   protected override void OnStop() {

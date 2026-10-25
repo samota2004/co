@@ -14,6 +14,7 @@ import { startIpc } from './ipc.js';
 import { desktopSampleStatus, desktopDiagnosticStatus, heartbeatMetadata, healthReport } from './health.js';
 import { AGENT_VERSION, DEFAULT_CONFIG } from '../shared/contract.js';
 import { reconcileAccountControl } from './account-control.js';
+import {acknowledgeStopCommand,pendingStopExpiry,pendingStopReport,receiveStopCommand} from './remote-stop.js';
 import {UnixDesktopSupervisor} from './unix-desktop-supervisor.js';
 import {UserDesktopSupervisor} from './user-desktop-supervisor.js';
 import {assertUserConfig,assertEnrollment,ownedPath,macosFacts} from './macos-user.js';
@@ -140,15 +141,32 @@ async function runEnrolledService(local) {
     }
   };
   const upload=async()=> {while(!stopping){const before=uploader.lastAcceptedUsage?.eventId;await uploader.tick();if(uploader.lastAcceptedUsage?.eventId!==before)await writeDesktopStatus(true);if(uploader.revoked)await revoke();await sleep(1000);}};
-  let accountControlReport=null;
+  let accountControlReport=null,stopCommandReport=null,stopCommandExpiresAt=null;
   const heartbeat=async()=> {
     let failures=0;
     while(!stopping) {
       try {
         if(uploader.revoked) {await revoke();break;}
         await emit('HEARTBEAT',heartbeatMetadata());
-        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen),...(accountControlReport?{accountControlReport}:{})});
+        if(stopCommandReport&&!stopCommandExpiresAt)stopCommandExpiresAt=await pendingStopExpiry(local.dataDirectory);
+        if(stopCommandExpiresAt&&Date.parse(stopCommandExpiresAt)<=Date.now()){await pendingStopReport(local.dataDirectory);stopCommandReport=null;stopCommandExpiresAt=null;}
+        stopCommandReport=stopCommandReport||await pendingStopReport(local.dataDirectory);
+        if(stopCommandReport&&!stopCommandExpiresAt)stopCommandExpiresAt=await pendingStopExpiry(local.dataDirectory);
+        const sentStopReport=stopCommandReport;
+        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen),...(accountControlReport?{accountControlReport}:{}),...(sentStopReport?{agentCommandReport:sentStopReport}:{})});
         accountControlReport=null;
+        if(sentStopReport&&r.agentCommandAck===sentStopReport.commandId&&await acknowledgeStopCommand(local.dataDirectory,sentStopReport.commandId)){
+          stopCommandReport=null;
+          stopCommandExpiresAt=null;
+          console.log('Administrator-approved endpoint service stop was acknowledged; stopping without deleting enrollment credentials or queue data.');
+          stop();
+          break;
+        }
+        if(r.agentCommand){
+          const received=await receiveStopCommand(local.dataDirectory,secrets,r.agentCommand);
+          if(received.accepted){stopCommandReport=received.report;stopCommandExpiresAt=r.agentCommand.expiresAt;}
+          else console.warn('Endpoint command rejected by local binding, expiry or replay checks.');
+        }
         health.accountControl=await reconcileAccountControl(local,secrets,r.accountControl);
         const reported=/^reported: ([A-Z_]+)$/.exec(health.accountControl)?.[1];
         const resultCode=reported||(/^disabled:|^unsupported:/.test(health.accountControl)?'CONTROL_DISABLED':/^refused:/.test(health.accountControl)?'CONTROL_REFUSED':/^error:/.test(health.accountControl)?'NATIVE_ERROR':/^unchanged:/.test(health.accountControl)?'NEEDS_REVIEW':null);

@@ -65,7 +65,15 @@ if ($result.mappedIdentity) {
   Register-ScheduledTask -TaskName 'CYBERORBIT Desktop Monitor' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Visible CYBERORBIT approved application usage monitor' | Out-Null
 }
 New-Service -Name CyberOrbitAgent -DisplayName 'CYBERORBIT Endpoint Monitor' -Description 'Visible enterprise endpoint telemetry; uploads independently of website' -BinaryPathName ('"'+(Join-Path $installRoot 'CyberOrbitService.exe')+'" "'+$configFile+'"') -StartupType Automatic | Out-Null
+ # SYSTEM and Administrators receive full service control. Built-in Users can
+ # query status/configuration only; STOP, PAUSE, CHANGE_CONFIG and DELETE are absent.
+$serviceDacl = 'D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x2008D;;;BU)'
+& sc.exe sdset CyberOrbitAgent $serviceDacl | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Could not restrict CyberOrbitAgent service control permissions.' }
 & sc.exe failure CyberOrbitAgent reset= 86400 actions= restart/10000/restart/30000/restart/60000 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Could not configure CyberOrbitAgent service recovery.' }
+& sc.exe failureflag CyberOrbitAgent 1 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Could not configure CyberOrbitAgent recovery for non-zero exits.' }
 if ($result.mappedIdentity) { & (Join-Path $PSScriptRoot 'configure-startup.ps1') }
 Start-Service CyberOrbitAgent
 Write-Output "Installed device $($result.deviceId). Session helper starts at next logon. Revoke credentials in the dashboard before uninstall/reassignment."

@@ -66,7 +66,7 @@ test('two Windows and one Mac remain visible/enrolled and keep uploading before 
     const fresh=await service.assign(f.admin,{userId:f.employee2.id,name:'Pending migration enrollment',platform:'win32',issueEnrollmentToken:false});
     const token=await service.issueEnrollmentToken(f.admin,fresh.deviceId);
     const exchanged=await service.enroll({token:token.enrollmentToken,platform:'win32',agentVersion:'1.1.0'});
-    await service.change(f.admin,fresh.deviceId,{},true);await assert.rejects(service.heartbeat(exchanged.credential,{agentVersion:'1.1.0',health}),{status:401});
+    await service.change(f.admin,fresh.deviceId,{reason:'Migration test credential revocation'},true);await assert.rejects(service.heartbeat(exchanged.credential,{agentVersion:'1.1.0',health}),{status:401});
     assert.equal(lookups,0);
     // Apply the real additive migration SQL in place. No reset, reseed or ID/
     // credential changes are needed to restore the optional feature.

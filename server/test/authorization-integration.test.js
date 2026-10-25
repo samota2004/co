@@ -19,7 +19,7 @@ test('policy risk and trust change only from qualifying evidence; duplicate evid
     assert.equal(await f.prisma.riskScore.count({where:{userId:f.employee.id}}),0,'ordinary timing does not create a scored risk record');
     assert.equal(timingOnly.user.trustUpdatedAt,null,'zero risk does not fabricate a trust assessment');
     const eventId=randomUUID();
-    const suspicious=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'FAILED_LOGIN',eventId,failedAuthCount:2});
+    const suspicious=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'FAILED_LOGIN',eventId,failedAuthCount:2,isOffHours:false});
     assert.equal(suspicious.decision.evaluation.riskScore,10,'two observed failed logins map to the configured authentication factor');
     assert.equal(suspicious.user.trustScore,before.trustScore-1,'positive evidence lowers trust by the documented small-risk step');
     const duplicate=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'FAILED_LOGIN',eventId,failedAuthCount:2});

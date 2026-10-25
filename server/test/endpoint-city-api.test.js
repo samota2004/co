@@ -27,7 +27,7 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
       const e=await service.enroll({token:a.enrollmentToken,platform,agentVersion:heartbeat.agentVersion});
       const original=await f.prisma.endpointDevice.findUnique({where:{id:a.deviceId}});enrolled.push({a,e,original});
       const before=calls;let reply=await service.heartbeat(e.credential,heartbeat,'8.8.8.8');assert.equal(calls,before);
-      assert.deepEqual(Object.keys(reply).sort(),['config','accountControl','companyId','userId','deviceId'].sort());assert.deepEqual(reply.config,DEFAULT_CONFIG);
+      assert.deepEqual(Object.keys(reply).sort(),['config','accountControl','agentCommand','agentCommandAck','companyId','userId','deviceId'].sort());assert.deepEqual(reply.config,DEFAULT_CONFIG);
       await service.changeCity(f.admin,a.deviceId,{enabled:true});reply=await service.heartbeat(e.credential,heartbeat,'8.8.8.8');assert.equal(calls,before+1);
       assert.deepEqual(reply.config,DEFAULT_CONFIG);
       const d=(await service.dashboard(f.admin)).devices.find(d=>d.id===a.deviceId);assert.equal(d.ipCity.city,'Fixture City');assert.equal(d.userId,f.employee.id);
@@ -48,7 +48,7 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
     server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
     const origin=`http://127.0.0.1:${server.address().port}`;
     const post=async(xff='1.1.1.1')=>fetch(origin+'/api/endpoint/heartbeat',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${e.credential}`,'X-Forwarded-For':xff,'X-Forwarded-Proto':'https'},body:JSON.stringify({...heartbeat,ip:'9.9.9.9',deviceId:'wrong'})});
-    let r=await post();assert.equal(r.status,200);assert.equal(lastAddress,'127.0.0.1');assert.deepEqual(Object.keys(await r.json()).sort(),['success','config','accountControl'].sort());
+    let r=await post();assert.equal(r.status,200);assert.equal(lastAddress,'127.0.0.1');assert.deepEqual(Object.keys(await r.json()).sort(),['success','config','accountControl','agentCommand','agentCommandAck'].sort());
     app.set('trust proxy',['loopback']);r=await post();assert.equal(r.status,200);assert.equal(lastAddress,'1.1.1.1');
     // Reproduce the deployed failure: loopback accepts the local TLS proxy but
     // stops at a private downstream hop. Switching to the explicit Render
@@ -127,7 +127,7 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
       pending=service.heartbeat(e.credential,heartbeat,'8.8.8.8');await waiting;
       if(change==='disable'){await service.changeCity(f.admin,a.deviceId,{enabled:false});await service.changeCity(f.admin,a.deviceId,{enabled:true});}
       if(change==='pause'){await service.change(f.admin,a.deviceId,{config:{...original.config,paused:true}});await service.change(f.admin,a.deviceId,{config:original.config});}
-      if(change==='revoke')await service.change(f.admin,a.deviceId,{},true);
+      if(change==='revoke')await service.change(f.admin,a.deviceId,{reason:'City test credential revocation'},true);
       finish({...estimate,city:'Obsolete City'});await pending;assert.notEqual((await saved()).ipCity.city,'Obsolete City');
     }
     await assert.rejects(service.heartbeat(e.credential,heartbeat,'8.8.8.8'),{status:401});

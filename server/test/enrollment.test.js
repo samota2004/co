@@ -54,7 +54,7 @@ test('enrollment schema errors, token states, single-use exchange and actual Win
     assert.equal(large.status,413);assert.equal((await large.json()).code,'ENDPOINT_PAYLOAD_TOO_LARGE');
     const expired=await assignment('Expired token');await f.prisma.endpointDevice.update({where:{id:expired.deviceId},data:{enrollmentExpiresAt:new Date(0)}});
     result=await call(request(expired.enrollmentToken));assert.equal(result.status,401);assert.equal(result.data.code,'ENROLLMENT_TOKEN_EXPIRED');
-    const revoked=await assignment('Revoked token');await service.change(f.admin,revoked.deviceId,{},true);
+    const revoked=await assignment('Revoked token');await service.change(f.admin,revoked.deviceId,{reason:'Enrollment test token revocation'},true);
     result=await call(request(revoked.enrollmentToken));assert.equal(result.status,401);assert.equal(result.data.code,'ENROLLMENT_TOKEN_UNAVAILABLE');
     await f.prisma.user.update({where:{id:f.employee.id},data:{status:'DISABLED'}});
     result=await call(request(pending.enrollmentToken));assert.equal(result.status,401);assert.equal(result.data.code,'ENROLLMENT_ASSIGNMENT_INVALID');

@@ -69,7 +69,7 @@ test('macOS contract over real HTTP/PostgreSQL: assignment guards, heartbeat, of
     await f.prisma.endpointEvent.updateMany({where:{deviceId:a.deviceId,type:'APPLICATION_USAGE'},data:{occurredAt:new Date(Date.now()-8*86400000)}});
     await expireMacBrowserTitles(f.prisma);
     const old=await f.prisma.endpointEvent.findFirst({where:{deviceId:a.deviceId,type:'APPLICATION_USAGE'}});assert.equal(old.metadata.browserTitle,undefined);assert.equal(old.metadata.durationSeconds,4);
-    await service.change(f.admin,a.deviceId,{},true);
+    await service.change(f.admin,a.deviceId,{reason:'macOS fixture credential revocation'},true);
     await assert.rejects(device.post('heartbeat',{agentVersion:'1.2.0',health}),e=>e.status===401);
     await q.append(events[0]);const revoked=new Uploader(q,device);await revoked.tick();assert.equal(revoked.revoked,true);assert.equal(q.health().queueEvents,1);
   } finally {

@@ -90,7 +90,7 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
   const foreignHeaders={Authorization:'Bearer '+generateJwtToken(f.otherAdmin,true)};
   assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Test unauthorized company boundary'},foreignHeaders)).status,404);
   assert.equal((await pause(foreignHeaders)).status,404);
-  assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{},foreignHeaders)).status,404);
+  assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{reason:'Cross-company revoke check'},foreignHeaders)).status,404);
   assert.equal((await heartbeat()).data.accountControl.action,'BLOCK');
   assert.equal((await heartbeat()).data.config.paused,false);
   await f.prisma.role.create({data:{code:'SYSTEM_ADMIN',name:'System administrator'}});
@@ -114,7 +114,7 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
   await assert.rejects(setAccount({user:storedManager,params:{id:stored.id}},'ACTIVE'),e=>e.code==='ADMIN_REQUIRED');
   assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Administrative review completed'},headers)).status,200);
   assert.equal((await heartbeat()).data.accountControl.action,'ALLOW');
-  assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{},headers)).status,200);
+  assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{reason:'Approved test credential revocation'},headers)).status,200);
   assert.equal(await f.prisma.auditLog.count({where:{action:'AGENT_REVOKED',userId:f.admin.id}}),1);
   assert.equal((await heartbeat()).status,401);
  }finally{

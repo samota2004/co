@@ -110,8 +110,8 @@ test('enrollment expiry/reuse, company boundary, verified attribution, dedupe an
   const foreground=normalize(r.deviceId,'APPLICATION_FOREGROUND',{identity:'S-1-5-21-111-222-333-1001',pid:3,name:'AnyApplication',sessionId:'1'});
   await s.ingest(r.credential,{events:[foreground]});assert.equal(m.events[3].userId,'employee');assert.equal(m.events[3].type,'APPLICATION_FOREGROUND');
   await assert.rejects(s.ingest(r.credential,{events:[event()]}),e=>e.status===403);
-  await assert.rejects(s.change({...admin,companyId:'B'},r.deviceId,{},true),e=>e.status===404);
-  await s.change(admin,r.deviceId,{},true);await assert.rejects(s.ingest(r.credential,{events:[e]}),e=>e.status===401);
+  await assert.rejects(s.change({...admin,companyId:'B'},r.deviceId,{reason:'Revoke test credential'},true),e=>e.status===404);
+  await s.change(admin,r.deviceId,{reason:'Revoke test credential'},true);await assert.rejects(s.ingest(r.credential,{events:[e]}),e=>e.status===401);
 });
 
 test('all three platforms get fresh account instructions only for their enrolled employee or manager',async()=>{

@@ -36,6 +36,13 @@ const handle = fn => async (req, res) => {
   }
 };
 const credential = req => req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '';
+const requireRecentMfa = (req,res,next) => {
+  const now=Date.now(), sessionAt=req.authSession?.mfaVerifiedAt?.getTime(), tokenAt=Number(req.authClaims?.iat)*1000;
+  const verifiedAt=Number.isFinite(sessionAt)?sessionAt:tokenAt;
+  if(req.authClaims?.mfaVerified!==true||!Number.isFinite(verifiedAt)||verifiedAt>now+30000||now-verifiedAt>15*60*1000)
+    return res.status(403).json({success:false,error:{code:'FRESH_MFA_REQUIRED',message:'Verify administrator MFA again, then retry this device-control action.'}});
+  return next();
+};
 router.post('/assign', requireSecurityAdmin, (req,res,next) => { res.set('Cache-Control','no-store'); next(); }, handle(req => service.assign(req.user, req.body)));
 router.post('/:id/enrollment-token', requireSecurityAdmin, (req,res,next) => { res.set('Cache-Control','no-store'); next(); }, handle(req => service.issueEnrollmentToken(req.user, req.params.id)));
 router.post('/enroll', (req, res, next) => {
@@ -59,10 +66,15 @@ router.post('/ingest', handle(async req => {
 router.post('/heartbeat', handle(async req => {
   const result = await service.heartbeat(credential(req), req.body,cityRequestAddress(req),cityAddressDiagnostics(req));
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
-  return { config: result.config, accountControl: result.accountControl };
+  return { config: result.config, accountControl: result.accountControl, agentCommand: result.agentCommand, agentCommandAck: result.agentCommandAck };
 }));
 router.get('/dashboard', requireAuth, handle(req => service.dashboard(req.user, req.query.userId, req.query.eventType, req.query.deviceId, req.query.readinessDate)));
 router.put('/:id/config', requireSecurityAdmin, handle(req => service.change(req.user, req.params.id, req.body)));
 router.post('/:id/city-estimate', requireSecurityAdmin, handle(req => service.changeCity(req.user, req.params.id, req.body)));
-router.post('/:id/revoke', requireSecurityAdmin, handle(req => service.change(req.user, req.params.id, {}, true)));
+router.post('/:id/stop-agent', requireSecurityAdmin, requireRecentMfa, handle(async req => {
+  const result=await service.requestAgentStop(req.user,req.params.id,req.body);
+  sseManager.broadcast('ENDPOINT_UPDATED',{companyId:req.user.companyId,userId:result.userId});
+  return result;
+}));
+router.post('/:id/revoke', requireSecurityAdmin, requireRecentMfa, handle(req => service.change(req.user, req.params.id, req.body, true)));
 export default router;

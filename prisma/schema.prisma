@@ -477,6 +477,7 @@ model EndpointEnforcementCommand {
   resultCode     String?
   reason         String
   issuedAt       DateTime      @default(now())
+  expiresAt      DateTime?
   acknowledgedAt DateTime?
   createdById    String?
   createdAt      DateTime      @default(now())
@@ -484,6 +485,7 @@ model EndpointEnforcementCommand {
 
   @@index([companyId, userId, createdAt])
   @@index([deviceId, status, createdAt])
+  @@index([deviceId, status, expiresAt])
   @@map("endpoint_enforcement_commands")
 }
 
