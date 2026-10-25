@@ -344,7 +344,6 @@ export const DashboardPage = ({
   const onlineUsers = overview?.summary.activeUsers ?? "—";
   const highRisk = overview?.summary.highRiskUsers ?? "—";
   const mediumRisk = overview?.summary.restrictedAccounts ?? "—";
-  const safeUsers = overview?.summary.pendingApprovals ?? "—";
   const criticalIncidents = overview?.summary.criticalAlerts ?? "—";
 
   const assessedTrust = administrators.filter(user => typeof user.trustScore === 'number' && Number.isFinite(user.trustScore));
@@ -725,15 +724,6 @@ export const DashboardPage = ({
             description="Reversible restrictions"
             icon={Activity}
             accent="gold"
-            isDark={isDark}
-          />
-
-          <MetricCard
-            label="Pending Approvals"
-            value={safeUsers}
-            description="Awaiting an authorized review"
-            icon={UserCheck}
-            accent="green"
             isDark={isDark}
           />
 
