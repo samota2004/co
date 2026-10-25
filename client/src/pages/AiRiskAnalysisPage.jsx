@@ -293,7 +293,7 @@ export const AiRiskAnalysisPage = ({
           <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#070C12] hover:shadow-[0_22px_70px_rgba(103,232,249,0.07)] sm:p-6 lg:p-7">
             <div className="flex items-start justify-between">
               <span className="text-[12px] font-medium tracking-[0.12em] text-[#A7B0BA]">
-                OBSERVED RISK SCORE
+                CURRENT POLICY RISK
               </span>
 
               <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#D4AF37]/20 bg-[#D4AF37]/[0.05] text-[#D4AF37]">
@@ -302,13 +302,13 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <div className="mt-5 text-4xl font-light tracking-[-0.04em] text-[#D4AF37]">
-              {formatScore(riskScore)} <span className="text-sm text-[#7F8A96]">/ 100</span>
+              {formatScore(analysis?.accountRisk?.score)} <span className="text-sm text-[#7F8A96]">/ 100</span>
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              Highest read-only risk from the last 24 hours · {analysis?.riskLevel}
+              Saved account score used for policy decisions · {analysis?.accountRisk?.level ?? 'Not assessed'}
             </span>
-            <span className="mt-2 block text-[12px] text-[#A7B0BA]">Stored account policy risk: {analysis?.accountRisk?.score ?? "Unavailable"}/100{analysis?.accountRisk?.level ? ` · ${analysis.accountRisk.level}` : ''}. This persisted score is used for account policy posture; it is separate from the live observation score.</span>
+            <span className="mt-2 block text-[12px] text-[#A7B0BA]">Recent observed activity: {formatScore(riskScore)}/100 (last 24 hours, read-only). It does not reset the saved account score when the observation window moves.</span>
           </div>
 
           {/* 2. Trust Score */}

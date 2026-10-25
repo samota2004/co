@@ -37,9 +37,11 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
   await waitUntil(b,"document.querySelector('main')?.textContent.includes('Nine') && document.querySelector('main')?.textContent.includes('Synthetic editor fixture') && document.querySelector('main')?.textContent.includes('192.0.2.11')",'selected employee details, sessions, and endpoint events render');
   const riskResponse=await fetch(`${origin}/api/risk/analysis/${nine.id}`,{headers:{Authorization:`Bearer ${token}`}});
   const riskBody=await riskResponse.json();assert.equal(riskResponse.status,200);assert.equal(riskBody.analysis.accountRisk.score,51);
-  await waitUntil(b,"document.querySelector('main')?.textContent.includes('OBSERVED RISK') && document.querySelector('main')?.textContent.includes('Stored account policy risk: 51/100')",'employee detail shows live observed risk separately from stored policy risk');
+  await waitUntil(b,"document.querySelector('main')?.textContent.includes('CURRENT POLICY RISK') && document.querySelector('main')?.textContent.includes('Recent observed activity:')",'employee detail shows saved policy risk and recent observations separately');
   const liveScore=riskBody.analysis.riskScore;
-  assert.ok(body.includes(`${liveScore} / 100`) || (await b.evaluate('document.querySelector("main").innerText')).includes(`${liveScore} / 100`),'employee detail uses the same backend observed score as Risk Analysis');
+  body=await b.evaluate('document.querySelector("main").innerText');
+  assert.ok(body.includes('51 / 100'),'employee detail keeps the saved policy score visible beyond the observation window');
+  assert.ok(body.includes(`Recent observed activity: ${liveScore}/100`),'employee detail uses the same backend observed score as Risk Analysis');
   assert.ok(apiRequests.includes(`/api/users/${nine.id}`),'existing employee detail API receives the selected ID');
   body=await b.evaluate('document.querySelector("main").innerText');
   assert.equal(body.includes('Priyanka'),false,'Nine view does not include another employee');

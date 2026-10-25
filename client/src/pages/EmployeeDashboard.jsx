@@ -349,19 +349,17 @@ useEffect(() => {
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">
-              {monitoringData ? 'OBSERVED RISK · LAST 24H' : 'STORED POLICY RISK'}
+              CURRENT POLICY RISK
             </span>
             <Activity className="w-4 h-4 text-[#D4AF37]" />
           </div>
           <div className="text-3xl font-light tracking-tight sm:text-4xl text-[#D4AF37]">
-            {monitoringData
-              ? liveRiskState.loading && !liveRiskState.analysis ? 'Loading…' : observedRiskScore === null ? 'Not assessed' : observedRiskScore
-              : riskScore}{" "}
-            {(monitoringData ? observedRiskScore !== null : true) && <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>}
+            {riskScore}{" "}
+            <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>
           </div>
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             {monitoringData
-              ? `Read-only backend analysis of recent endpoint and security observations. Stored account policy risk: ${riskScore}/100${liveRiskState.error ? ` · Live refresh failed: ${liveRiskState.error}` : ''}`
+              ? `Saved account risk used by policy. Recent observed activity: ${liveRiskState.loading && !liveRiskState.analysis ? 'Loading…' : observedRiskScore === null ? 'Not assessed' : `${observedRiskScore}/100`} (last 24 hours, read-only).${liveRiskState.error ? ` Analysis refresh failed: ${liveRiskState.error}` : ''}`
               : 'Latest persisted contextual policy assessment. Endpoint observations are reviewed separately in Risk Analysis.'}
           </p>
         </div>
@@ -382,7 +380,7 @@ useEffect(() => {
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             Account state: {currentUser?.status || "ACTIVE"}
           </p>
-          {monitoringData && <p className="mt-1 text-xs leading-5 text-[#7F8A96]">Posture follows stored account policy risk ({riskScore}/100); the observed 24-hour score is read-only.</p>}
+          {monitoringData && <p className="mt-1 text-xs leading-5 text-[#7F8A96]">Posture follows the saved account risk ({riskScore}/100). Recent endpoint observations are reviewed separately and do not reset this score after 24 hours.</p>}
         </div>
 
         {/* Active Sessions */}
