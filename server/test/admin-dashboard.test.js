@@ -19,8 +19,10 @@ test('admin dashboard queries contain administrator records only while employee 
     await f.prisma.session.create({data:{sessionToken:randomUUID(),userId:systemAdmin.id,ip:'127.0.0.1',expiresAt:new Date(now.getTime()-1000),mfaVerifiedAt:new Date(now.getTime()-86400000)}});
     for(const user of [admin,employee,manager]){
       await f.prisma.activityEvent.create({data:{eventId:randomUUID(),userId:user.id,userEmail:user.email,userRole:user.roleCode,type:'MASS_DOWNLOAD',timestamp:now,ip:'127.0.0.1',location:'Synthetic test fixture',severity:'CRITICAL',riskContribution:99}});
-      await f.prisma.riskScore.create({data:{userId:user.id,score:user.riskScore,level:'CRITICAL',factors:['SYNTHETIC_TEST_FIXTURE'],timestamp:now}});
+      await f.prisma.riskScore.create({data:{userId:user.id,score:user.riskScore,level:user.riskLevel,factors:['SYNTHETIC_TEST_FIXTURE'],timestamp:now}});
     }
+    await f.prisma.trustHistory.create({data:{userId:admin.id,trustScore:59,riskScore:72,delta:-1,reason:'Synthetic verified administrator assessment',timestamp:now}});
+    await f.prisma.user.update({where:{id:admin.id},data:{riskScore:5,riskLevel:'LOW',trustScore:40,trustUpdatedAt:new Date(now.getTime()-1000)}});
     await f.prisma.riskScore.create({data:{userId:systemAdmin.id,score:18,level:'LOW',factors:['SYNTHETIC_TEST_FIXTURE'],timestamp:now}});
     for(const user of [admin,employee])await f.prisma.incident.create({data:{incidentId:randomUUID(),title:`Incident for ${user.name}`,userId:user.id,userEmail:user.email,severity:'CRITICAL',status:'OPEN',riskScore:user.riskScore,contributingFactors:['SYNTHETIC_TEST_FIXTURE']}});
     for(const user of [admin,employee,manager])await f.prisma.auditLog.create({data:{companyId:'A',userId:user.id,userEmail:user.email,action:'MFA_SUCCESS',category:'MFA',severity:'INFO',details:'Synthetic dashboard fixture'}});
@@ -79,6 +81,16 @@ test('admin dashboard queries contain administrator records only while employee 
     const employeeMonitoring=await request(admin,'/users');
     assert.equal(employeeMonitoring.status,200);
     assert.deepEqual(new Set(employeeMonitoring.body.users.map(user=>user.id)),new Set([employee.id,manager.id]));
+    const center=await request(f.admin,`/admins/${admin.id}/security-center`);
+    assert.equal(center.status,200);
+    assert.equal(center.body.administrator.id,admin.id);
+    assert.equal(center.body.administrator.riskScore,72);
+    assert.equal(center.body.administrator.riskLevel,'HIGH');
+    assert.equal(center.body.administrator.trustScore,59);
+    assert.equal(center.body.sessionCount,1);
+    assert.equal(center.body.window.days,90);
+    assert.equal(JSON.stringify(center.body).includes('Employee Must Stay Hidden'),false);
+    assert.equal((await request(f.otherAdmin,`/admins/${admin.id}/security-center`)).status,404,'another company cannot inspect this administrator');
   }finally{
     if(server)await new Promise(resolve=>server.close(resolve));
     const {sseManager}=await import('../services/sse.js');for(const client of sseManager.clients)client.end();

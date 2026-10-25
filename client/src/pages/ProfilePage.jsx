@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 
 import { TrustGauge } from "../components/TrustGauge";
 
@@ -10,22 +10,15 @@ import {
   Clock,
   MapPin,
   FolderLock,
-  KeyRound,
   Activity,
 } from "lucide-react";
-
-import { AccessRequestModal } from "../components/AccessRequestModal";
 
 export const ProfilePage = ({
   currentUser,
   devices,
-  resources,
   recentEvents,
-  onRefreshData,
   onOpenCopilot,
 }) => {
-  const [requestModalOpen, setRequestModalOpen] = useState(false);
-
   const userDevices = devices.filter((d) => d.userId === currentUser.id);
 
   const userEvents = recentEvents.filter((e) => e.userId === currentUser.id);
@@ -77,8 +70,7 @@ export const ProfilePage = ({
 
             <p className="mt-4 max-w-2xl text-[14px] leading-6 text-[#A7B0BA]">
               Review your dynamic trust rating, verified hardware endpoints,
-              behavioral baseline parameters, and request elevated resource
-              privileges.
+              behavioral baseline parameters and recorded security activity.
             </p>
 
             <div className="mt-5 flex flex-wrap gap-2">
@@ -94,15 +86,6 @@ export const ProfilePage = ({
             </div>
           </div>
 
-          <div className="absolute bottom-7 right-7 z-20">
-            <button
-              onClick={() => setRequestModalOpen(true)}
-              className="flex items-center gap-2 rounded-xl border border-[#67E8F9]/45 bg-[#67E8F9] px-4 py-2.5 text-sm font-bold text-[#03070C] shadow-[0_8px_30px_rgba(103,232,249,0.12)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#8AF0FF] hover:shadow-[0_12px_35px_rgba(103,232,249,0.18)]"
-            >
-              <KeyRound className="h-4 w-4" />
-              <span>Request Resource Access</span>
-            </button>
-          </div>
         </div>
       </section>
 
@@ -276,14 +259,6 @@ export const ProfilePage = ({
         </div>
       </div>
 
-      {/* Access Request Modal */}
-      <AccessRequestModal
-        isOpen={requestModalOpen}
-        onClose={() => setRequestModalOpen(false)}
-        currentUser={currentUser}
-        resources={resources}
-        onSubmitted={onRefreshData}
-      />
     </div>
   );
 };

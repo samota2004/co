@@ -140,14 +140,19 @@ async function runEnrolledService(local) {
     }
   };
   const upload=async()=> {while(!stopping){const before=uploader.lastAcceptedUsage?.eventId;await uploader.tick();if(uploader.lastAcceptedUsage?.eventId!==before)await writeDesktopStatus(true);if(uploader.revoked)await revoke();await sleep(1000);}};
+  let accountControlReport=null;
   const heartbeat=async()=> {
     let failures=0;
     while(!stopping) {
       try {
         if(uploader.revoked) {await revoke();break;}
         await emit('HEARTBEAT',heartbeatMetadata());
-        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen)});
+        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen),...(accountControlReport?{accountControlReport}:{})});
+        accountControlReport=null;
         health.accountControl=await reconcileAccountControl(local,secrets,r.accountControl);
+        const reported=/^reported: ([A-Z_]+)$/.exec(health.accountControl)?.[1];
+        const resultCode=reported||(/^disabled:|^unsupported:/.test(health.accountControl)?'CONTROL_DISABLED':/^refused:/.test(health.accountControl)?'CONTROL_REFUSED':/^error:/.test(health.accountControl)?'NATIVE_ERROR':/^unchanged:/.test(health.accountControl)?'NEEDS_REVIEW':null);
+        if(r.accountControl?.commandId&&resultCode)accountControlReport={commandId:r.accountControl.commandId,resultCode,reportedAt:new Date().toISOString()};
         if(process.platform==='win32')health.windowsAccount=health.accountControl;
         const next=effectiveConfig(r.config,local);
         if(next.paused || !next.activeApplication)await usage.reset();

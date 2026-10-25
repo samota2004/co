@@ -5,6 +5,7 @@ import { EndpointService, EndpointError } from '../services/endpoint-service.js'
 import { endpointRequestContext, endpointFailure } from '../middleware/endpoint-errors.js';
 import { sseManager } from '../services/sse.js';
 import {cityAddressDiagnostics,cityRequestAddress} from '../services/proxy-policy.js';
+import {refreshDailyRiskSnapshot} from '../services/daily-risk-snapshot-service.js';
 const router = express.Router();
 const service = new EndpointService(prisma);
 const attempts = new Map();
@@ -47,6 +48,11 @@ router.post('/enroll', (req, res, next) => {
 }, handle(req => service.enroll(req.body)));
 router.post('/ingest', handle(async req => {
   const result = await service.ingest(credential(req), req.body);
+  if (result.acceptedEventIds?.length) {
+    const accepted = await prisma.endpointEvent.findMany({ where: { deviceId: result.deviceId, eventId: { in: result.acceptedEventIds }, userId: { not: null } }, select: { userId: true, occurredAt: true } });
+    const days = new Map(accepted.map(event => [`${event.userId}:${event.occurredAt.toISOString().slice(0,10)}`, event]));
+    for (const event of days.values()) try { await refreshDailyRiskSnapshot(prisma, { userId: event.userId, day: event.occurredAt }); } catch (error) { console.warn('Endpoint daily snapshot refresh deferred:', error?.code || error?.name || 'unavailable'); }
+  }
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
   return { acceptedEventIds: result.acceptedEventIds };
 }));

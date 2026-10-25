@@ -21,6 +21,23 @@ test('risk evidence remains bounded and model threshold reaches the first alert 
   assert.equal(evaluate(normal,{threat_probability:.9,operating_threshold:NaN}).riskScore,0);
 });
 
+test('after-hours timing is not a standalone threat, but corroborates independent evidence',()=>{
+  assert.equal(evaluate({...normal,isOffHours:true}).riskScore,0);
+  assert.equal(evaluate({...normal,isOffHours:true}).contributingFactors.some(f=>f.category==='TIME'),false);
+  const corroborated=evaluate({...normal,isOffHours:true,failedAuthCount:2});
+  assert.equal(corroborated.riskScore,30);
+  assert.equal(corroborated.contributingFactors.some(f=>f.category==='TIME'),true);
+});
+
+test('trust decreases on qualifying positive risk and remains unchanged for zero-risk activity',async()=>{
+  const {evolveTrust}=await import('../../cyber/zero-trust/trust-engine.js');
+  assert.equal(evolveTrust(100,0,DEFAULT_POLICY,false),100);
+  assert.equal(evolveTrust(100,20,DEFAULT_POLICY,false),99);
+  assert.equal(evolveTrust(100,60,DEFAULT_POLICY,false),92);
+  assert.equal(evolveTrust(90,0,DEFAULT_POLICY,false),90);
+  assert.equal(evolveTrust(90,0,DEFAULT_POLICY,true),91);
+});
+
 test('context and model evidence are explained without summing overlapping risk',()=>{
   const resource={name:'private',departmentCode:'FINANCE',sensitivity:'HIGHLY_SENSITIVE'};
   const event={...normal,failedAuthCount:5,isUsbTransfer:true,downloadVolumeMB:240};

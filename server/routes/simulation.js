@@ -1,7 +1,9 @@
 import {Router} from 'express';
 import {prisma} from '../models/prisma.js';
-import {securityService} from '../services/security-service.js';
-import {api,SecurityError,scopedUser} from '../services/security-common.js';
+import {riskEngine} from '../../cyber/risk-engine/risk-engine.js';
+import {getPolicy,policyAction} from '../services/policy-service.js';
+import {evolveTrust} from '../../cyber/zero-trust/trust-engine.js';
+import {api,SecurityError,userScope,audit} from '../services/security-common.js';
 const router=Router();
 const CUSTOM_INPUT_FIELDS=new Set(['userId','resourceId','deviceId','downloadVolumeMB','failedAuthCount','isOffHours','isPrivilegeEscalation']);
 function customInput(raw){
@@ -203,23 +205,43 @@ const SCENARIOS = {
   }
 };
 
-router.get('/scenarios',api(async()=>({scenarios:Object.entries(SCENARIOS).map(([id,s])=>({id,name:s.name,eventType:s.eventType,synthetic:true}))})));
+async function scenarioTarget(req,targetId){
+ const target=await prisma.user.findFirst({where:{AND:[userScope(req.user),{OR:[{id:targetId},{employeeId:targetId}]}]},select:{id:true,roleCode:true,departmentCode:true}});
+ if(!target)throw new SecurityError(404,'USER_NOT_FOUND','Employee context is not available in your authorized scope.');
+ if(['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(target.roleCode))throw new SecurityError(400,'EMPLOYEE_REQUIRED','Select an employee context.');
+ return target;
+}
+
+router.get('/scenarios',api(async()=>({scenarios:Object.entries(SCENARIOS).map(([id,s])=>({id,name:s.name,eventType:s.eventType,synthetic:true,description:s.name.replace(/^Scenario \d+: /,'')}))})));
+router.get('/history',api(async req=>({runs:(await prisma.auditLog.findMany({where:{companyId:req.user.companyId,userId:req.user.id,action:'SIMULATION_RUN'},orderBy:{timestamp:'desc'},take:50,select:{id:true,timestamp:true,metadata:true}})).map(row=>({id:row.id,timestamp:row.timestamp,...(row.metadata||{})}))})));
+async function evaluateScenario(req,user,event,scenario){
+ const [policy,resource,device]=await Promise.all([
+  getPolicy(prisma,req.user.companyId),
+  event.resourceId?prisma.resource.findFirst({where:{id:event.resourceId,companyId:req.user.companyId}}):null,
+  event.deviceId?prisma.device.findFirst({where:{id:event.deviceId,userId:user.id,user:{companyId:req.user.companyId,deletedAt:null}}}):null,
+ ]);
+ if(event.resourceId&&!resource)throw new SecurityError(404,'RESOURCE_NOT_FOUND','Select a resource in your company.');
+ if(event.deviceId&&!device)throw new SecurityError(404,'DEVICE_NOT_FOUND','Select a device assigned to the selected employee.');
+ const evaluation=riskEngine.evaluateRisk({id:'synthetic-scenario',departmentCode:user.departmentCode,roleCode:user.roleCode,baseline:null,previousIncidents:0},{...event,timestamp:new Date().toISOString(),aggregateOnly:true},device,resource,null,policy);
+ const action=policyAction(evaluation.riskScore,policy);
+ const measuredTrust=user.trustUpdatedAt?user.trustScore:null;
+ const projectedTrust=measuredTrust===null?null:evolveTrust(measuredTrust,evaluation.riskScore,policy,false);
+ const result={scenario,synthetic:true,simulationOnly:true,target:{roleCode:user.roleCode,departmentCode:user.departmentCode},decision:{decision:action,allowed:['ALLOW','MONITOR'].includes(action),requiresMfa:action==='MFA',requiresApproval:action==='REQUIRE_APPROVAL',isRestricted:['RESTRICT','FREEZE','REQUIRE_APPROVAL'].includes(action),isFrozen:action==='FREEZE',reason:evaluation.explanationText,evaluation:{...evaluation,trustScore:projectedTrust}},userState:{productionStateUnchanged:true,riskScoreNotReadOrChanged:true,trustScoreNotReadOrChanged:true},ml:{available:false,reason:'Synthetic scenario evaluation never calls the trained model.'},incident:null,request:null};
+ await audit(prisma,req.user,'SIMULATION_RUN',{synthetic:true,scenario,targetRole:user.roleCode,departmentCode:user.departmentCode,riskScore:evaluation.riskScore,riskLevel:evaluation.riskLevel,policyAction:action,contributingFactors:evaluation.contributingFactors,simulationOnly:true});
+ return result;
+}
 router.post('/custom',api(async req=>{
  const input=customInput(req.body);
- const user=await scopedUser(prisma,req.user,input.userId);
- if(['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(user.roleCode))throw new SecurityError(400,'EMPLOYEE_REQUIRED','Select an employee demo account.');
- const event={userId:user.id,...(input.resourceId?{resourceId:input.resourceId}:{}),...(input.deviceId?{deviceId:input.deviceId}:{}),eventType:input.isPrivilegeEscalation?'PRIVILEGE_CHANGE':'FILE_DOWNLOAD',source:'synthetic-custom-scenario',downloadVolumeMB:input.downloadVolumeMB,failedAuthCount:input.failedAuthCount,isOffHours:input.isOffHours,isPrivilegeEscalation:input.isPrivilegeEscalation,metadata:{synthetic:true,simulationKind:'custom-context'}};
- const result=await securityService.evaluate(req.user,event,{ip:req.ip,simulation:true});
- return{...result,scenario:'Custom synthetic context',synthetic:true};
+ const user=await scenarioTarget(req,input.userId);
+ const event={...(input.resourceId?{resourceId:input.resourceId}:{}),...(input.deviceId?{deviceId:input.deviceId}:{}),eventType:input.isPrivilegeEscalation?'PRIVILEGE_CHANGE':'FILE_DOWNLOAD',downloadVolumeMB:input.downloadVolumeMB,failedAuthCount:input.failedAuthCount,isOffHours:input.isOffHours,isPrivilegeEscalation:input.isPrivilegeEscalation,metadata:{synthetic:true,simulationKind:'custom-context'}};
+ return evaluateScenario(req,user,event,'Custom synthetic context');
 }));
 router.post('/scenario/:scenarioId',api(async req=>{
  const scenario=SCENARIOS[req.params.scenarioId];
  if(!scenario)throw new SecurityError(400,'UNKNOWN_SCENARIO','Select an existing scenario.');
  if(!req.body.userId)throw new SecurityError(400,'USER_REQUIRED','Explicitly select an employee. Scenarios can restrict that account.');
- const user=await scopedUser(prisma,req.user,req.body.userId);
- if(['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(user.roleCode))throw new SecurityError(400,'EMPLOYEE_REQUIRED','Select an employee demo account.');
- const event={...scenario.defaults,...req.body,userId:user.id,eventType:scenario.eventType,source:'synthetic-scenario',metadata:{...scenario.defaults.metadata,...req.body.metadata,synthetic:true,scenarioId:req.params.scenarioId}};
- const result=await securityService.evaluate(req.user,event,{ip:req.ip,simulation:true});
- return{...result,scenario:scenario.name,synthetic:true};
+ const user=await scenarioTarget(req,req.body.userId);
+ const event={...scenario.defaults,...req.body,eventType:scenario.eventType,metadata:{...scenario.defaults.metadata,synthetic:true,scenarioId:req.params.scenarioId}};
+ return evaluateScenario(req,user,event,scenario.name);
 }));
 export default router;

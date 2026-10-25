@@ -62,7 +62,7 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     const refresh = () => b.evaluate('document.querySelector(\'[aria-label="Refresh risk analysis"]\').click()');
     await waitUntil(b, `${has('NO EMPLOYEE SELECTED')} && document.querySelector('[aria-label="Risk analysis employee"]').options.length>2`, 'manual employee selection');
     await select(f.employee.id);
-    await waitUntil(b, `${settled} && ${has('Off-hours interactive activity')} && ${has('CURRENT POLICY RISK')}`, 'calculated contextual risk');
+    await waitUntil(b, `${settled} && ${has('Activity detected — no qualifying security risk identified')} && ${has('CURRENT POLICY RISK')}`, 'activity without unsupported standalone risk');
     assert.equal(await b.evaluate(has('NO TELEMETRY AVAILABLE')), false);
     assert.equal(await b.evaluate(has('Risk assessment pending')), false);
     assert.equal(await b.evaluate(has('Risk telemetry laptop')), false, 'Risk page must not reproduce device cards');
@@ -73,11 +73,16 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     assert.equal(await f.prisma.riskScore.count(), 0, 'Reading analysis must not change authorization scores');
     assert.equal(await f.prisma.mlPrediction.count(), 0);
     const initialAnalysis = await fetch(`${origin}/api/risk/analysis/${f.employee.id}`, { headers: { Authorization: `Bearer ${generateJwtToken(f.admin, true)}` } }).then(response => response.json());
-    assert.equal(initialAnalysis.analysis.riskScore, 20);
+    assert.equal(initialAnalysis.analysis.riskScore, null);
+    assert.equal(initialAnalysis.analysis.activityDetected, true);
+    assert.equal(initialAnalysis.analysis.observedRiskScore, null);
     assert.equal(initialAnalysis.analysis.coverage.interactiveEvents, 1);
     assert.equal(initialAnalysis.analysis.coverage.endpointEvents, 182);
     assert.equal(initialAnalysis.analysis.trustScore, null);
     assert.equal(initialAnalysis.analysis.trustBasis, 'UNASSESSED');
+    const weekAnalysis=await fetch(`${origin}/api/risk/analysis/${f.employee.id}?range=7d`,{headers:{Authorization:`Bearer ${generateJwtToken(f.admin,true)}`}}).then(response=>response.json());
+    assert.equal(weekAnalysis.analysis.window.range,'7d');assert.equal(weekAnalysis.analysis.history.length,7);
+    assert.equal((await fetch(`${origin}/api/risk/analysis/${f.employee.id}?range=invalid`,{headers:{Authorization:`Bearer ${generateJwtToken(f.admin,true)}`} })).status,400);
     assert.ok((await b.evaluate(card('TRUST SCORE'))).includes('Unassessed'));
     assert.ok((await b.evaluate(card('RF SCORE (UNCALIBRATED)'))).includes('Awaiting inputs'));
     assert.ok(!(await b.evaluate(card('RF SCORE (UNCALIBRATED)'))).includes('N/A'));
@@ -105,7 +110,7 @@ test('risk analysis calculates real risk, updates live, isolates employees and r
     await waitUntil(b, `${settled} && ${has('2 employee-attributed interactive observations analysed')}`, 'employee selection race');
     const assessment = await securityService.evaluate(f.admin, { userId: f.employee.id, eventType: 'FILE_DOWNLOAD', downloadVolumeMB: 600 });
     // Security-service SSE events update the combined observed risk and recorded trust.
-    await waitUntil(b, `${has('Recorded security assessment')} && ${has('Latest recorded trust')}`, 'recorded security assessment');
+    await waitUntil(b, `${has('qualifying evidence detected and recorded')} && ${has('Latest recorded trust')}`, 'recorded security assessment');
     assert.ok((await b.evaluate(card('CURRENT POLICY RISK'))).includes(String(assessment.decision.evaluation.riskScore)));
     assert.ok((await b.evaluate(card('TRUST SCORE'))).includes(String(assessment.decision.evaluation.trustScore)));
     assert.equal(await b.evaluate(has('2 employee-attributed interactive observations analysed')), true);

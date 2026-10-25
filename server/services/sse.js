@@ -67,6 +67,7 @@ class SseManager {
       const scope = this.scopes.get(client);
       if (!scope || scope.expiresAt <= Date.now()) { client.end(); this.clients.delete(client); continue; }
       if (type !== 'HEARTBEAT') {
+        if(type==='SECURITY_NOTIFICATION'&&data?.recipientId!==scope.user.id)continue;
         const subject = data?.event || data?.incident || data?.request || data?.user || data?.device || data?.entry || data;
         const subjectId = subject?.userId || (data?.user ? data.user.id : null);
         const owner = subjectId ? db.getUserById(subjectId) : null;

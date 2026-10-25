@@ -72,10 +72,10 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
   assert.ok(activityData.events.every(e=>e.deviceId===enrolled.data.deviceId&&e.companyId===stored.companyId));
   const foreignActivity=await fetch(origin+'/api/endpoint/dashboard?eventType=APPLICATION_ACTIVITY&deviceId='+enrolled.data.deviceId,{headers:{Authorization:'Bearer '+generateJwtToken(f.otherAdmin,true)}});
   assert.equal(foreignActivity.status,404);
-  const foreignFreeze=await post('/users/'+stored.id+'/freeze',{}, {Authorization:'Bearer '+generateJwtToken(f.otherAdmin,true)});
+  const foreignFreeze=await post('/users/'+stored.id+'/freeze',{reason:'Test unauthorized company boundary'}, {Authorization:'Bearer '+generateJwtToken(f.otherAdmin,true)});
   assert.equal(foreignFreeze.status,404);
   assert.equal((await heartbeat()).data.accountControl.action,'ALLOW');
-  assert.equal((await post('/users/'+stored.id+'/freeze',{},headers)).status,200);
+  assert.equal((await post('/users/'+stored.id+'/freeze',{reason:'Verified account containment'},headers)).status,200);
   const frozen=await heartbeat();assert.equal(frozen.status,200);assert.equal(frozen.data.accountControl.action,'BLOCK');
   assert.equal(frozen.data.accountControl.identity,'S-1-5-21-111-222-333-1001');assert.equal(frozen.data.accountControl.deviceId,enrolled.data.deviceId);
   const configPath='/endpoint/'+enrolled.data.deviceId+'/config';
@@ -88,7 +88,7 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
     assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{},deniedHeaders)).status,401);
   }
   const foreignHeaders={Authorization:'Bearer '+generateJwtToken(f.otherAdmin,true)};
-  assert.equal((await post('/users/'+stored.id+'/unfreeze',{},foreignHeaders)).status,404);
+  assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Test unauthorized company boundary'},foreignHeaders)).status,404);
   assert.equal((await pause(foreignHeaders)).status,404);
   assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{},foreignHeaders)).status,404);
   assert.equal((await heartbeat()).data.accountControl.action,'BLOCK');
@@ -101,9 +101,9 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
     assert.equal(assign.status,200);
     assert.equal((await pause(controlHeaders)).status,200);
     assert.equal((await heartbeat()).data.config.paused,true);
-    assert.equal((await post('/users/'+stored.id+'/unfreeze',{},controlHeaders)).status,200);
+    assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Incident reviewed and cleared'},controlHeaders)).status,200);
     assert.equal((await heartbeat()).data.accountControl.action,'ALLOW');
-    assert.equal((await post('/users/'+stored.id+'/freeze',{},controlHeaders)).status,200);
+    assert.equal((await post('/users/'+stored.id+'/freeze',{reason:'Critical evidence remains active'},controlHeaders)).status,200);
     const audit=await f.prisma.auditLog.findFirst({where:{action:'AGENT_PAUSED',userId:actor.id}});
     assert.equal(audit.metadata.actorId,actor.id);assert.equal(audit.metadata.deviceId,enrolled.data.deviceId);
     await f.prisma.user.update({where:{id:actor.id},data:{status:'DISABLED'}});
@@ -112,7 +112,7 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
   }
   const {setAccount}=await import('../routes/security.js');
   await assert.rejects(setAccount({user:storedManager,params:{id:stored.id}},'ACTIVE'),e=>e.code==='ADMIN_REQUIRED');
-  assert.equal((await post('/users/'+stored.id+'/unfreeze',{},headers)).status,200);
+  assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Administrative review completed'},headers)).status,200);
   assert.equal((await heartbeat()).data.accountControl.action,'ALLOW');
   assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{},headers)).status,200);
   assert.equal(await f.prisma.auditLog.count({where:{action:'AGENT_REVOKED',userId:f.admin.id}}),1);

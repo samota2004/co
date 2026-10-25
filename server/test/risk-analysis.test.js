@@ -20,14 +20,25 @@ test('absence of evidence and stored trust stays unavailable instead of becoming
   assert.ok(result.history.every(point => point.score === null));
 });
 
-test('live observed risk and stored account policy risk remain separate and explicit', () => {
+test('7-day range returns daily stored risk and trust history without mutating scores',()=>{
+  const timestamp=new Date(at.getTime()-2*86400000);
+  const result=analyse({range:'7d',riskEvents:[{score:47,timestamp}],trustEvents:[{trustScore:68,timestamp}],priorRisk:{score:22,timestamp:new Date(at.getTime()-10*86400000)},priorTrust:{trustScore:82,timestamp:new Date(at.getTime()-10*86400000)}});
+  assert.equal(result.window.range,'7d');assert.equal(result.window.hours,168);assert.equal(result.history.length,7);
+  const bucket=result.history.find(point=>new Date(point.time).getTime()<=timestamp.getTime()&&timestamp.getTime()<new Date(point.time).getTime()+86400000);
+  assert.equal(bucket.score,47);assert.equal(bucket.trust,68);
+  assert.equal(result.history.at(-1).score,47,'last qualifying risk assessment carries forward within the view');
+});
+
+test('ordinary observed activity does not become risk and the persisted policy score remains primary', () => {
   const result = analyse({
     user: { ...user, riskScore: 51, riskLevel: 'MEDIUM' },
-    riskAssessment: { id: 'recorded-assessment' },
+    riskAssessment: { id: 'recorded-assessment', score: 51, level: 'MEDIUM', factors: [{ factor: 'Verified prior risk', description: 'Persisted policy evidence.' }], timestamp: at },
     activeEvents: [{ type: 'APPLICATION_USAGE', userId: user.id, occurredAt: new Date('2026-10-12T23:00:00Z') }],
     counts: [group('APPLICATION_USAGE', 1, user.id)],
   });
-  assert.equal(result.riskScore, 20, '24-hour observed score follows the configured off-hours evidence');
+  assert.equal(result.riskScore, 51, 'the current score is the latest recorded policy assessment');
+  assert.equal(result.observedRiskScore, null, 'off-hours alone is not qualifying risk evidence');
+  assert.match(result.activitySummary, /Activity detected.*no qualifying security risk identified/);
   assert.deepEqual(result.accountRisk, { score: 51, level: 'MEDIUM' }, 'persisted account score remains available for policy context');
 });
 
@@ -44,20 +55,21 @@ test('background processes, attached USB, file changes and connections do not be
   assert.ok(result.history.every(point => point.score === null));
 });
 
-test('off-hours interactive observations use policy weights once and distinguish verified from device-wide evidence', () => {
+test('off-hours interactive observations remain visible but do not score without independent evidence', () => {
   const rows = [
     { type: 'APPLICATION_USAGE', userId: user.id, occurredAt: new Date('2026-10-12T23:00:00Z') },
     { type: 'APPLICATION_FOREGROUND', userId: null, occurredAt: new Date('2026-10-12T23:01:00Z') },
     { type: 'SESSION_LOGIN', userId: user.id, occurredAt: new Date('2026-10-13T10:00:00Z') },
   ];
   const result = analyse({ activeEvents: rows, counts: [group('APPLICATION_USAGE', 1, user.id), group('APPLICATION_FOREGROUND', 1), group('SESSION_LOGIN', 1, user.id)], policy: { ...DEFAULT_POLICY, offHoursPenalty: 17 } });
-  assert.equal(result.riskScore, 17);
+  assert.equal(result.riskScore, null);
+  assert.equal(result.observedRiskScore, null);
   assert.equal(result.coverage.offHoursEvents, 1);
   assert.equal(result.coverage.verifiedEvents, 2);
-  assert.equal(result.contributingFactors.length, 1);
-  assert.match(result.contributingFactors[0].description, /1 attributed to the employee and 0 device-wide/);
-  assert.equal(result.history.find(point => point.time === '2026-10-12T22:30:00.000Z').score, 17);
-  assert.equal(result.history.find(point => point.time === '2026-10-13T09:30:00.000Z').score, 0);
+  assert.equal(result.contributingFactors.length, 0);
+  assert.match(result.explanation, /Activity detected.*no qualifying security risk identified/);
+  assert.equal(result.history.find(point => point.time === '2026-10-12T22:30:00.000Z').score, null);
+  assert.equal(result.history.find(point => point.time === '2026-10-13T09:30:00.000Z').score, null);
   assert.equal(result.ml.available, false);
 });
 
@@ -77,7 +89,7 @@ test('learned hours and a declared timezone govern timing risk', () => {
   process.env.SECURITY_TIMEZONE = 'Asia/Kolkata';
   try {
     const result = analyse({ activeEvents: [{ userId: user.id, occurredAt: new Date('2026-10-13T04:30:00Z') }], counts: [group('APPLICATION_USAGE', 1, user.id)], baseline: { sampleDays: 8, statistics: {}, normalStartHour: 10, normalEndHour: 20 } });
-    assert.equal(result.riskScore, 0);
+  assert.equal(result.riskScore, null);
     assert.equal(result.window.timezone, 'Asia/Kolkata');
     assert.equal(result.baselineBasis, 'Learned historical access hours');
   } finally { process.env.SECURITY_TIMEZONE = 'UTC'; }

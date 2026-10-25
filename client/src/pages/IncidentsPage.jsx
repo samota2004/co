@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { SeverityBadge, StatusBadge } from "../components/Badges";
 import { useTheme } from "../context/ThemeContext";
+import {requestApi} from '../services/api.js';
+import {confirmAccountAction} from '../services/confirm-account-action.js';
 
 const getIncidentId = (incident) =>
   incident?.id || incident?.incidentId || incident?._id || "";
@@ -500,36 +502,13 @@ export const IncidentsPage = ({
     if (!userId || !isAuthorized) {
       return;
     }
+    const reason=confirmAccountAction('freeze',incidents.find(row=>getIncidentUserId(row)===userId)?.userName||'this employee');if(!reason)return;
 
     try {
       setFreezeError(null);
       setFreezingUserId(userId);
 
-      const response = await fetch(`/api/users/${userId}/freeze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(currentUser?.id
-            ? {
-                "x-user-id": currentUser.id,
-              }
-            : {}),
-        },
-        body: JSON.stringify({
-          reason: "Administrator-requested application account containment",
-          source: "INCIDENT_RESPONSE",
-        }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(
-          data?.error?.message ||
-            data?.message ||
-            "Failed to freeze user account.",
-        );
-      }
+      await requestApi(`/api/users/${encodeURIComponent(userId)}/freeze`,{method:'POST',body:{reason}});
 
       await handleRefresh();
     } catch (error) {
@@ -545,32 +524,13 @@ export const IncidentsPage = ({
     if (!userId || !isAuthorized) {
       return;
     }
+    const reason=confirmAccountAction('unfreeze',incidents.find(row=>getIncidentUserId(row)===userId)?.userName||'this employee');if(!reason)return;
 
     try {
       setFreezeError(null);
       setFreezingUserId(userId);
 
-      const response = await fetch(`/api/users/${userId}/unfreeze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(currentUser?.id
-            ? {
-                "x-user-id": currentUser.id,
-              }
-            : {}),
-        },
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(
-          data?.error?.message ||
-            data?.message ||
-            "Failed to unfreeze user account.",
-        );
-      }
+      await requestApi(`/api/users/${encodeURIComponent(userId)}/unfreeze`,{method:'POST',body:{reason}});
 
       await handleRefresh();
     } catch (error) {

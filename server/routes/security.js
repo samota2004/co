@@ -5,13 +5,14 @@ import {randomUUID} from 'node:crypto';
 import {prisma,Prisma} from '../models/prisma.js';
 import {requireAuth,requireSecurityAdmin} from '../middleware/auth.js';
 import {api,SecurityError,userScope,scopedUser,publicUser,pagination,text,audit,isAdmin} from '../services/security-common.js';
-import {getPolicy,savePolicy} from '../services/policy-service.js';
+import {getPolicy,savePolicy,validatePolicy,riskLevel,policyAction} from '../services/policy-service.js';
 import {securityService} from '../services/security-service.js';
 import {getRiskAnalysis} from '../services/risk-analysis-service.js';
 import {learnBaseline} from '../services/ueba-service.js';
 import {sseManager} from '../services/sse.js';
 import {sendExport} from '../services/export-service.js';
 import {createLiveModelDataReadiness} from '../services/ml-data-readiness.js';
+import {refreshDailyRiskSnapshot} from '../services/daily-risk-snapshot-service.js';
 const router=Router();router.use(requireAuth);
 const subjectScope=req=>({user:userScope(req.user)});
 const decorateEvent=e=>({...e,eventType:e.type,userName:e.user?.name,ipAddress:e.ip,...(e.metadata?.evaluation||{}),policyAction:e.metadata?.decision,xaiReasons:e.metadata?.ml?.xai_reasons||[],mlThreatProbability:e.metadata?.ml?.threat_probability??null});
@@ -26,12 +27,12 @@ router.get('/assignment-options',requireSecurityAdmin,api(async req=>({
 router.get('/users',api(async req=>({users:(await prisma.user.findMany({where:{...userScope(req.user),roleCode:{in:['EMPLOYEE','MANAGER']}},orderBy:[{name:'asc'},{id:'asc'}],include:monitoringInclude(),...pagination(req.query)})).map(monitoredUser)})));
 router.get('/users/:id',api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id);
-  const companyId=req.user.companyId,now=new Date(),canReview=isAdmin(req.user)||req.user.roleCode==='MANAGER';
+  const companyId=req.user.companyId,now=new Date(),historyFrom=new Date(now.getTime()-90*86400000),canReview=isAdmin(req.user)||req.user.roleCode==='MANAGER';
   const [devices,events,trustHistory,riskHistory,baseline,incidents,sessions,loginHistory,accessRequests,auditEvents]=await Promise.all([
     prisma.device.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}}}),
     prisma.activityEvent.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}},orderBy:{timestamp:'desc'},take:100}),
-    prisma.trustHistory.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}},orderBy:{timestamp:'desc'},take:200}),
-    prisma.riskScore.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}},orderBy:{timestamp:'desc'},take:200}),
+    prisma.trustHistory.findMany({where:{userId:u.id,user:{companyId,deletedAt:null},timestamp:{gte:historyFrom,lte:now}},orderBy:{timestamp:'asc'},take:5000}),
+    prisma.riskScore.findMany({where:{userId:u.id,user:{companyId,deletedAt:null},timestamp:{gte:historyFrom,lte:now}},orderBy:{timestamp:'asc'},take:5000}),
     prisma.behaviorProfile.findFirst({where:{userId:u.id,user:{companyId,deletedAt:null}}}),
     canReview?prisma.incident.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}},orderBy:{createdAt:'desc'},take:50}):[],
     (canReview||req.user.id===u.id)?prisma.session.findMany({where:{userId:u.id,revokedAt:null,expiresAt:{gt:now},user:{companyId,deletedAt:null}},select:{id:true,ip:true,userAgent:true,createdAt:true,expiresAt:true},orderBy:{createdAt:'desc'},take:100}):[],
@@ -39,8 +40,9 @@ router.get('/users/:id',api(async req=>{
     canReview?prisma.accessRequest.findMany({where:{userId:u.id,resource:{companyId}},select:{id:true,requestId:true,resourceId:true,justification:true,status:true,riskAtRequest:true,decisionReason:true,decisionTimestamp:true,createdAt:true,resource:{select:{name:true,sensitivity:true}}},orderBy:{createdAt:'desc'},take:100}):[],
     canReview?prisma.auditLog.findMany({where:{companyId,userId:u.id,user:{companyId,deletedAt:null}},select:{id:true,action:true,category:true,severity:true,timestamp:true},orderBy:{timestamp:'desc'},take:100}):[],
   ]);
+  const dailyRiskHistory=await prisma.dailyRiskSnapshot.findMany({where:{userId:u.id,companyId,day:{gte:new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-89*86400000)}},orderBy:{day:'asc'},take:90});
   const user=await prisma.user.findFirst({where:{id:u.id,companyId,deletedAt:null},include:monitoringInclude()});
-  return{user:monitoredUser(user),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents,sessions:sessions.map(session=>({...session,status:'ACTIVE'})),loginHistory,accessRequests,auditEvents};
+  return{user:monitoredUser(user),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),dailyRiskHistory,baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents,sessions:sessions.map(session=>({...session,status:'ACTIVE'})),loginHistory,accessRequests,auditEvents};
 }));
 async function userChanges(req,create=false,current=null){
   const b=req.body||{},fields={};
@@ -80,9 +82,14 @@ if(updated.roleCode==='MANAGER'&&fields.assignedAdminId!==undefined&&fields.assi
   await audit(tx,req.user,'TEAM_ADMINISTRATOR_CHANGED',{managerId:u.id,previousAdminId:u.assignedAdminId,assignedAdminId:fields.assignedAdminId},u.id);
 }
 await tx.session.updateMany({where:{userId:u.id,revokedAt:null},data:{revokedAt:new Date()}});await audit(tx,req.user,'USER_UPDATED',{fields:Object.keys(fields),...(fields.assignedAdminId!==undefined?{previousAdminId:u.assignedAdminId,assignedAdminId:fields.assignedAdminId}: {})},u.id);return updated;});return{user:publicUser(user)};}));
-export async function setAccount(req,status){if(!isAdmin(req.user)||req.user.status!=='ACTIVE'||!req.user.companyId)throw new SecurityError(403,'ADMIN_REQUIRED','Only an active administrator can change account restrictions.');const u=await scopedUser(prisma,req.user,req.params.id);if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','Use Admin Management for this account.');const user=await prisma.$transaction(async tx=>{const updated=await tx.user.update({where:{id:u.id},data:{status,authVersion:{increment:1}}});await tx.session.updateMany({where:{userId:u.id,revokedAt:null},data:{revokedAt:new Date()}});await audit(tx,req.user,status==='ACTIVE'?'ACCOUNT_RESTORED':'ACCOUNT_RESTRICTED',{status,reason:String(req.body?.reason||'Administrative security review').slice(0,500)},u.id);return updated;});sseManager.broadcastAccountStatus(user.id,status,publicUser(user));return{user:publicUser(user),message:status==='ACTIVE'?'Account restored. Locally approved endpoint agents will restore sign-in on their next successful heartbeat; verify the device report.':'Account restricted and console sessions invalidated. FROZEN status is applied to supported local OS accounts only by locally approved agents; verify the device report.'};}
+export async function setAccount(req,status){if(!isAdmin(req.user)||req.user.status!=='ACTIVE'||!req.user.companyId)throw new SecurityError(403,'ADMIN_REQUIRED','Only an active administrator can change account restrictions.');const u=await scopedUser(prisma,req.user,req.params.id);if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','Use Admin Management for this account.');const reason=text(req.body?.reason,'Reason',500);if(reason.trim().length<8)throw new SecurityError(400,'REASON_REQUIRED','Provide a reason of at least 8 characters.');if(status==='ACTIVE'&&await prisma.incident.findFirst({where:{userId:u.id,severity:'CRITICAL',status:{notIn:['RESOLVED','FALSE_POSITIVE','REJECTED']}}}))throw new SecurityError(409,'CRITICAL_HOLD_ACTIVE','Resolve the critical incident before unfreezing this account.');const result=await prisma.$transaction(async tx=>{const updated=await tx.user.update({where:{id:u.id},data:{status,authVersion:{increment:1}}});await tx.session.updateMany({where:{userId:u.id,revokedAt:null},data:{revokedAt:new Date()}});await audit(tx,req.user,status==='ACTIVE'?'ACCOUNT_RESTORED':'ACCOUNT_RESTRICTED',{status,reason},u.id);const devices=await tx.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null},select:{id:true,lastSeen:true,platform:true,mappedIdentity:true}});const eligible=devices.filter(device=>['win32','linux','darwin'].includes(device.platform)&&Boolean(device.mappedIdentity));const action=status==='FROZEN'?'BLOCK':'ALLOW';await tx.endpointEnforcementCommand.updateMany({where:{companyId:req.user.companyId,userId:u.id,status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED'}});if(eligible.length)await tx.endpointEnforcementCommand.createMany({data:eligible.map(device=>({companyId:req.user.companyId,userId:u.id,deviceId:device.id,action,status:device.lastSeen&&Date.now()-device.lastSeen.getTime()<=300000?'PENDING':'PENDING_OFFLINE',reason,createdById:req.user.id}))});const notification=await tx.securityNotification.create({data:{companyId:req.user.companyId,recipientId:req.user.id,targetUserId:u.id,dedupeKey:`account:${u.id}:${updated.authVersion}`,type:'ACCOUNT_RESTRICTION',severity:status==='FROZEN'?'CRITICAL':'HIGH',title:status==='ACTIVE'?'Account restriction lifted':'Account restriction changed',message:`${updated.name}: ${status}. ${eligible.length} managed endpoint command(s) recorded.`,metadata:{status,reason,endpointCommands:eligible.length}}});const commands=eligible.length?await tx.endpointEnforcementCommand.findMany({where:{companyId:req.user.companyId,userId:u.id,createdById:req.user.id,createdAt:{gte:new Date(Date.now()-5000)}},orderBy:{createdAt:'desc'},take:eligible.length}):[];return{user:updated,commands,notification};});
+ sseManager.broadcastAccountStatus(result.user.id,status,publicUser(result.user));sseManager.broadcast('SECURITY_NOTIFICATION',{companyId:req.user.companyId,userId:result.user.id,recipientId:req.user.id,notification:result.notification});return{user:publicUser(result.user),endpointEnforcement:result.commands.map(({id,commandId,deviceId,action,status:commandStatus,issuedAt})=>({id,commandId,deviceId,action,status:commandStatus,issuedAt})),message:status==='ACTIVE'?'Account restored and console sessions invalidated. Managed agents will report OS-account recovery on their next authenticated heartbeat; verify each device result.':'Account frozen and console sessions invalidated. OS-account restrictions are pending until a locally approved managed agent reports verified enforcement.'};}
 router.post('/users/:id/freeze',requireSecurityAdmin,api(req=>setAccount(req,'FROZEN')));
 router.post('/users/:id/unfreeze',requireSecurityAdmin,api(req=>setAccount(req,'ACTIVE')));
+
+router.get('/notifications',requireSecurityAdmin,api(async req=>{const take=Math.min(100,Math.max(1,Number(req.query.limit)||50));const notifications=await prisma.securityNotification.findMany({where:{companyId:req.user.companyId,recipientId:req.user.id},orderBy:{createdAt:'desc'},take});const unread=await prisma.securityNotification.count({where:{companyId:req.user.companyId,recipientId:req.user.id,readAt:null}});return{notifications,unread};}));
+router.patch('/notifications/:id/read',requireSecurityAdmin,api(async req=>{const row=await prisma.securityNotification.updateMany({where:{id:req.params.id,companyId:req.user.companyId,recipientId:req.user.id,readAt:null},data:{readAt:new Date()}});if(!row.count)throw new SecurityError(404,'NOTIFICATION_NOT_FOUND','Notification not found or already read.');return{updated:true};}));
+router.post('/notifications/read-all',requireSecurityAdmin,api(async req=>({updated:(await prisma.securityNotification.updateMany({where:{companyId:req.user.companyId,recipientId:req.user.id,readAt:null},data:{readAt:new Date()}})).count})));
 router.delete('/users/:id',requireSecurityAdmin,api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id);
   if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','Use Admin Management for this account.');
@@ -96,6 +103,8 @@ router.delete('/users/:id',requireSecurityAdmin,api(async req=>{
 }));
 
 router.get('/policies',requireSecurityAdmin,api(async req=>({config:await getPolicy(prisma,req.user.companyId)})));
+router.get('/policies/history',requireSecurityAdmin,api(async req=>({versions:(await prisma.auditLog.findMany({where:{companyId:req.user.companyId,action:'POLICY_UPDATED'},select:{id:true,timestamp:true,userEmail:true,metadata:true},orderBy:{timestamp:'desc'},take:50})).map(row=>({id:row.id,version:row.id,timestamp:row.timestamp,actor:row.userEmail||'Administrator',config:row.metadata?.config||null}))})));
+router.post('/policies/preview',requireSecurityAdmin,api(async req=>{const score=req.body?.riskScore;if(typeof score!=='number'||!Number.isFinite(score)||score<0||score>100)throw new SecurityError(400,'INVALID_PREVIEW_SCORE','Risk score must be a number from 0 to 100.');const config=validatePolicy(req.body?.config||{},await getPolicy(prisma,req.user.companyId));const level=riskLevel(score,config),action=policyAction(score,config);return{preview:true,readOnly:true,riskScore:score,riskLevel:level,action,requiresMfa:action==='MFA',requiresApproval:action==='REQUIRE_APPROVAL',restrictsSensitiveAccess:['RESTRICT','FREEZE','REQUIRE_APPROVAL'].includes(action),wouldFreeze:action==='FREEZE',policy:config};}));
 router.patch('/policies/:id?',requireSecurityAdmin,api(async req=>{const result=await savePolicy(prisma,req.user,req.body);sseManager.broadcast('POLICY_UPDATED',{companyId:req.user.companyId,config:result.config});return result;}));
 router.get('/resources',api(async req=>({resources:(await prisma.resource.findMany({where:{companyId:req.user.companyId},...pagination(req.query)})).map(decorateResource)})));
 router.get('/resources/:id',api(async req=>{const resource=await prisma.resource.findFirst({where:{id:req.params.id,companyId:req.user.companyId}});if(!resource)throw new SecurityError(404,'RESOURCE_NOT_FOUND','Resource not found.');return{resource:decorateResource(resource)};}));
@@ -121,7 +130,7 @@ router.post('/telemetry/ingest',requireSecurityAdmin,api(async()=>{
   throw new SecurityError(400,'ML_DATA_INCOMPLETE','Generic telemetry cannot produce a notebook-compatible 21-feature aggregate. No prediction or risk update was made.',createLiveModelDataReadiness());
 }));
 router.post('/risk/evaluate',requireSecurityAdmin,api(assess));
-router.get('/risk/analysis/:id',requireSecurityAdmin,api(async req=>({analysis:await getRiskAnalysis(prisma,req.user,req.params.id)})));
+router.get('/risk/analysis/:id',requireSecurityAdmin,api(async req=>{const range=req.query.range||'24h';if(!['24h','7d','30d','90d'].includes(range))throw new SecurityError(400,'INVALID_RISK_RANGE','Choose 24h, 7d, 30d, or 90d.');return{analysis:await getRiskAnalysis(prisma,req.user,req.params.id,new Date(),range)};}));
 router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});return{userId:u.id,riskScore:latest?u.riskScore:null,riskLevel:latest?u.riskLevel:null,latest};}));
 router.get('/risk/history/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.riskScore.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
 router.get('/trust/:id/history',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.trustHistory.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
@@ -170,10 +179,9 @@ router.get('/audit-logs',requireSecurityAdmin,api(async req=>{
 router.get('/dashboard/:section',requireSecurityAdmin,api(async req=>{
  const where={...userScope(req.user),roleCode:{in:['SYSTEM_ADMIN','SECURITY_ADMIN']}},scope={user:where},policy=await getPolicy(prisma,req.user.companyId);
  if(req.params.section==='summary'){
-  const [users,activeUsers,highRiskUsers,restrictedAccounts,pendingApprovals,criticalAlerts,administrators,authenticationLogs]=await Promise.all([
+  const [users,activeUsers,restrictedAccounts,pendingApprovals,criticalAlerts,administrators,authenticationLogs]=await Promise.all([
    prisma.user.count({where}),
    prisma.user.count({where:{...where,status:'ACTIVE'}}),
-   prisma.user.count({where:{...where,riskScores:{some:{}},riskScore:{gte:policy.mfaThreshold}}}),
    prisma.user.count({where:{...where,status:{in:['FROZEN','RESTRICTED','INVESTIGATION']}}}),
    prisma.accessRequest.count({where:{...scope,status:'PENDING'}}),
    prisma.incident.count({where:{...scope,severity:'CRITICAL',status:{notIn:['RESOLVED','FALSE_POSITIVE']}}}),
@@ -181,22 +189,26 @@ router.get('/dashboard/:section',requireSecurityAdmin,api(async req=>{
    prisma.auditLog.findMany({where:{companyId:req.user.companyId,user:where,action:{in:['AUTH_LOGIN','AUTH_FAILED','MFA_SUCCESS','MFA_FAILED']}},select:{id:true,action:true,timestamp:true,severity:true},orderBy:{timestamp:'desc'},take:500}),
   ]);
   const administratorIds=administrators.map(user=>user.id),now=new Date();
-  const [latestLogins,activeSessions,alerts,incidents]=administratorIds.length?await Promise.all([
+  const [latestLogins,activeSessions,alerts,incidents,latestRisks,latestTrusts]=administratorIds.length?await Promise.all([
    prisma.session.groupBy({by:['userId'],where:{userId:{in:administratorIds},mfaVerifiedAt:{not:null}},_max:{createdAt:true}}),
    prisma.session.groupBy({by:['userId'],where:{userId:{in:administratorIds},revokedAt:null,expiresAt:{gt:now}},_count:{_all:true}}),
    prisma.activityEvent.findMany({where:{user:where,OR:[{severity:{in:['HIGH','VERY_HIGH','CRITICAL']}},{riskContribution:{gte:50}}]},select:{id:true,type:true,timestamp:true,severity:true,riskContribution:true,user:{select:{name:true,departmentCode:true}}},orderBy:{timestamp:'desc'},take:30}),
    prisma.incident.findMany({where:{...scope,status:{notIn:['RESOLVED','FALSE_POSITIVE']}},select:{id:true,incidentId:true,title:true,severity:true,status:true,riskScore:true,createdAt:true,user:{select:{name:true,departmentCode:true}}},orderBy:{createdAt:'desc'},take:30}),
-  ]):[[],[],[],[]];
+   prisma.riskScore.findMany({where:{userId:{in:administratorIds}},orderBy:[{userId:'asc'},{timestamp:'desc'}],distinct:['userId'],select:{userId:true,score:true,level:true,timestamp:true}}),
+   prisma.trustHistory.findMany({where:{userId:{in:administratorIds}},orderBy:[{userId:'asc'},{timestamp:'desc'}],distinct:['userId'],select:{userId:true,trustScore:true,timestamp:true}}),
+  ]):[[],[],[],[],[],[]];
   const loginByUser=new Map(latestLogins.map(row=>[row.userId,row._max.createdAt]));
   const sessionsByUser=new Map(activeSessions.map(row=>[row.userId,row._count._all]));
-  const adminRows=administrators.map(user=>{const riskAssessed=Boolean(user._count.riskScores),trustAssessed=Boolean(user.trustUpdatedAt);const{_count,...record}=user;const trustState=!trustAssessed?'NOT_ASSESSED':user.trustScore<30?'FRESH_MFA_REQUIRED':user.trustScore<60?'SENSITIVE_APPROVAL_REQUIRED':'STANDARD';return{...record,...(!riskAssessed?{riskScore:null,riskLevel:null}:{}),...(!trustAssessed?{trustScore:null}:{}),assessmentStatus:riskAssessed||trustAssessed?'ASSESSED':'NOT_ASSESSED',trustState,lastLoginAt:loginByUser.get(user.id)||null,sessionState:(sessionsByUser.get(user.id)||0)>0?'ACTIVE':'INACTIVE'};});
+  const riskByUser=new Map(latestRisks.map(row=>[row.userId,row])),trustByUser=new Map(latestTrusts.map(row=>[row.userId,row]));
+  const adminRows=administrators.map(user=>{const latestRisk=riskByUser.get(user.id),latestTrust=trustByUser.get(user.id),riskAssessed=Boolean(latestRisk),trustAssessed=Boolean(user.trustUpdatedAt||latestTrust),trustScore=latestTrust&&(!user.trustUpdatedAt||latestTrust.timestamp>=user.trustUpdatedAt)?latestTrust.trustScore:trustAssessed?user.trustScore:null;const{_count,...record}=user;const riskScore=latestRisk?.score??null,riskLevelValue=latestRisk?.level??null,trustState=!trustAssessed?'NOT_ASSESSED':trustScore<30?'FRESH_MFA_REQUIRED':trustScore<60?'SENSITIVE_APPROVAL_REQUIRED':'STANDARD';return{...record,riskScore,riskLevel:riskLevelValue,trustScore,assessmentStatus:riskAssessed||trustAssessed?'ASSESSED':'NOT_ASSESSED',trustState,lastRiskAt:latestRisk?.timestamp??null,lastTrustAt:latestTrust?.timestamp??user.trustUpdatedAt??null,lastLoginAt:loginByUser.get(user.id)||null,sessionState:(sessionsByUser.get(user.id)||0)>0?'ACTIVE':'INACTIVE'};});
+  const highRiskUsers=adminRows.filter(user=>user.riskScore!==null&&user.riskScore>=policy.mfaThreshold).length;
   const departmentMap=new Map();
   for(const user of adminRows){const group=departmentMap.get(user.departmentCode)||{name:user.departmentCode,count:0,riskTotal:0,assessedCount:0};group.count++;if(user.riskScore!==null){group.riskTotal+=user.riskScore;group.assessedCount++;}departmentMap.set(user.departmentCode,group);}
   const departments=[...departmentMap.values()].map(({name,count,riskTotal,assessedCount})=>({name,count,risk:assessedCount?Math.round(riskTotal/assessedCount):null}));
   return{summary:{users,activeUsers,highRiskUsers,restrictedAccounts,pendingApprovals,criticalAlerts},administrators:adminRows,departments,authenticationActivity:authenticationLogs.map(row=>({id:row.id,eventType:row.action,timestamp:row.timestamp,severity:row.severity})),alerts:alerts.map(row=>({id:row.id,eventType:row.type,timestamp:row.timestamp,severity:row.severity,riskContribution:row.riskContribution,isAnomalous:['HIGH','VERY_HIGH','CRITICAL'].includes(row.severity),userName:row.user.name,userDepartment:row.user.departmentCode})),incidents:incidents.map(row=>{const{user,...incident}=row;return{...incident,userName:user.name,userDepartment:user.departmentCode};})};
  }
- if(req.params.section==='risk-distribution')return{distribution:await prisma.user.groupBy({by:['riskLevel'],where:{...where,riskScores:{some:{}}},_count:{_all:true}})};
- if(req.params.section==='risk-trends')return{history:await prisma.riskScore.findMany({where:{...scope,timestamp:{gte:new Date(Date.now()-30*86400000)}},orderBy:{timestamp:'asc'},take:2000})};
+ if(req.params.section==='risk-distribution'){const rows=await prisma.riskScore.findMany({where:{user:{...where}},orderBy:[{userId:'asc'},{timestamp:'desc'}],distinct:['userId'],select:{userId:true,level:true}});const totals=new Map();for(const row of rows)totals.set(row.level,(totals.get(row.level)||0)+1);return{distribution:[...totals].map(([riskLevel,count])=>({riskLevel,_count:{_all:count}}))};}
+ if(req.params.section==='risk-trends')return{history:await prisma.riskScore.findMany({where:{...scope,timestamp:{gte:new Date(Date.now()-90*86400000)}},orderBy:{timestamp:'asc'},take:5000})};
  if(req.params.section==='recent-alerts')return{incidents:await prisma.incident.findMany({where:scope,orderBy:{createdAt:'desc'},take:30})};
  throw new SecurityError(404,'DASHBOARD_SECTION_NOT_FOUND','Dashboard section not found.');
 }));

@@ -47,6 +47,7 @@ export const AiRiskAnalysisPage = ({
 
   // Manual selection only. The page always opens with no employee selected.
   const [targetUserId, setTargetUserId] = useState("");
+  const [historyRange,setHistoryRange]=useState('24h');
   const [analysis, setAnalysis] = useState(null);
   const [telemetryLoading, setTelemetryLoading] = useState(false);
   const [telemetryError, setTelemetryError] = useState("");
@@ -70,7 +71,7 @@ export const AiRiskAnalysisPage = ({
       inFlight = true;
       setTelemetryLoading(true);
       try {
-        const result = await fetchJson(`/api/risk/analysis/${encodeURIComponent(targetUserId)}`);
+        const result = await fetchJson(`/api/risk/analysis/${encodeURIComponent(targetUserId)}?range=${historyRange}`);
         if (cancelled) return;
         if (!result?.success || result.analysis?.userId !== targetUserId || !Array.isArray(result.analysis?.history)) {
           throw new Error(result?.error?.message || result?.message || (typeof result?.error === "string" ? result.error : "Unable to load risk analysis"));
@@ -103,7 +104,7 @@ export const AiRiskAnalysisPage = ({
       clearInterval(timer);
       window.removeEventListener("cyberorbit-endpoint-updated", scheduleRefresh);
     };
-  }, [targetUserId, fetchJson]);
+  }, [targetUserId, fetchJson, historyRange]);
 
   useEffect(() => {
     if (!isRefreshing) refreshTelemetry.current?.();
@@ -122,6 +123,7 @@ export const AiRiskAnalysisPage = ({
     name: factor.factor, score: factor.scoreImpact, description: factor.description,
   }));
   const riskHistory = analysis?.history || [];
+  const windowLabel=historyRange==='24h'?'last 24 hours':`last ${historyRange}`;
   const formatScore = value => typeof value === "number" && Number.isFinite(value) ? value.toFixed(Number.isInteger(value) ? 0 : 1) : "N/A";
   const formatRfScore = value => typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)} / 100` : "N/A";
   // ======================================================
@@ -232,7 +234,7 @@ export const AiRiskAnalysisPage = ({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl text-[#F4F7FA]">Behavioral risk assessment</h2>
-                <p className="mt-1 text-sm text-[#7F8A96]">Last 24 hours · {analysis?.coverage ? `${analysis.coverage.endpointEvents + analysis.coverage.securityEvents} recorded observations reviewed` : "Analysing recorded observations"}</p>
+                <p className="mt-1 text-sm text-[#7F8A96]">{windowLabel} · {analysis?.coverage ? `${analysis.coverage.endpointEvents + analysis.coverage.securityEvents} recorded observations reviewed` : "Analysing recorded observations"}</p>
               </div>
               <button type="button" aria-label="Refresh risk analysis" disabled={telemetryLoading} onClick={() => refreshTelemetry.current?.()} className="flex items-center gap-2 rounded-lg border border-[#67E8F9]/25 px-3 py-2 text-sm text-[#67E8F9] disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${telemetryLoading ? "animate-spin" : ""}`} />
@@ -241,7 +243,7 @@ export const AiRiskAnalysisPage = ({
             </div>
             {telemetryError && <p role="alert" className="text-sm text-red-300">{telemetryError}</p>}
             {hasTelemetry && <>
-              <p className="text-[#A7B0BA]"><span className="font-semibold text-[#D4AF37]">{analysis.riskLevel} RISK</span> · {analysis.explanation}</p>
+              <p className="text-[#A7B0BA]"><span className="font-semibold text-[#D4AF37]">{analysis.riskScore === null ? 'ACTIVITY OBSERVED' : `${analysis.riskLevel} RISK`}</span> · {analysis.activitySummary || analysis.explanation}</p>
               <p className="text-sm text-[#67E8F9]">Recommendation: {analysis.recommendation}</p>
             </>}
             {lastUpdated && <p className="text-xs text-[#7F8A96]">Last analysed: {lastUpdated.toLocaleString()}. Updates as new observations arrive.</p>}
@@ -279,7 +281,7 @@ export const AiRiskAnalysisPage = ({
               <ShieldCheck className="h-6 w-6" strokeWidth={1.5} />
             </div>
             <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO ATTRIBUTED RISK EVIDENCE</div>
-            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">No employee-attributed interactive activity or scored security assessment is available for {targetUser.name} in the last 24 hours. Assigned-device observations remain visible separately and do not prove this employee acted.</p>
+            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">No employee-attributed interactive activity or scored security assessment is available for {targetUser.name} in the {windowLabel}. Assigned-device observations remain visible separately and do not prove this employee acted.</p>
           </section>
         ) : (
           <>
@@ -308,7 +310,7 @@ export const AiRiskAnalysisPage = ({
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
               {analysis?.accountRisk?.score === null || analysis?.accountRisk?.score === undefined ? 'No recorded account risk assessment yet' : `Saved account score used for policy decisions · ${analysis.accountRisk.level}`}
             </span>
-            <span className="mt-2 block text-[12px] text-[#A7B0BA]">Recent observed activity: {formatScore(riskScore)}/100 (last 24 hours, read-only). It does not reset the saved account score when the observation window moves.</span>
+            <span className="mt-2 block text-[12px] text-[#A7B0BA]">Recent activity: {analysis?.activityDetected ? (analysis?.observedRiskScore === null ? 'detected; no additional qualifying endpoint risk evidence' : 'qualifying evidence detected and recorded') : `none attributed in the ${windowLabel}`}. This card shows the latest persisted account score used by policy.</span>
           </div>
 
           {/* 2. Trust Score */}
@@ -462,11 +464,12 @@ export const AiRiskAnalysisPage = ({
                 </span>
 
                 <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
-                Risk Trend · Last 24 Hours
+                Risk &amp; Trust Trend · {historyRange.toUpperCase()}
                 </h3>
               </div>
 
               <div className="flex items-center gap-2 text-[12px] text-[#7F8A96]">
+                <label>Window <select aria-label="Risk analysis history range" value={historyRange} onChange={event=>setHistoryRange(event.target.value)} className="ml-1 rounded border border-white/15 bg-slate-900 p-2 text-white"><option value="24h">24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option></select></label>
                 <span className="h-1.5 w-1.5 rounded-full bg-[#67E8F9]" />
                 Risk
                 {analysis?.ml?.available && <><span className="ml-2 h-1.5 w-1.5 rounded-full bg-[#D4AF37]" />ML</>}
@@ -474,7 +477,7 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <div className="h-64 w-full">
-              {riskHistory.every(point => point.score === null && point.mlProb === null) ? <p className="flex h-full items-center justify-center text-center text-sm text-[#7F8A96]">No scored interactive observations or security assessments are available for this window.</p> :
+              {riskHistory.every(point => point.score === null && point.trust === null && point.mlProb === null) ? <p className="flex h-full items-center justify-center text-center text-sm text-[#7F8A96]">No scored risk or trust history is available for this window.</p> :
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
                   data={riskHistory}
@@ -509,7 +512,7 @@ export const AiRiskAnalysisPage = ({
 
                   <XAxis
                     dataKey="time"
-                    tickFormatter={value => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    tickFormatter={value => new Date(value).toLocaleString([], historyRange==='24h'?{hour:'2-digit',minute:'2-digit'}:{month:'short',day:'numeric'})}
                     stroke="#596570"
                     fontSize={10}
                     tickLine={false}
@@ -556,6 +559,8 @@ export const AiRiskAnalysisPage = ({
                     fill="url(#aiCyanArea)"
                     name="Observed risk"
                   />
+
+                  <Area type="monotone" dataKey="trust" stroke="#D4AF37" strokeWidth={1.5} fillOpacity={0} name="Recorded trust" />
 
                   {analysis?.ml?.available && <Area
                     type="monotone"

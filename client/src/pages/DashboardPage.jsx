@@ -1252,7 +1252,11 @@ export const DashboardPage = ({
                     return (
                       <tr
                         key={user.id}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`Open security center for ${user.name}`}
                         onClick={() => onSelectUser && onSelectUser(user.id)}
+                        onKeyDown={event=>{if((event.key==='Enter'||event.key===' ')&&onSelectUser){event.preventDefault();onSelectUser(user.id);}}}
                         className={`
                           group
                           border-b

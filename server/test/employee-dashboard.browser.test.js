@@ -24,7 +24,7 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
   const app=express();app.use(express.json());app.use('/api',routes);app.use(express.static(path.join(projectRoot,'client/dist')));app.get('*',(req,res)=>res.sendFile(path.join(projectRoot,'client/dist/index.html')));
   server=await new Promise(resolve=>{const instance=app.listen(0,'127.0.0.1',()=>resolve(instance));});
   profile=await fs.mkdtemp(path.join(os.tmpdir(),'orbit-employee-dashboard-'));b=await browser(profile);
-  const errors=[],apiRequests=[];b.listeners.push(message=>{if(message.method==='Runtime.exceptionThrown')errors.push(message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text);if(message.method==='Network.requestWillBeSent'&&message.params.request.url.includes('/api/users/'))apiRequests.push(new URL(message.params.request.url).pathname);});
+  const errors=[],consoleMessages=[],apiRequests=[];b.listeners.push(message=>{if(message.method==='Runtime.exceptionThrown')errors.push(message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text);if(message.method==='Runtime.consoleAPICalled')consoleMessages.push(message.params.args?.map(arg=>arg.value||arg.description).join(' '));if(message.method==='Network.requestWillBeSent'&&message.params.request.url.includes('/api/users/'))apiRequests.push(new URL(message.params.request.url).pathname);});
   await b.command('Runtime.enable');await b.command('Page.enable');await b.command('Network.enable');
   const token=generateJwtToken(f.admin,true),user={...f.admin,passwordHash:undefined};
   await b.command('Page.addScriptToEvaluateOnNewDocument',{source:`localStorage.setItem('zero_trust_token',${JSON.stringify(token)});localStorage.setItem('zero_trust_user',${JSON.stringify(JSON.stringify(user))});`});
@@ -32,17 +32,23 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
   await b.command('Page.navigate',{url:origin+'/employee-dashboard'});
   await waitUntil(b,"document.querySelector('.console-workspace[data-page=\"employee-dashboard\"]') && document.querySelector('main')?.textContent.includes('Employee List') && document.querySelector('main')?.textContent.includes('Nine')",'existing dashboard lists employees first');
   let body=await b.evaluate('document.querySelector("main").innerText');
+  const sidebar=await b.evaluate('document.querySelector("#cyberorbit-sidebar")?.innerText || ""');
+  for(const removed of ['Security Profile','Protected Resources','Access Requests'])assert.equal(sidebar.includes(removed),false,`${removed} is absent from the active frontend navigation`);
   assert.equal(body.includes(f.admin.name),false,'admin is not treated as selected employee');
   assert.equal(apiRequests.includes(`/api/users/${f.admin.id}`),false,'no default request loads admin detail');
   await b.evaluate("Array.from(document.querySelectorAll('tr[aria-label]')).find(row=>row.getAttribute('aria-label')==='View Nine').click()");
-  await waitUntil(b,"document.querySelector('main')?.textContent.includes('Nine') && document.querySelector('main')?.textContent.includes('Synthetic editor fixture') && document.querySelector('main')?.textContent.includes('192.0.2.11')",'selected employee details, sessions, and endpoint events render');
+  try{await waitUntil(b,"document.querySelector('main')?.textContent.includes('Nine') && document.querySelector('main')?.textContent.includes('Synthetic editor fixture')",'selected employee details and endpoint events render');}catch(error){console.error('Browser page diagnostics',JSON.stringify({errors,consoleMessages,apiRequests}));throw error;}
   const riskResponse=await fetch(`${origin}/api/risk/analysis/${nine.id}`,{headers:{Authorization:`Bearer ${token}`}});
   const riskBody=await riskResponse.json();assert.equal(riskResponse.status,200);assert.equal(riskBody.analysis.accountRisk.score,51);
-  await waitUntil(b,"document.querySelector('main')?.textContent.includes('CURRENT POLICY RISK') && document.querySelector('main')?.textContent.includes('Recent observed activity:')",'employee detail shows saved policy risk and recent observations separately');
-  const liveScore=riskBody.analysis.riskScore;
+  await waitUntil(b,"document.querySelector('main')?.textContent.includes('CURRENT POLICY RISK') && document.querySelector('main')?.textContent.includes('Recent endpoint activity:')",'employee detail shows one persisted policy score and evidence status');
+  await b.evaluate("Array.from(document.querySelectorAll('main details summary')).find(summary=>summary.textContent.includes('Why this score?'))?.click()");
   body=await b.evaluate('document.querySelector("main").innerText');
   assert.ok(body.includes('51 / 100'),'employee detail keeps the saved policy score visible beyond the observation window');
-  assert.ok(body.includes(`Recent observed activity: ${liveScore}/100`),'employee detail uses the same backend observed score as Risk Analysis');
+  assert.ok(body.includes('Why this score?') && body.includes('Synthetic test assessment'),'current score exposes its persisted factor evidence');
+  assert.ok(body.includes('Recent endpoint activity: Activity detected; no qualifying risk evidence'),'ordinary activity is not displayed as another score');
+  assert.equal(body.includes('ACTIVE LOGIN SESSIONS'),false,'employee monitor does not present employee console-session counts');
+  assert.equal(body.includes('Valid Login Sessions'),false,'employee monitor does not show browser session cards');
+  assert.equal(body.includes('REQUEST ACCESS'),false,'employee monitor no longer exposes the request-access button');
   assert.ok(apiRequests.includes(`/api/users/${nine.id}`),'existing employee detail API receives the selected ID');
   body=await b.evaluate('document.querySelector("main").innerText');
   assert.equal(body.includes('Priyanka'),false,'Nine view does not include another employee');
@@ -51,7 +57,7 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
   await b.evaluate("Array.from(document.querySelectorAll('main button')).find(button=>button.textContent.includes('Employee List')).click()");
   await waitUntil(b,"document.querySelector('main')?.textContent.includes('Employee List')",'return to employee list');
   await b.evaluate("Array.from(document.querySelectorAll('tr[aria-label]')).find(row=>row.getAttribute('aria-label')==='View Priyanka').click()");
-  await waitUntil(b,"document.querySelector('main')?.textContent.includes('Priyanka') && document.querySelector('main')?.textContent.includes('No endpoint agent assigned to this employee.') && document.querySelector('main')?.textContent.includes('192.0.2.22')",'selected employee without an agent shows the correct empty state');
+  await waitUntil(b,"document.querySelector('main')?.textContent.includes('Priyanka') && document.querySelector('main')?.textContent.includes('No endpoint agent assigned to this employee.')",'selected employee without an agent shows the correct empty state');
   body=await b.evaluate('document.querySelector("main").innerText');
   assert.ok(body.includes('Not assessed'),'an employee without scored assessments does not show registration defaults');
   assert.ok(body.includes('Endpoint activity is unavailable because no endpoint agent is assigned to this employee.'),'endpoint timeline explains why this employee has no endpoint activity');

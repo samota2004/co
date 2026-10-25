@@ -10,6 +10,13 @@ export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
   reason: 'The trained model requires complete 21-feature CERT user-day logon/device/file/HTTP/email coverage. File changes are not reads; connections are not HTTP history. Email/content features and training preprocessing are unavailable. No endpoint inference is performed.' });
+const endpointMonitoringUser = user => {
+  if (!user) return null;
+  const { _count, ...record } = user;
+  const riskAssessed = Boolean(_count?.riskScores);
+  const trustAssessed = Boolean(user.trustUpdatedAt);
+  return { ...record, ...(!riskAssessed ? { riskScore: null, riskLevel: null } : {}), ...(!trustAssessed ? { trustScore: null } : {}), assessmentStatus: riskAssessed || trustAssessed ? 'ASSESSED' : 'NOT_ASSESSED' };
+};
 export class EndpointError extends Error {
   constructor(status, message, code = 'ENDPOINT_REJECTED', diagnostics = {}) {
     super(message); this.name = 'EndpointError'; this.status = status; this.code = code;
@@ -131,6 +138,8 @@ export class EndpointService {
   async heartbeat(secret, body, address, addressDiagnostics) {
     try { validateHealth(body.health); } catch (e) { throw new EndpointError(400, e.message); }
     if (typeof body.agentVersion !== 'string' || body.agentVersion.length > 40) throw new EndpointError(400, 'Invalid version');
+    const report=body.accountControlReport;
+    if(report!==undefined&&(!report||typeof report!=='object'||Array.isArray(report)||Object.keys(report).some(key=>!['commandId','resultCode','reportedAt'].includes(key))||typeof report.commandId!=='string'||report.commandId.length>80||typeof report.resultCode!=='string'||!['BLOCKED','ALLOWED','LOGOFF_PENDING','EXTERNALLY_DISABLED','RECOVERY_REQUIRED','UNSAFE_ACCOUNT','UNSAFE_RECOVERY','UNSUPPORTED_MACHINE','UNSAFE_STORAGE','ACCESS_DENIED','NATIVE_ERROR','CONTROL_DISABLED','CONTROL_REFUSED','NEEDS_REVIEW'].includes(report.resultCode)||!Number.isFinite(Date.parse(report.reportedAt))||Date.parse(report.reportedAt)>Date.now()+60000))throw new EndpointError(400,'Invalid account-control acknowledgement');
     const result=await withCitySchema(this.prisma,cityAvailable=>this.prisma.$transaction(async tx => {
       const d = await this.authenticate(tx, secret,cityAvailable);
       const observedAt=new Date();
@@ -138,11 +147,35 @@ export class EndpointService {
         ...(d.ipCityEnabled?{ipCityGeneration:{increment:1}}:{}) } });
       if (changed.count !== 1) throw new EndpointError(401, 'Revoked credential');
       const generation=d.ipCityEnabled?(await tx.endpointDevice.findUnique({where:{id:d.id},select:{ipCityGeneration:true}})).ipCityGeneration:null;
+      const enforcement=tx.endpointEnforcementCommand;
       // Only the authenticated enrollment's employee determines the OS target.
       // Keep device credentials valid while frozen so an administrator can restore access.
+      if(report&&enforcement){
+        const command=await enforcement.findUnique({where:{commandId:report.commandId}});
+        if(command&&command.deviceId===d.id&&command.userId===d.userId&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&Date.parse(report.reportedAt)>=command.issuedAt.getTime()){
+          const success=(command.action==='BLOCK'&&report.resultCode==='BLOCKED')||(command.action==='ALLOW'&&report.resultCode==='ALLOWED');
+          const pending=report.resultCode==='LOGOFF_PENDING';
+          const unsupported=['UNSUPPORTED_MACHINE','UNSAFE_STORAGE','CONTROL_DISABLED'].includes(report.resultCode);
+          await enforcement.update({where:{id:command.id},data:{resultCode:report.resultCode,status:success?'SUCCEEDED':pending?'PENDING':unsupported?'UNSUPPORTED':'FAILED',acknowledgedAt:new Date(report.reportedAt)}});
+        }
+      }
       const eligible=['win32','linux','darwin'].includes(d.platform) && d.mappedIdentity && ['EMPLOYEE','MANAGER'].includes(d.user.roleCode);
-      const action=eligible ? (d.user.status==='FROZEN'?'BLOCK':d.user.status==='ACTIVE'?'ALLOW':'HOLD') : 'HOLD';
-      return { config: d.config, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:new Date().toISOString()}, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
+      const desired=eligible?(d.user.status==='FROZEN'?'BLOCK':d.user.status==='ACTIVE'?'ALLOW':'HOLD'):'HOLD';
+      if(enforcement)await enforcement.updateMany({where:{deviceId:d.id,status:{in:['PENDING','PENDING_OFFLINE']},...(desired==='HOLD'?{}:{action:{not:desired}})},data:{status:'SUPERSEDED'}});
+      let command=eligible&&enforcement?await enforcement.findFirst({where:{deviceId:d.id,status:{in:['PENDING','PENDING_OFFLINE']},action:desired},orderBy:{createdAt:'asc'}}):null;
+      if(command){
+        await tx.endpointEnforcementCommand.update({where:{id:command.id},data:{status:'PENDING',issuedAt:observedAt}});
+        command={...command,issuedAt:observedAt};
+      }
+      let latestCommand=null;
+      if(eligible&&desired!=='HOLD'&&!command&&enforcement){
+        latestCommand=await enforcement.findFirst({where:{deviceId:d.id},orderBy:{createdAt:'desc'}});
+        if(!latestCommand||latestCommand.action!==desired){
+          command=await enforcement.create({data:{companyId:d.companyId,userId:d.userId,deviceId:d.id,action:desired,status:'PENDING',reason:'Reconcile the managed OS account with the server-validated account state.'}});
+        }
+      }
+      const action=command?command.action:enforcement&&latestCommand?.action===desired?'HOLD':desired;
+      return { config: d.config, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:observedAt.toISOString(),...(command?{commandId:command.commandId}: {})}, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
     }));
     const {cityDevice:d,generation,observedAt,...response}=result;
     // Optional lookup cannot roll back or fail an authenticated heartbeat.
@@ -190,7 +223,8 @@ export class EndpointService {
     const {devices,cityAvailable} = await withCitySchema(this.prisma,async cityAvailable=>({cityAvailable,devices:await this.prisma.endpointDevice.findMany({ where, select: {
       id: true, userId: true, name: true, platform: true, mappedIdentity: true, enrolledAt: true,
       revokedAt: true, lastSeen: true, agentVersion: true, health: true, config: true,...(cityAvailable?{ipCityEnabled:true,ipCity:true}:{}),
-      user: { select: { id: true, name: true, employeeId: true, riskScore: true, trustScore: true, riskLevel: true } }
+      enforcementCommands:{orderBy:{createdAt:'desc'},take:5,select:{id:true,commandId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,acknowledgedAt:true,createdAt:true}},
+      user: { select: { id: true, name: true, employeeId: true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true } } } }
     }, orderBy: { createdAt: 'desc' } })}));
     // A device filter must resolve inside the already-scoped company/employee
     // list. This keeps the dashboard filter from becoming an IDOR.
@@ -249,7 +283,7 @@ export class EndpointService {
     }
     const incidents = isEndpointAdmin(user)||user.roleCode==='MANAGER' ? await this.prisma.incident.findMany({ where: { user: userScope(user), ...(userId ? { userId } : {}) }, take: 30, orderBy: { createdAt: 'desc' } }) : [];
     const employees = isEndpointAdmin(user) ? await this.prisma.user.findMany({ where: { ...userScope(user), status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } }, select: { id: true, employeeId: true, name: true }, orderBy: { name: 'asc' } }) : [];
-    return { devices: devices.map(d => ({ ...d,ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: {...ML_AVAILABILITY, dataReadiness:createLiveModelDataReadiness({window:{date:readinessWindow.date,timezone:'UTC',startInclusive:readinessWindow.start.toISOString(),endExclusive:readinessWindow.end.toISOString(),state:readinessWindow.state},scopes:readinessScopes})} };
+    return { devices: devices.map(d => ({ ...d, user: endpointMonitoringUser(d.user), ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: {...ML_AVAILABILITY, dataReadiness:createLiveModelDataReadiness({window:{date:readinessWindow.date,timezone:'UTC',startInclusive:readinessWindow.start.toISOString(),endExclusive:readinessWindow.end.toISOString(),state:readinessWindow.state},scopes:readinessScopes})} };
   }
   async change(admin, id, body, revoke = false) {
     if (!admin || !isEndpointAdmin(admin) || admin.status !== 'ACTIVE' || !admin.companyId) throw new EndpointError(403, 'Active administrator required');

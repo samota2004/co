@@ -11,6 +11,8 @@ import {
   RefreshCw,
   Radar,
 } from "lucide-react";
+import {requestApi} from '../services/api.js';
+import {confirmAccountAction} from '../services/confirm-account-action.js';
 
 const normalizeValue = (value) => {
   if (value === null || value === undefined) {
@@ -62,6 +64,8 @@ export const AlertsPage = ({
   const [updatingUserId, setUpdatingUserId] = useState(null);
   const [actionError, setActionError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [notificationPermission,setNotificationPermission]=useState(()=>typeof window!=='undefined'&&'Notification' in window?Notification.permission:'unsupported');
+  const [investigatingId,setInvestigatingId]=useState(null);
   useEffect(() => {
     if (!selectedAlert) return;
     const previous = document.activeElement;
@@ -313,32 +317,19 @@ export const AlertsPage = ({
     if (!userId || !isAuthorized) {
       return;
     }
+    const reason=confirmAccountAction('freeze',selectedAlert?.userName||'this employee');if(!reason)return;
 
     try {
       setActionError("");
       setUpdatingUserId(userId);
 
-      const response = await fetch(`/api/users/${userId}/freeze`, {
+      const data = await requestApi(`/api/users/${encodeURIComponent(userId)}/freeze`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(currentUser?.id ? { "x-user-id": currentUser.id } : {}),
-        },
-        body: JSON.stringify({
-          reason: "Security incident containment",
+        body: {
+          reason,
           source: "ALERT_RESPONSE",
-        }),
+        },
       });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok || data.success === false) {
-        throw new Error(
-          data?.error?.message ||
-            data?.message ||
-            `Unable to freeze account. Status ${response.status}`,
-        );
-      }
 
       if (onRefreshData) {
         await onRefreshData();
@@ -368,28 +359,13 @@ export const AlertsPage = ({
     if (!userId || !isAuthorized) {
       return;
     }
+    const reason=confirmAccountAction('unfreeze',selectedAlert?.userName||'this employee');if(!reason)return;
 
     try {
       setActionError("");
       setUpdatingUserId(userId);
 
-      const response = await fetch(`/api/users/${userId}/unfreeze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(currentUser?.id ? { "x-user-id": currentUser.id } : {}),
-        },
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok || data.success === false) {
-        throw new Error(
-          data?.error?.message ||
-            data?.message ||
-            `Unable to unfreeze account. Status ${response.status}`,
-        );
-      }
+      const data = await requestApi(`/api/users/${encodeURIComponent(userId)}/unfreeze`, {method:"POST",body:{reason}});
 
       if (onRefreshData) {
         await onRefreshData();
@@ -421,6 +397,9 @@ export const AlertsPage = ({
 
 
   };
+
+  const enableNotifications=async()=>{if(!('Notification' in window)){setNotificationPermission('unsupported');return;}const permission=await Notification.requestPermission();setNotificationPermission(permission);};
+  const acknowledgeAlert=async alert=>{const id=getIncidentId(alert);if(!id)return;setActionError('');setInvestigatingId(id);try{const result=await requestApi(`/api/incidents/${encodeURIComponent(id)}`,{method:'PATCH',body:{status:'INVESTIGATING',notes:'Acknowledged from the security alert inbox.'}});setSelectedAlert(current=>current?{...current,...result.incident,status:'INVESTIGATING'}:current);await onRefreshData?.();}catch(error){setActionError(error.message||'Unable to acknowledge this incident.');}finally{setInvestigatingId(null);}};
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5 px-5 pb-10 pt-5 text-[#F4F7FA] sm:px-8 lg:px-12">
@@ -469,6 +448,7 @@ export const AlertsPage = ({
               <span className="rounded-full border border-[#67E8F9]/25 bg-[#67E8F9]/5 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[#67E8F9]">Threat Triage</span>
               <span className="rounded-full border border-[#D4AF37]/25 bg-[#D4AF37]/5 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[#D4AF37]">Behavioral Risk</span>
               <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[#7F8A96]">{unresolvedCount} Active</span>
+              <button type="button" onClick={enableNotifications} disabled={notificationPermission==='granted'||notificationPermission==='unsupported'} className="rounded-full border border-cyan-700/50 px-3 py-1.5 text-[11px] text-cyan-200 disabled:opacity-50">{notificationPermission==='granted'?'Browser notifications enabled':notificationPermission==='denied'?'Browser notifications blocked':notificationPermission==='unsupported'?'Notifications unavailable':'Enable browser notifications'}</button>
             </div>
           </div>
 
@@ -732,6 +712,7 @@ export const AlertsPage = ({
 
             <div className="space-y-5 mt-6">
               <div className="flex flex-wrap gap-3">
+                {selectedAlert.status!=='INVESTIGATING'&&selectedAlert.status!=='RESOLVED'&&<button disabled={investigatingId===getIncidentId(selectedAlert)} className="rounded-lg border border-amber-700 px-4 py-2 text-amber-200 disabled:opacity-50" onClick={()=>acknowledgeAlert(selectedAlert)}>{investigatingId===getIncidentId(selectedAlert)?'Acknowledging…':'Acknowledge & investigate'}</button>}
                 <button className="rounded-lg border border-cyan-800 px-4 py-2 text-cyan-200" onClick={() => onSelectIncident?.(selectedAlert.id)}>Open incident</button>
                 <button className="rounded-lg border border-slate-600 px-4 py-2" onClick={() => onSelectUser?.(selectedAlert.userId)}>Employee profile</button>
               </div>

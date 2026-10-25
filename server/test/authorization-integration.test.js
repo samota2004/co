@@ -6,6 +6,53 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import {deviceFixture} from './device-fixture.js';
 
+test('policy risk and trust change only from qualifying evidence; duplicate evidence is idempotent',{timeout:90000},async()=>{
+  const f=await deviceFixture();let sse;
+  try{
+    const {securityService}=await import('../services/security-service.js');
+    sse=(await import('../services/sse.js')).sseManager;
+    const before=await f.prisma.user.findUnique({where:{id:f.employee.id}});
+    const timingOnly=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'LOGIN',eventId:randomUUID(),isOffHours:true});
+    assert.equal(timingOnly.decision.evaluation.riskScore,0,'off-hours context alone does not make a threat score');
+    assert.equal((await f.prisma.user.findUnique({where:{id:f.employee.id}})).trustScore,before.trustScore,'ordinary timing does not reduce trust');
+    assert.equal((await f.prisma.user.findUnique({where:{id:f.employee.id}})).riskScore,before.riskScore,'ordinary timing does not overwrite the last qualifying risk assessment');
+    assert.equal(await f.prisma.riskScore.count({where:{userId:f.employee.id}}),0,'ordinary timing does not create a scored risk record');
+    assert.equal(timingOnly.user.trustUpdatedAt,null,'zero risk does not fabricate a trust assessment');
+    const eventId=randomUUID();
+    const suspicious=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'FAILED_LOGIN',eventId,failedAuthCount:2});
+    assert.equal(suspicious.decision.evaluation.riskScore,10,'two observed failed logins map to the configured authentication factor');
+    assert.equal(suspicious.user.trustScore,before.trustScore-1,'positive evidence lowers trust by the documented small-risk step');
+    const duplicate=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'FAILED_LOGIN',eventId,failedAuthCount:2});
+    assert.equal(duplicate.duplicate,true);
+    assert.equal(duplicate.user.trustScore,before.trustScore-1,'duplicate event does not apply the trust change twice');
+    assert.equal(await f.prisma.riskScore.count({where:{userId:f.employee.id}}),1,'only the unique event with qualifying evidence creates a scored record');
+    assert.equal(await f.prisma.auditLog.count({where:{userId:f.employee.id,action:'TRUST_CHANGED'}}),1);
+  }finally{if(sse)clearInterval(sse.heartbeatInterval);await f.close();}
+});
+
+test('actionable policy decisions are published to the scoped alert stream',{timeout:90000},async()=>{
+ const f=await deviceFixture();let sse,original,broadcasts=[];
+ try{
+  const {securityService}=await import('../services/security-service.js');sse=(await import('../services/sse.js')).sseManager;original=sse.broadcastPolicyDecision.bind(sse);sse.broadcastPolicyDecision=payload=>{broadcasts.push(payload);};
+  const result=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'FILE_DOWNLOAD',eventId:randomUUID(),downloadVolumeMB:600,isOffHours:true});
+  assert.ok(!['ALLOW','MONITOR'].includes(result.decision.decision),'fixture should produce an actionable policy decision');assert.equal(broadcasts.length,1);assert.equal(broadcasts[0].companyId,'A');assert.equal(broadcasts[0].userId,f.employee.id);assert.equal(broadcasts[0].decision,result.decision.decision);
+ }finally{if(sse){if(original)sse.broadcastPolicyDecision=original;clearInterval(sse.heartbeatInterval);}await f.close();}
+});
+
+test('carried-forward assessment holds do not refresh the historical evidence timestamp',{timeout:90000},async()=>{
+ const f=await deviceFixture();let sse;
+ try{
+  const {securityService}=await import('../services/security-service.js');sse=(await import('../services/sse.js')).sseManager;
+  const timestamp=new Date(Date.now()-2*60000);
+  await f.prisma.riskScore.create({data:{userId:f.employee.id,score:65,level:'HIGH',factors:[{factor:'Recorded suspicious activity',category:'AUTH',scoreImpact:65,description:'Synthetic test evidence'}],timestamp}});
+  const result=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'LOGIN',eventId:randomUUID(),isOffHours:false});
+  assert.equal(result.decision.evaluation.riskScore,65,'the active policy hold remains visible');
+  assert.equal(await f.prisma.riskScore.count({where:{userId:f.employee.id}}),1,'an ordinary event does not create a new scored observation');
+  const stored=await f.prisma.riskScore.findFirst({where:{userId:f.employee.id},orderBy:{timestamp:'desc'}});
+  assert.equal(stored.timestamp.getTime(),timestamp.getTime(),'the old evidence timestamp is preserved');
+ }finally{if(sse)clearInterval(sse.heartbeatInterval);await f.close();}
+});
+
 test('persisted trust, incident holds and request tampering affect protected resource access',{timeout:90000},async()=>{
   const f=await deviceFixture();let server,sse;
   try{

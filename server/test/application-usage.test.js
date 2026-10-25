@@ -34,6 +34,16 @@ test('usage filtering precedes timeline limit and preserves employee/company iso
     assert.ok(mixed.events.every(e=>e.type==='PROCESS_RUNNING'));assert.equal(mixed.timeline.hasMore,true);
     const own=await service.dashboard(f.employee,undefined,'APPLICATION_USAGE');
     assert.deepEqual(own.events.map(e=>e.metadata.name),['brave','Notepad']);assert.equal(own.timeline.hasMore,false);
+    assert.equal(own.devices[0].user.riskScore,null,'registration risk default is not shown as assessed');
+    assert.equal(own.devices[0].user.trustScore,null,'registration trust default is not shown as assessed');
+    assert.equal(own.devices[0].user.assessmentStatus,'NOT_ASSESSED');
+    const trustUpdatedAt=new Date();
+    await f.prisma.user.update({where:{id:f.employee.id},data:{riskScore:31,riskLevel:'LOW',trustScore:76,trustUpdatedAt}});
+    await f.prisma.riskScore.create({data:{userId:f.employee.id,score:31,level:'LOW',factors:[{factor:'Synthetic verified assessment'}]}});
+    const assessed=await service.dashboard(f.admin,f.employee.id,'APPLICATION_USAGE');
+    assert.equal(assessed.devices[0].user.riskScore,31);
+    assert.equal(assessed.devices[0].user.trustScore,76);
+    assert.equal(assessed.devices[0].user.assessmentStatus,'ASSESSED');
     assert.equal(own.timeline.eventType,'APPLICATION_USAGE');
     const admin=await call(f.admin,`?eventType=APPLICATION_USAGE&userId=${f.employee.id}`);
     assert.equal(admin.status,200);assert.ok(admin.data.events.some(e=>e.metadata.name==='Notepad'));

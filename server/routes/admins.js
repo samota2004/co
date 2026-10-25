@@ -18,6 +18,25 @@ async function fields(b,create=false){
  return data;
 }
 router.get('/',api(async req=>({admins:(await prisma.user.findMany({where:{companyId:req.user.companyId,deletedAt:null,roleCode:{in:['SECURITY_ADMIN','SYSTEM_ADMIN']}},orderBy:{name:'asc'},take:200})).map(publicUser)})));
+router.get('/:id/security-center',api(async req=>{
+ const admin=await locate(req),from=new Date(Date.now()-90*86400000),now=new Date();
+ const [sessions,devices,endpointDevices,riskHistory,trustHistory,dailyRiskHistory,lastRisk,lastTrust,incidents,auditEvents,lastLogin]=await Promise.all([
+  prisma.session.findMany({where:{userId:admin.id,revokedAt:null,expiresAt:{gt:now},user:{companyId:req.user.companyId,deletedAt:null}},select:{id:true,ip:true,userAgent:true,createdAt:true,expiresAt:true,mfaVerifiedAt:true},orderBy:{createdAt:'desc'},take:100}),
+  prisma.device.findMany({where:{userId:admin.id,user:{companyId:req.user.companyId,deletedAt:null}},select:{id:true,name:true,os:true,browser:true,status:true,trustScore:true,lastSeen:true,firstSeen:true},orderBy:{lastSeen:'desc'},take:100}),
+  prisma.endpointDevice.findMany({where:{userId:admin.id,companyId:req.user.companyId},select:{id:true,name:true,platform:true,agentVersion:true,health:true,lastSeen:true,enrolledAt:true,revokedAt:true},orderBy:{lastSeen:'desc'},take:100}),
+  prisma.riskScore.findMany({where:{userId:admin.id,timestamp:{gte:from,lte:now}},select:{id:true,score:true,level:true,factors:true,policyAction:true,timestamp:true},orderBy:{timestamp:'asc'},take:5000}),
+  prisma.trustHistory.findMany({where:{userId:admin.id,timestamp:{gte:from,lte:now}},select:{id:true,trustScore:true,riskScore:true,delta:true,reason:true,timestamp:true},orderBy:{timestamp:'asc'},take:5000}),
+  prisma.dailyRiskSnapshot.findMany({where:{userId:admin.id,companyId:req.user.companyId,day:{gte:new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-89*86400000)}},orderBy:{day:'asc'},take:90}),
+  prisma.riskScore.findFirst({where:{userId:admin.id},select:{score:true,level:true,timestamp:true},orderBy:{timestamp:'desc'}}),
+  prisma.trustHistory.findFirst({where:{userId:admin.id},select:{trustScore:true,timestamp:true},orderBy:{timestamp:'desc'}}),
+  prisma.incident.findMany({where:{userId:admin.id,user:{companyId:req.user.companyId,deletedAt:null}},select:{id:true,title:true,severity:true,status:true,riskScore:true,createdAt:true},orderBy:{createdAt:'desc'},take:100}),
+  prisma.auditLog.findMany({where:{companyId:req.user.companyId,userId:admin.id,timestamp:{gte:from,lte:now}},select:{id:true,action:true,category:true,severity:true,timestamp:true},orderBy:{timestamp:'desc'},take:200}),
+  prisma.auditLog.findFirst({where:{companyId:req.user.companyId,userId:admin.id,action:'AUTH_LOGIN'},select:{timestamp:true},orderBy:{timestamp:'desc'}}),
+ ]);
+ const currentTrust=lastTrust&&(!admin.trustUpdatedAt||lastTrust.timestamp>=admin.trustUpdatedAt)?lastTrust.trustScore:admin.trustUpdatedAt?admin.trustScore:null;
+ const currentTrustAt=lastTrust&&(!admin.trustUpdatedAt||lastTrust.timestamp>=admin.trustUpdatedAt)?lastTrust.timestamp:admin.trustUpdatedAt??null;
+ return{administrator:{id:admin.id,name:admin.name,email:admin.email,employeeId:admin.employeeId,roleCode:admin.roleCode,departmentCode:admin.departmentCode,status:admin.status,isMainAdmin:admin.isMainAdmin,assessmentStatus:lastRisk||currentTrustAt?'ASSESSED':'NOT_ASSESSED',riskScore:lastRisk?.score??null,riskLevel:lastRisk?.level??null,trustScore:currentTrust,riskUpdatedAt:lastRisk?.timestamp??null,trustUpdatedAt:currentTrustAt,lastLoginAt:lastLogin?.timestamp??null},window:{from,to:now,days:90},sessions,sessionCount:sessions.length,monitoringStatus:sessions.length?'ACTIVE_SESSION':endpointDevices.some(device=>!device.revokedAt&&device.lastSeen&&now-device.lastSeen<300000)?'AGENT_CONNECTED':'NO_ACTIVE_SESSION_OR_AGENT',devices,endpointDevices,riskHistory,trustHistory,dailyRiskHistory,incidents,auditEvents};
+}));
 router.post('/',requireMainAdmin,api(async req=>{const data=await fields(req.body,true);const admin=await prisma.$transaction(async tx=>{await releaseDeletedIdentifiers(tx,req.user,data);const u=await tx.user.create({data:{...data,employeeId:'ADM-'+randomUUID(),companyId:req.user.companyId,isMainAdmin:false}});await audit(tx,req.user,'ADMIN_CREATED',{id:u.id});return u;});return{admin:{...publicUser(admin),riskScore:null,currentRiskScore:null,riskLevel:null,currentRiskLevel:null,assessmentStatus:'NOT_ASSESSED'}};}));
 router.patch('/:id',requireMainAdmin,api(async req=>{
  const u=await locate(req),data=await fields(req.body);

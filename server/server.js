@@ -127,5 +127,11 @@ const {scheduleEndpointRetention}=await import('./services/endpoint-retention.js
 const {prisma:retentionDb}=await import('./models/prisma.js');
 const stopRetention=scheduleEndpointRetention(retentionDb);
 httpServer.once('close',stopRetention);
+const {finalizeDailyRiskSnapshots}=await import('./services/daily-risk-snapshot-service.js');
+let snapshotRefreshRunning=false;
+const refreshSnapshots=async()=>{if(snapshotRefreshRunning)return;snapshotRefreshRunning=true;try{const outcome=await finalizeDailyRiskSnapshots(retentionDb);if(outcome.truncated)console.warn('Daily risk snapshot catch-up reached its 50,000-row per-source safety cap.');}catch(error){console.warn('Daily risk snapshot catch-up deferred:',error?.code||error?.name||'unavailable');}finally{snapshotRefreshRunning=false;}};
+void refreshSnapshots();
+const snapshotTimer=setInterval(refreshSnapshots,5*60*1000);snapshotTimer.unref();
+httpServer.once('close',()=>clearInterval(snapshotTimer));
 ready = true;
 console.log(`[CyberOrbit SOC] Server running on http://localhost:${httpServer.address().port}`);

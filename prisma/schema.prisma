@@ -202,6 +202,8 @@ model User {
   mlPredictions       MlPrediction[]
   auditLogs           AuditLog[]
   endpointDevices     EndpointDevice[]
+  dailyRiskSnapshots  DailyRiskSnapshot[]
+  receivedNotifications SecurityNotification[] @relation("NotificationRecipient")
 
   @@index([roleCode])
   @@index([companyId, managerId])
@@ -235,6 +237,7 @@ model EndpointDevice {
   config         Json
   createdAt      DateTime @default(now())
   events         EndpointEvent[]
+  enforcementCommands EndpointEnforcementCommand[]
   @@index([companyId, userId])
   @@map("endpoint_devices")
 }
@@ -411,6 +414,77 @@ model TrustHistory {
   @@index([userId])
   @@index([timestamp])
   @@map("trust_histories")
+}
+
+model DailyRiskSnapshot {
+  id                String   @id @default(cuid())
+  companyId         String
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day               DateTime @db.Date
+  riskScore         Float?
+  riskLevel         EventSeverity?
+  trustScore        Float?
+  trustAsOf         DateTime?
+  monitoringStatus  String
+  riskFactors       Json
+  securityEventIds  Json
+  riskAssessmentIds Json
+  incidentIds       Json
+  sourceCounts      Json
+  finalized         Boolean  @default(false)
+  finalizedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([userId, day])
+  @@index([companyId, day])
+  @@index([userId, day])
+  @@map("daily_risk_snapshots")
+}
+
+model SecurityNotification {
+  id          String   @id @default(cuid())
+  companyId   String
+  recipientId String
+  recipient   User     @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  targetUserId String?
+  incidentId  String?
+  dedupeKey   String
+  type        String
+  severity    EventSeverity
+  title       String
+  message     String
+  metadata    Json
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@unique([recipientId, dedupeKey])
+  @@index([companyId, recipientId, createdAt])
+  @@index([recipientId, readAt, createdAt])
+  @@map("security_notifications")
+}
+
+model EndpointEnforcementCommand {
+  id             String        @id @default(cuid())
+  commandId      String        @unique @default(uuid())
+  companyId      String
+  userId         String
+  deviceId       String
+  device         EndpointDevice @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  action         String
+  status         String        @default("PENDING")
+  resultCode     String?
+  reason         String
+  issuedAt       DateTime      @default(now())
+  acknowledgedAt DateTime?
+  createdById    String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([companyId, userId, createdAt])
+  @@index([deviceId, status, createdAt])
+  @@map("endpoint_enforcement_commands")
 }
 
 model Incident {

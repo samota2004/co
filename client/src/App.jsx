@@ -1,10 +1,7 @@
 import { PageErrorBoundary } from "./components/PageErrorBoundary";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {refreshSession} from './services/session.js';
 import {requestApi} from './services/api.js';
-import {ResourcesPage} from './pages/ResourcesPage.jsx';
-import {AccessRequestsPage} from './pages/AccessRequestsPage.jsx';
-import {SecurityProfilePage} from './pages/SecurityProfilePage.jsx';
 
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -19,6 +16,7 @@ import { LoginPage } from "./pages/LoginPage";
 
 import { DashboardPage } from "./pages/DashboardPage";
 import { AdminManagementPage } from "./pages/AdminManagementPage";
+import { AdministratorSecurityCenter } from "./pages/AdministratorSecurityCenter";
 
 import { EmployeeDashboard } from "./pages/EmployeeDashboard";
 import { EmployeeManagementPage } from "./pages/EmployeeManagementPage";
@@ -41,6 +39,7 @@ const EMPLOYEE_ROLES = ["EMPLOYEE", "MANAGER"];
 const isAdminRole = (role) => ADMIN_ROLES.includes(role);
 
 const isEmployeeRole = (role) => EMPLOYEE_ROLES.includes(role);
+const notifySecurity = (title,body) => { if(typeof window!=='undefined'&&'Notification' in window&&Notification.permission==='granted')try{new Notification(title,{body,tag:`cyberorbit-${Date.now()}`});}catch{} };
 
 const getStoredUser = () => {
   if (typeof window === "undefined") {
@@ -84,6 +83,8 @@ const pathToTab = (pathname) => {
   ) {
     return "admin-management";
   }
+
+  if (clean === "admin-security-center") return "admin-security-center";
 
   if (clean === "dashboard") {
     return "dashboard";
@@ -145,8 +146,6 @@ const pathToTab = (pathname) => {
   if (clean === "settings") {
     return "settings";
   }
-  if(['resources','access-requests','security-profile'].includes(clean))return clean;
-
   return "landing";
 };
 
@@ -167,12 +166,11 @@ const tabToPath = (tab) => {
 };
 
 const pageTitles = {
-  resources: "Enterprise Resources",
-  "access-requests": "Access Requests and Reviews",
-  "security-profile": "Employee Security Profile",
   dashboard: "SOC Executive Dashboard",
 
   "admin-management": "Administrator Account Management",
+
+  "admin-security-center": "Administrator Security Center",
 
   "employee-dashboard": "Employee Security & Trust Portal",
 
@@ -245,7 +243,7 @@ export default function App() {
 
     if (
       isEmployeeRole(initialRole) &&
-      (initialPathTab === "dashboard" || initialPathTab === "admin-management")
+      (initialPathTab === "dashboard" || initialPathTab === "admin-management" || initialPathTab === "admin-security-center")
     ) {
       return "employee-dashboard";
     }
@@ -269,11 +267,13 @@ export default function App() {
 
   const [devices, setDevices] = useState([]);
 
-  const [accessRequests, setAccessRequests] = useState([]);
 
   const [recentEvents, setRecentEvents] = useState([]);
 
   const [auditLogs, setAuditLogs] = useState([]);
+  const [securityNotifications, setSecurityNotifications] = useState([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const notificationIds=useRef(new Set());
 
   const [stats, setStats] = useState(null);
 
@@ -326,6 +326,8 @@ export default function App() {
         if (tab === "admin-management" && !isCurrentUserAdmin) {
           targetTab = "employee-dashboard";
         }
+
+        if (tab === "admin-security-center" && !isCurrentUserAdmin) targetTab = "employee-dashboard";
 
         if (tab === "employees" && !isCurrentUserAdmin) {
           targetTab = "employee-dashboard";
@@ -434,6 +436,12 @@ export default function App() {
         return;
       }
 
+      if (pathTab === "admin-security-center" && !isAdminRole(role)) {
+        setActiveTab("employee-dashboard");
+        window.history.replaceState({}, "", "/employee-dashboard");
+        return;
+      }
+
       if (pathTab === "dashboard" && isEmployeeRole(role)) {
         setActiveTab("employee-dashboard");
 
@@ -493,7 +501,6 @@ export default function App() {
     setIncidents([]);
     setResources([]);
     setDevices([]);
-    setAccessRequests([]);
     setRecentEvents([]);
     setAuditLogs([]);
     setStats(null);
@@ -615,7 +622,6 @@ export default function App() {
         incidentsRes,
         resourcesRes,
         devicesRes,
-        requestsRes,
         eventsRes,
         logsRes,
         statsRes,
@@ -624,13 +630,12 @@ export default function App() {
         isCurrentUserAdmin || getUserRole(currentUser)==='MANAGER' ? safeFetchJson("/api/incidents") : Promise.resolve(null),
         safeFetchJson("/api/resources"),
         safeFetchJson("/api/devices"),
-        safeFetchJson("/api/access-requests"),
         safeFetchJson("/api/activity"),
         isCurrentUserAdmin ? safeFetchJson("/api/audit-logs") : Promise.resolve(null),
         safeFetchJson("/api/stats"),
       ]);
 
-      const unavailable = [["Employees",usersRes],["Incidents",incidentsRes],["Resources",resourcesRes],["Devices",devicesRes],["Access requests",requestsRes],["Activity",eventsRes],["Audit logs",logsRes],["Statistics",statsRes]].filter(([,result])=>result && !result.success).map(([name])=>name);
+      const unavailable = [["Employees",usersRes],["Incidents",incidentsRes],["Resources",resourcesRes],["Devices",devicesRes],["Activity",eventsRes],["Audit logs",logsRes],["Statistics",statsRes]].filter(([,result])=>result && !result.success).map(([name])=>name);
       setSyncError(unavailable.length ? `Could not refresh: ${unavailable.join(", ")}. Previously loaded records may be out of date. Use Refresh to retry.` : "");
 
       if (usersRes?.success && usersRes.users) {
@@ -649,9 +654,6 @@ export default function App() {
         setDevices(devicesRes.devices);
       }
 
-      if (requestsRes?.success && requestsRes.requests) {
-        setAccessRequests(requestsRes.requests);
-      }
 
       if (eventsRes?.success && eventsRes.events) {
         setRecentEvents(eventsRes.events);
@@ -674,6 +676,10 @@ export default function App() {
       setLoading(false);
     }
   }, [isAuthenticated, isCurrentUserAdmin, safeFetchJson, userRole]);
+
+  useEffect(()=>{if(!isAuthenticated||!isCurrentUserAdmin)return;let cancelled=false;requestApi('/api/notifications?limit=50').then(result=>{if(!cancelled){notificationIds.current=new Set((result.notifications||[]).map(row=>row.id));setSecurityNotifications(result.notifications||[]);setUnreadNotifications(result.unread||0);}}).catch(()=>{});return()=>{cancelled=true;};},[isAuthenticated,isCurrentUserAdmin,currentUser?.id]);
+  const markNotificationRead=async id=>{try{await requestApi(`/api/notifications/${encodeURIComponent(id)}/read`,{method:'PATCH'});setSecurityNotifications(rows=>rows.map(row=>row.id===id?{...row,readAt:new Date().toISOString()}:row));setUnreadNotifications(value=>Math.max(0,value-1));}catch(error){setLiveToast({type:'danger',title:'Notification update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});}};
+  const markAllNotificationsRead=async()=>{try{await requestApi('/api/notifications/read-all',{method:'POST'});setSecurityNotifications(rows=>rows.map(row=>({...row,readAt:row.readAt||new Date().toISOString()})));setUnreadNotifications(0);}catch(error){setLiveToast({type:'danger',title:'Notification update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});}};
 
   useEffect(() => {
     fetchAllData();
@@ -733,6 +739,11 @@ export default function App() {
             setSseEventCount((prev) => prev + 1);
 
             switch (payload.type) {
+              case "SECURITY_NOTIFICATION": {
+                const notification=payload.data?.notification;
+                if(notification&&notification.recipientId===currentUser?.id){const firstDelivery=!notificationIds.current.has(notification.id);notificationIds.current.add(notification.id);setSecurityNotifications(rows=>[notification,...rows.filter(row=>row.id!==notification.id)].slice(0,50));if(firstDelivery&&!notification.readAt)setUnreadNotifications(value=>value+1);if(firstDelivery){notifySecurity(notification.title,notification.message);setLiveToast({type:notification.severity==='CRITICAL'?'danger':'warning',title:notification.title,message:notification.message,timestamp:new Date().toLocaleTimeString()});}}
+                break;
+              }
               case "CONNECTED":
                 setSseStatus("LIVE");
                 break;
@@ -795,6 +806,7 @@ export default function App() {
                     dec.decision === "RESTRICT" ||
                     dec.requiresMfa)
                 ) {
+                  notifySecurity("CYBERORBIT policy action",`A ${dec.decision} decision requires review.`);
                   setLiveToast({
                     id: `toast-${Date.now()}`,
                     title: `Zero Trust Policy: ${dec.decision}`,
@@ -811,6 +823,7 @@ export default function App() {
                 const cont = payload.data;
 
                 if (cont) {
+                  notifySecurity("CYBERORBIT containment update",`A containment action was reported: ${cont.action}.`);
                   setLiveToast({
                     id: `toast-${Date.now()}`,
                     title: `Containment: ${cont.action}`,
@@ -829,6 +842,7 @@ export default function App() {
                 const inc = payload.data?.incident || payload.data;
 
                 if (inc && inc.id) {
+                  notifySecurity("CYBERORBIT incident created",`A ${inc.severity||'security'} incident requires investigation.`);
                   setIncidents((prev) => {
                     const filtered = prev.filter((x) => x.id !== inc.id);
 
@@ -1018,7 +1032,7 @@ export default function App() {
         eventSource = null;
       }
     };
-  }, [isAuthenticated, isCurrentUserAdmin]);
+  }, [isAuthenticated, isCurrentUserAdmin, currentUser?.id]);
 
   useEffect(() => {
     const pollInterval = sseStatus === "LIVE" ? 45000 : 15000;
@@ -1058,8 +1072,12 @@ export default function App() {
   };
 
   const accountAction=async(userId,action)=>{
+    const verb=action==='freeze'?'freeze':'unfreeze';
+    if(!window.confirm(`Confirm ${verb} for this employee? This revokes active application sessions.`))return;
+    const reason=window.prompt(`Enter the reason for ${verb} (minimum 8 characters):`);
+    if(typeof reason!=='string'||reason.trim().length<8){setLiveToast({type:'warning',title:'Reason required',message:'No account change was made. Enter at least 8 characters.',timestamp:new Date().toLocaleTimeString()});return;}
     try{
-      const result=await requestApi('/api/users/'+userId+'/'+action,{method:'POST',body:{reason:'SOC account review'}});
+      const result=await requestApi('/api/users/'+userId+'/'+action,{method:'POST',body:{reason:reason.trim()}});
       setLiveToast({type:'warning',title:'Account updated',message:result.message,timestamp:new Date().toLocaleTimeString()});
       await fetchAllData();
     }catch(error){setLiveToast({type:'danger',title:'Account update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});}
@@ -1230,6 +1248,11 @@ export default function App() {
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
           onToggleMobileNav={() => setMobileNavOpen((previous) => !previous)}
+          notifications={securityNotifications}
+          unreadNotifications={unreadNotifications}
+          onReadNotification={markNotificationRead}
+          onReadAllNotifications={markAllNotificationsRead}
+          onNotificationSelect={notification=>{if(notification.incidentId){setFocusedIncidentId(notification.incidentId);handleNavigate('incidents');}}}
         />
 
         {liveToast && (
@@ -1330,8 +1353,7 @@ export default function App() {
               <DashboardPage
                 onSelectUser={(userId) => {
                   setCurrentUserId(userId);
-
-                  handleNavigate("employee-dashboard");
+                  handleNavigate("admin-security-center");
                 }}
                 onSelectIncident={(id) => { setFocusedIncidentId(typeof id === "object" ? id?.id || id?.incidentId : id || null); handleNavigate("incidents"); }}
                 onNavigateToSimulator={() => handleNavigate("simulator")}
@@ -1351,6 +1373,10 @@ export default function App() {
               />
             )}
 
+            {activeTab === "admin-security-center" && isCurrentUserAdmin && currentUserId && (
+              <AdministratorSecurityCenter administratorId={currentUserId} onBack={() => handleNavigate("dashboard")} />
+            )}
+
             {activeTab === "employee-dashboard" &&
               (isCurrentUserAdmin || isCurrentUserEmployee) && (
                 <EmployeeDashboard
@@ -1360,7 +1386,6 @@ export default function App() {
                   devices={devices}
                   isAdminView={isCurrentUserAdmin}
                   selectedEmployeeId={currentUserId}
-                  onOpenAccessRequestModal={() => handleNavigate("access-requests")}
                 />
               )}
 
@@ -1444,12 +1469,8 @@ export default function App() {
             )}
 
             {activeTab === "policies" && (
-              isCurrentUserAdmin ? <PoliciesPage onRefreshData={fetchAllData} /> : <ResourcesPage resources={resources} currentUser={currentUser} onRefreshData={fetchAllData}/>
+              isCurrentUserAdmin ? <PoliciesPage onRefreshData={fetchAllData} /> : null
             )}
-
-            {activeTab==='resources'&&<ResourcesPage resources={resources} currentUser={currentUser} onRefreshData={fetchAllData}/>}
-            {activeTab==='access-requests'&&<AccessRequestsPage requests={accessRequests} currentUser={currentUser} resources={resources} onRefreshData={fetchAllData}/>}
-            {activeTab==='security-profile'&&<SecurityProfilePage currentUser={currentUser} users={users} selectedEmployeeId={currentUserId}/>}
 
             {activeTab === "ml-analytics" && isCurrentUserAdmin && (
               <MlAnalyticsPage />

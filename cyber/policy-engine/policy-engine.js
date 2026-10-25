@@ -37,7 +37,9 @@ class PolicyEngine {
     }
     const evaluation = riskEngine.evaluateRisk(user, event, device, resource, mlResult);
     const eventSummary = event.eventType ? `${event.eventType} ${resource ? `on ${resource.name}` : ""}` : "Security Context Check";
-    trustEngine.updateTrustScore(user, evaluation, eventSummary);
+    // This legacy in-memory path has no validated benign-day recovery proof.
+    // A zero-risk evaluation must therefore leave trust unchanged.
+    trustEngine.updateTrustScore(user, evaluation, eventSummary, false);
     let decision = evaluation.recommendedAction;
     let allowed = false;
     let requiresMfa = false;

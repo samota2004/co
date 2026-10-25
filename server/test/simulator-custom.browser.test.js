@@ -37,14 +37,16 @@ test('custom simulator form submits to the validated synthetic assessment route'
   await waitUntil(b,"document.querySelector('[aria-label=\"Scenario employee\"]')?.options.length>1 && document.querySelector('form button')?.disabled===true",'simulator loaded with employee options');
   await b.evaluate(`(()=>{const e=document.querySelector('[aria-label="Scenario employee"]');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(e,${JSON.stringify(f.employee.id)});e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   await waitUntil(b,"!document.querySelector('form button').disabled",'employee selected');
-  await b.evaluate("Array.from(document.querySelectorAll('form button')).find(button=>button.textContent.includes('Assess synthetic event')).click()");
+  await b.evaluate("Array.from(document.querySelectorAll('form button')).find(button=>button.textContent.includes('Evaluate synthetic context')).click()");
   await waitUntil(b,"document.querySelector('[role=\"status\"]')?.textContent.includes('Risk ')",'custom assessment result rendered');
   assert.ok(requests.some(request=>request.path==='/api/simulation/custom'&&request.method==='POST'));
   assert.ok(responses.some(response=>response.path==='/api/simulation/custom'&&response.status===200));
   assert.ok(!requests.some(request=>request.path==='/api/telemetry/ingest'),'custom simulation must not call generic model telemetry');
-  const stored=(await f.prisma.activityEvent.findMany({where:{userId:f.employee.id,type:'FILE_DOWNLOAD'},orderBy:{timestamp:'desc'},take:5})).find(event=>event.metadata?.source==='synthetic-custom-scenario');
-  assert.ok(stored,'custom form assessment was persisted through the simulation flow');
-  assert.equal(stored.metadata.synthetic,true);assert.equal(stored.metadata.simulation,true);
+  assert.match(await b.evaluate("document.querySelector('[role=status]')?.textContent||''"),/READ-ONLY RESULT/);
+  assert.equal(await f.prisma.activityEvent.count({where:{userId:f.employee.id}}),0,'simulated results do not create employee activity records');
+  const stored=await f.prisma.auditLog.findFirst({where:{userId:f.admin.id,action:'SIMULATION_RUN'}});
+  assert.ok(stored,'simulation run is retained in the administrator audit history');
+  assert.equal(stored.metadata.synthetic,true);assert.equal(stored.metadata.simulationOnly,true);
  }finally{
   if(b)await b.close();if(sse){for(const client of sse.clients)client.end();clearInterval(sse.heartbeatInterval);}
   if(server)await new Promise(resolve=>server.close(resolve));await f.close();

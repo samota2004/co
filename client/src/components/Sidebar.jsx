@@ -97,11 +97,6 @@ export const Sidebar = ({
   // ======================================================
 
   const navSections = [
-    {title:'Access and security',items:[
-      {id:'security-profile',label:'Security Profile',icon:UserCheck},
-      {id:'resources',label:'Protected Resources',icon:Shield},
-      {id:'access-requests',label:'Access Requests',icon:Shield}
-    ]},
     {
       title: "Dashboard",
       items: [
@@ -211,7 +206,7 @@ export const Sidebar = ({
         },
       ],
     },
-  ].sort((a,b)=>(a.title === "Dashboard" ? -1 : b.title === "Dashboard" ? 1 : 0)).map(section=>({...section,items:section.items.filter(item=>isCurrentUserAdmin||['employee-dashboard','security-profile','resources','access-requests','settings'].includes(item.id))})).filter(section=>section.items.length);
+  ].sort((a,b)=>(a.title === "Dashboard" ? -1 : b.title === "Dashboard" ? 1 : 0)).map(section=>({...section,items:section.items.filter(item=>isCurrentUserAdmin||['employee-dashboard','settings'].includes(item.id))})).filter(section=>section.items.length);
 
   // ======================================================
   // SIDEBAR UI

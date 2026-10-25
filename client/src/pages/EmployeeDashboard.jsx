@@ -1,18 +1,15 @@
-import React,{useEffect,useState} from "react";
+import React,{useEffect,useMemo,useState} from "react";
 import {requestApi} from "../services/api.js";
 import {
   Shield,
   ShieldCheck,
-  Laptop,
   CheckCircle2,
   Lock,
   Activity,
   TrendingUp,
-  FileText,
   Clock,
   Wifi,
   Monitor,
-  Smartphone,
   AlertCircle,
 } from "lucide-react";
 import {
@@ -70,7 +67,7 @@ export const EmployeeDashboard = ({ currentUser, users = [], isAdminView = false
       <header className="rounded-2xl border border-[#67E8F9]/40 bg-[#050A10] p-6">
         <p className="text-xs uppercase tracking-[0.2em] text-[#D4AF37]">EMPLOYEE MONITORING</p>
         <h1 className="mt-2 text-3xl font-light">Select an employee</h1>
-        <p className="mt-2 text-sm text-[#A7B0BA]">Choose an authorized employee to view their security posture, login sessions, activity, and endpoint agent.</p>
+        <p className="mt-2 text-sm text-[#A7B0BA]">Choose an authorized employee to view their recorded risk and trust history, activity, incidents, and assigned endpoint agent.</p>
       </header>
       <section className="overflow-x-auto rounded-2xl border border-white/10 bg-[#050A10] p-5" aria-label="Employee list">
         <h2 className="mb-4 text-xl">Employee List</h2>
@@ -96,7 +93,6 @@ const EmployeeDashboardDetails = ({
   currentUser,
   events = [],
   devices = [],
-  onOpenAccessRequestModal,
   monitoringData = null,
 }) => {
   const { isDark } = useTheme();
@@ -110,9 +106,6 @@ const EmployeeDashboardDetails = ({
   const userDevices = devices.filter((d) => d.userId === currentUser?.id);
   const displayEvents = userEvents;
   const displayDevices = userDevices;
-  const [activeSessions, setActiveSessions] = useState([]);
-const [sessionsLoading, setSessionsLoading] = useState(true);
-const [sessionsError, setSessionsError] = useState(false);
 const [liveRiskState, setLiveRiskState] = useState({ analysis: null, loading: false, error: '' });
 
 useEffect(() => {
@@ -155,43 +148,17 @@ useEffect(() => {
   };
 }, [currentUser?.id, Boolean(monitoringData)]);
 
-useEffect(() => {
-  let cancelled = false;
-
-  const loadSessions = async () => {
-    try {
-      const result = monitoringData
-        ? { sessions: (monitoringData.sessions || []).filter(session => session.status === 'ACTIVE') }
-        : await requestApi("/api/auth/sessions");
-
-      if (!cancelled) {
-        setActiveSessions(result.sessions ?? []);
-        setSessionsError(false);
-      }
-    } catch (error) {
-      if (!cancelled) {
-        setSessionsError(true);
-      }
-    } finally {
-      if (!cancelled) {
-        setSessionsLoading(false);
-      }
-    }
-  };
-
-  loadSessions();
-
-  return () => {
-    cancelled = true;
-  };
-}, [currentUser?.id, monitoringData]);
-
   // ======================================================
   // SECURITY STATUS
   // ======================================================
   const riskScore = currentUser?.assessmentStatus === 'NOT_ASSESSED' ? null : currentUser?.currentRiskScore ?? currentUser?.riskScore ?? null;
-  const observedRiskScore = liveRiskState.analysis?.riskScore ?? null;
+  const observedRiskState = liveRiskState.analysis?.activityDetected
+    ? liveRiskState.analysis.observedRiskScore === null
+      ? 'Activity detected; no qualifying risk evidence in the available signals.'
+      : 'Activity detected; qualifying evidence is reflected in the current policy score.'
+    : 'No employee-attributed activity in the last 24 hours.';
   const trustScore = currentUser?.assessmentStatus === 'NOT_ASSESSED' ? null : currentUser?.currentTrustScore ?? currentUser?.trustScore ?? null;
+  const currentRiskFactors = (monitoringData?.riskHistory || []).slice().reverse().find(item => item.score === riskScore)?.factors;
 
   const getSecurityStatus = (score) => {
     if (score === null || !Number.isFinite(score))
@@ -226,9 +193,10 @@ useEffect(() => {
   // ======================================================
   // CHART DATA
   // ======================================================
-  const[history,setHistory]=useState([]),[historyError,setHistoryError]=useState('');
-  useEffect(()=>{if(!currentUser?.id)return;if(monitoringData){setHistory(monitoringData.trustHistory||[]);setHistoryError('');return;}const refresh=()=>requestApi('/api/users/'+currentUser.id).then(d=>{setHistory(d.trustHistory||[]);setHistoryError('');}).catch(e=>setHistoryError(e.message));refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer);},[currentUser?.id,monitoringData]);
-  const trendData=history.map(h=>({time:new Date(h.timestamp).toLocaleTimeString(),trust:h.trustScore,risk:h.riskScore,logins:userEvents.filter(e=>['LOGIN','LOGIN_SUCCESS'].includes(e.eventType)&&Math.floor(new Date(e.timestamp).getTime()/60000)===Math.floor(new Date(h.timestamp).getTime()/60000)).length}));
+  const[history,setHistory]=useState({trustHistory:[],riskHistory:[],dailyRiskHistory:[]}),[historyError,setHistoryError]=useState(''),[historyRange,setHistoryRange]=useState('90d');
+  useEffect(()=>{if(!currentUser?.id)return;if(monitoringData){setHistory({trustHistory:monitoringData.trustHistory||[],riskHistory:monitoringData.riskHistory||[],dailyRiskHistory:monitoringData.dailyRiskHistory||[]});setHistoryError('');return;}const refresh=()=>requestApi('/api/users/'+currentUser.id).then(d=>{setHistory({trustHistory:d.trustHistory||[],riskHistory:d.riskHistory||[],dailyRiskHistory:d.dailyRiskHistory||[]});setHistoryError('');}).catch(e=>setHistoryError(e.message));refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer);},[currentUser?.id,monitoringData]);
+  const trendData=useMemo(()=>{const now=Date.now(),step=historyRange==='24h'?3600000:86400000,count=({'24h':24,'7d':7,'30d':30,'90d':90})[historyRange],end=Math.floor(now/step)*step,start=end-(count-1)*step,buckets=new Map();for(let i=start;i<=end;i+=step)buckets.set(i,{time:new Date(i).toLocaleDateString([],historyRange==='24h'?{hour:'2-digit',minute:'2-digit'}:{month:'short',day:'numeric'}),risk:null,trust:null,logins:0});if(historyRange==='24h'){for(const row of history.riskHistory||[]){const time=+new Date(row.timestamp);if(!Number.isFinite(time)||time<start||time>=end+step)continue;const key=Math.floor(time/step)*step,b=buckets.get(key);if(b)b.risk=row.score;}for(const row of history.trustHistory||[]){const time=+new Date(row.timestamp);if(!Number.isFinite(time)||time<start||time>=end+step)continue;const key=Math.floor(time/step)*step,b=buckets.get(key);if(b){b.trust=row.trustScore;b.risk=row.riskScore??b.risk;}}}else for(const row of history.dailyRiskHistory||[]){const time=Date.parse(row.day);if(!Number.isFinite(time)||time<start||time>=end+step)continue;const key=Math.floor(time/step)*step,b=buckets.get(key);if(b){b.risk=typeof row.riskScore==='number'?row.riskScore:null;b.trust=typeof row.trustScore==='number'?row.trustScore:null;b.monitoringStatus=row.monitoringStatus;b.riskLevel=row.riskLevel;}}return[...buckets.values()];},[history,historyRange]);
+  const visibleSnapshots=(history.dailyRiskHistory||[]).filter(row=>{const day=Date.parse(row.day);return Number.isFinite(day)&&Date.now()-day<({'7d':7,'30d':30,'90d':90,'24h':1}[historyRange])*86400000;}).slice().reverse();
   const loginTrendData=monitoringData?.loginHistory?.some(row=>['AUTH_LOGIN','AUTH_FAILED'].includes(row.action))?monitoringData.loginHistory.filter(row=>['AUTH_LOGIN','AUTH_FAILED'].includes(row.action)).slice().reverse().map(row=>({time:new Date(row.timestamp).toLocaleTimeString(),logins:1})):trendData;
   const groups=new Map();for(const e of userEvents){const name=e.eventType||e.type||'Unknown';groups.set(name,(groups.get(name)||0)+1);}
   const totalActivity=[...groups.values()].reduce((total,value)=>total+value,0);
@@ -312,20 +280,11 @@ useEffect(() => {
           <div className="absolute left-0 top-0 h-10 w-1 rounded-br-full bg-[#D4AF37]" />
           <div className="absolute bottom-0 right-0 h-10 w-1 rounded-tl-full bg-[#67E8F9]" />
 
-          <div className="absolute bottom-9 right-9 z-20 flex items-center gap-3">
-            <button
-              onClick={onOpenAccessRequestModal}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#67E8F9] bg-[#67E8F9] px-5 py-3 text-[12px] font-semibold tracking-[0.14em] text-[#03070C] transition-all duration-200 hover:bg-transparent hover:text-[#67E8F9] cursor-pointer"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>REQUEST ACCESS</span>
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Top 4 Metric Overview: Trust Score, Risk Score, Status, Active Sessions */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Current measured trust, risk and policy posture. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Trust Score */}
         <div
           className={`group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:border-[#67E8F9]/30 hover:bg-[#070C12] sm:p-6 lg:p-7`}
@@ -343,6 +302,7 @@ useEffect(() => {
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             Recorded trust standing from contextual policy assessments
           </p>
+          {monitoringData && riskScore !== null && <details className="mt-3 text-xs text-[#A7B0BA]"><summary className="cursor-pointer text-[#67E8F9]">Why this score?</summary>{Array.isArray(currentRiskFactors) && currentRiskFactors.length ? <ul className="mt-2 space-y-1">{currentRiskFactors.map((factor,index)=><li key={`${factor.factor || 'factor'}-${index}`}>{factor.factor || 'Recorded factor'}{typeof factor.scoreImpact === 'number' ? ` · ${factor.scoreImpact} points` : ''}{factor.description ? ` — ${factor.description}` : ''}</li>)}</ul> : <p className="mt-2">No contributing-factor breakdown is stored with this assessment.</p>}</details>}
         </div>
 
         {/* Current Risk Score */}
@@ -361,7 +321,7 @@ useEffect(() => {
           </div>
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             {monitoringData
-              ? `${riskScore === null ? 'No recorded account risk assessment yet.' : 'Saved account risk used by policy.'} Recent observed activity: ${liveRiskState.loading && !liveRiskState.analysis ? 'Loading…' : observedRiskScore === null ? 'Not assessed' : `${observedRiskScore}/100`} (last 24 hours, read-only).${liveRiskState.error ? ` Analysis refresh failed: ${liveRiskState.error}` : ''}`
+              ? `${riskScore === null ? 'No recorded account risk assessment yet.' : 'Latest persisted policy assessment; this is the current score used by policy.'} Recent endpoint activity: ${liveRiskState.loading && !liveRiskState.analysis ? 'Loading…' : observedRiskState}${liveRiskState.error ? ` Analysis refresh failed: ${liveRiskState.error}` : ''}`
               : 'Latest persisted contextual policy assessment. Endpoint observations are reviewed separately in Risk Analysis.'}
           </p>
         </div>
@@ -382,29 +342,9 @@ useEffect(() => {
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             Account state: {currentUser?.status || "ACTIVE"}
           </p>
-          {monitoringData && <p className="mt-1 text-xs leading-5 text-[#7F8A96]">{riskScore === null ? 'No recorded policy assessment. Endpoint observations alone do not establish account risk or trust.' : `Posture follows the saved account risk (${riskScore}/100). Recent endpoint observations are reviewed separately and do not reset this score after 24 hours.`}</p>}
+          {monitoringData && <p className="mt-1 text-xs leading-5 text-[#7F8A96]">{riskScore === null ? 'No recorded policy assessment. Endpoint observations alone do not establish account risk or trust.' : `Posture follows the latest saved account risk assessment (${riskScore}/100).`}</p>}
         </div>
 
-        {/* Active Sessions */}
-        <div
-          className={`group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:border-[#67E8F9]/30 hover:bg-[#070C12] sm:p-6 lg:p-7`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">
-              ACTIVE LOGIN SESSIONS
-            </span>
-            <Laptop className="w-4 h-4 text-[#D4AF37]" />
-          </div>
-          <div className="text-3xl font-light tracking-tight sm:text-4xl text-current">
-            {sessionsLoading || sessionsError ? "—" : activeSessions.length}{" "}
-<span className="text-sm font-mono text-[#A7B0BA]">
-  Active Sessions
-</span>
-          </div>
-          <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
-            Valid, non-expired login sessions. Registered devices are listed separately.
-          </p>
-        </div>
       </div>
 
       {/* 4 Required Charts: Risk Trend, Trust Trend, Login Activity, Activity Distribution */}
@@ -423,6 +363,7 @@ useEffect(() => {
               </h3>
             </div>
             <div className="flex items-center gap-4 text-xs font-mono">
+              <label className="text-[#A7B0BA]">History <select aria-label="Risk and trust history range" value={historyRange} onChange={event=>setHistoryRange(event.target.value)} className="ml-2 rounded border border-white/15 bg-slate-900 px-2 py-1 text-white"><option value="24h">24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option><option value="90d">90 days</option></select></label>
               <span className="flex items-center gap-1.5 text-[#67E8F9]">
                 <span className="w-2.5 h-0.5 bg-[#67E8F9]" />
                 Risk
@@ -497,6 +438,7 @@ useEffect(() => {
             </ResponsiveContainer>
             }
           </div>
+          {historyRange!=='24h'&&<div className="mt-5 overflow-x-auto border-t border-white/10 pt-4"><h4 className="mb-3 text-sm font-semibold text-slate-200">Recorded daily assessments</h4>{visibleSnapshots.length?<table className="w-full min-w-[620px] text-left text-xs"><thead><tr className="text-slate-400"><th className="p-2">UTC day</th><th className="p-2">Risk</th><th className="p-2">Severity</th><th className="p-2">Trust</th><th className="p-2">Monitoring</th><th className="p-2">Evidence</th></tr></thead><tbody>{visibleSnapshots.map(row=><tr key={row.id} className="border-t border-white/10 align-top"><td className="p-2">{new Date(row.day).toISOString().slice(0,10)}</td><td className="p-2">{row.riskScore??'Not assessed'}</td><td className="p-2">{row.riskLevel||'—'}</td><td className="p-2">{row.trustScore??'Not assessed'}{row.trustAsOf&&<span className="block text-slate-500">as of {new Date(row.trustAsOf).toLocaleString()}</span>}</td><td className="p-2">{row.monitoringStatus}</td><td className="max-w-sm p-2">{(row.riskFactors||[]).map(f=>f.factor||f.description).filter(Boolean).join('; ')||'No qualifying risk factors recorded'}</td></tr>)}</tbody></table>:<p className="text-sm text-slate-400">No daily observation snapshots in this period. No score is inferred for missing days.</p>}</div>}
         </div>
 
         {/* Activity Distribution (4 cols) */}
@@ -635,99 +577,6 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Device Information & Active Sessions */}
-      {/* Valid Login Sessions */}
-<div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 sm:p-6 lg:p-7">
-  <div className="flex items-center justify-between mb-6 pb-3 border-b border-white/10">
-    <div>
-      <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37] block">
-        ACCOUNT SECURITY
-      </span>
-      <h3 className="text-2xl font-light tracking-tight mt-1">
-        Valid Login Sessions
-      </h3>
-    </div>
-    <span className="text-[12px] font-mono text-[#D4AF37] border border-cyan-300/25 px-2.5 py-0.5">
-      {sessionsLoading || sessionsError ? "—" : activeSessions.length} SESSIONS
-    </span>
-  </div>
-
-  {sessionsLoading ? (
-    <p className="text-[#A7B0BA]">Loading sessions...</p>
-  ) : sessionsError ? (
-    <p role="alert" className="text-red-400">
-      Unable to load login sessions.
-    </p>
-  ) : activeSessions.length === 0 ? (
-    <p className="text-[#A7B0BA]">No valid login sessions found.</p>
-  ) : (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {activeSessions.map((session) => {
-        const isMobile = /Android|iPhone|Mobile/i.test(
-          session.userAgent || ""
-        );
-
-        const browser = /Edg\//.test(session.userAgent || "")
-          ? "Microsoft Edge"
-          : /Chrome\//.test(session.userAgent || "")
-            ? "Google Chrome"
-            : /Firefox\//.test(session.userAgent || "")
-              ? "Firefox"
-              : "Unknown Browser";
-
-        const os = /Android/i.test(session.userAgent || "")
-          ? "Android"
-          : /Windows/i.test(session.userAgent || "")
-            ? "Windows"
-            : /iPhone|iPad/i.test(session.userAgent || "")
-              ? "iOS"
-              : /Macintosh/i.test(session.userAgent || "")
-                ? "macOS"
-                : "Unknown OS";
-
-        return (
-          <div
-            key={session.id}
-            className="rounded-xl border border-white/10 bg-[#070C12] p-5"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 border border-cyan-300/25 flex items-center justify-center">
-                {isMobile ? (
-                  <Smartphone className="w-5 h-5 text-[#D4AF37]" />
-                ) : (
-                  <Laptop className="w-5 h-5 text-[#D4AF37]" />
-                )}
-              </div>
-
-              <div>
-                <div className="text-base font-medium">
-                  {isMobile ? "Mobile Browser" : "Desktop Browser"}
-                </div>
-                <div className="text-xs text-[#A7B0BA]">
-                  {os} • {browser}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-white/10 text-xs font-mono text-[#A7B0BA] space-y-2">
-              <p>IP: {session.ip || "Unknown"}</p>
-              <p>
-                Login: {new Date(session.createdAt).toLocaleString()}
-              </p>
-              <p>
-                Expires: {new Date(session.expiresAt).toLocaleString()}
-              </p>
-              <p className="text-[#D4AF37]">
-                VALID LOGIN SESSION
-              </p>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  )}
-</div>
-
       {/* Recent Activities & Security Events */}
       <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:border-[#67E8F9]/30 hover:bg-[#070C12] sm:p-6 lg:p-7">
         <div className="flex items-center justify-between mb-6 pb-3 border-b border-white/10">
@@ -769,16 +618,15 @@ useEffect(() => {
                   Location / Device: {evt.ipAddress || "Corporate Intranet"}
                 </span>
                 <span className="text-[#D4AF37]">
-                  Risk: {evt.riskContribution || 15}/100
+                  Risk contribution: {typeof evt.riskContribution === 'number' && Number.isFinite(evt.riskContribution) ? `${evt.riskContribution}/100` : 'Not assessed'}
                 </span>
               </div>
             </div>
           ))}
         </div>
       </div>
-      {monitoringData && <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      {monitoringData && <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Incidents</h2>{monitoringData.incidents?.length ? monitoringData.incidents.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.title} · {item.severity} · {item.status}</p>) : <p className="text-[#A7B0BA]">No incidents recorded for this employee.</p>}</section>
-        <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Access requests</h2>{monitoringData.accessRequests?.length ? monitoringData.accessRequests.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.resource?.name || 'Resource'} · {item.status} · {new Date(item.createdAt).toLocaleString()}</p>) : <p className="text-[#A7B0BA]">No access requests recorded for this employee.</p>}</section>
         <section className="rounded-2xl border border-white/10 bg-[#050A10] p-5"><h2 className="mb-3 text-xl">Audit history</h2>{monitoringData.auditEvents?.length ? monitoringData.auditEvents.map(item=><p key={item.id} className="border-t border-white/10 py-2">{item.action} · {item.severity} · {new Date(item.timestamp).toLocaleString()}</p>) : <p className="text-[#A7B0BA]">No audit activity available for this employee.</p>}</section>
       </div>}
       {currentUser?.id && <EndpointMonitor employeeId={currentUser.id} />}

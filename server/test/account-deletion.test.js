@@ -23,7 +23,7 @@ test('deleted staff and administrators stay removed after fresh list requests', 
     assert.ok((await f.prisma.user.findUnique({where:{id:f.employee.id}})).deletedAt);
     assert.ok(await f.prisma.activityEvent.findUnique({where:{id:history.id}}));
     assert.equal((await call('/users/'+f.employee.id)).status,404);
-    assert.equal((await call('/users/'+f.employee.id+'/unfreeze','POST')).status,404);
+    assert.equal((await call('/users/'+f.employee.id+'/unfreeze','POST',f.admin,{reason:'Verify deleted account remains unavailable'})).status,404);
     assert.ok((await call('/users')).data.users.some(u=>u.id===f.disabled.id),'An ordinary disabled account is not treated as deleted');
 
     await f.prisma.role.create({data:{code:'MANAGER',name:'Manager'}});

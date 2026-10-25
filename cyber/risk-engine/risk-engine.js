@@ -11,7 +11,8 @@ export class RiskEngine {
     const baseline=user.baseline?.statistics?user.baseline:null;
     const start=baseline?.normalStartHour??9,end=baseline?.normalEndHour??18;
     const isOffHours=event.isOffHours??event.metadata?.isOffHours??(!event.aggregateOnly&&(hour<start||hour>=end));
-    if(isOffHours)add('Outside normal access hours',c.offHoursPenalty,'Observed access outside '+start+':00–'+end+':00 ('+(baseline?'learned baseline':'configured cold-start hours')+').','TIME');
+    // Timing is context, not proof of malicious intent. Add it only when this
+    // same assessment already contains an independent security-relevant signal.
     const userDepartment=user.departmentCode||user.department,resourceDepartment=resource?.departmentCode||resource?.department||event.resourceDepartment;
     const isCrossDepartment=Boolean(resourceDepartment&&resourceDepartment!=='ALL'&&resourceDepartment!==userDepartment);
     if(isCrossDepartment&&!event.approvalExists)add('Cross-department resource access',c.crossDeptRiskPenalty,'Requested '+(resource?.name||'resource')+' belongs to '+resourceDepartment+'; employee department is '+userDepartment+'.','RESOURCE');
@@ -28,6 +29,7 @@ export class RiskEngine {
     if(event.isUsbTransfer||event.metadata?.usbTransfer)add('Data transfer over removable media',12,'An explicit transfer event was observed; USB connection alone is not a transfer.','TRANSFER');
     const location=event.location;
     if(baseline&&location&&baseline.typicalLocations.length&&!baseline.typicalLocations.includes(location))add('Location outside learned baseline',10,'Observed location is absent from historical activity.','LOCATION');
+    if(isOffHours&&factors.length)add('Outside normal access hours',c.offHoursPenalty,'Observed access outside '+start+':00–'+end+':00 ('+(baseline?'learned baseline':'configured cold-start hours')+'); timing is corroborating context, not a standalone threat signal.','TIME');
     if(user.previousIncidents>0&&factors.length)add('Prior unresolved security incidents',Math.min(10,2*user.previousIncidents),user.previousIncidents+' unresolved incidents require additional review.','HISTORY');
     // The deployed RF output has no independently verified probability calibration.
     // Map its recorded operating threshold to the first alert band. This is a
