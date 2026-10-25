@@ -113,6 +113,47 @@ const EmployeeDashboardDetails = ({
   const [activeSessions, setActiveSessions] = useState([]);
 const [sessionsLoading, setSessionsLoading] = useState(true);
 const [sessionsError, setSessionsError] = useState(false);
+const [liveRiskState, setLiveRiskState] = useState({ analysis: null, loading: false, error: '' });
+
+useEffect(() => {
+  if (!monitoringData || !currentUser?.id) {
+    setLiveRiskState({ analysis: null, loading: false, error: '' });
+    return undefined;
+  }
+  let cancelled = false;
+  let inFlight = false;
+  let queued = false;
+  let debounce;
+  const refresh = async () => {
+    if (cancelled) return;
+    if (inFlight) { queued = true; return; }
+    inFlight = true;
+    setLiveRiskState(state => ({ ...state, loading: true }));
+    try {
+      const response = await requestApi(`/api/risk/analysis/${encodeURIComponent(currentUser.id)}`);
+      if (response.analysis?.userId !== currentUser.id) throw new Error('Risk analysis returned a different employee.');
+      if (!cancelled) setLiveRiskState({ analysis: response.analysis, loading: false, error: '' });
+    } catch (error) {
+      if (!cancelled) setLiveRiskState(state => ({ ...state, loading: false, error: error.message || 'Live risk analysis is unavailable.' }));
+    } finally {
+      inFlight = false;
+      if (!cancelled && queued) { queued = false; refresh(); }
+    }
+  };
+  const onEndpointUpdate = () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(refresh, 300);
+  };
+  refresh();
+  const timer = setInterval(refresh, 30000);
+  window.addEventListener('cyberorbit-endpoint-updated', onEndpointUpdate);
+  return () => {
+    cancelled = true;
+    clearTimeout(debounce);
+    clearInterval(timer);
+    window.removeEventListener('cyberorbit-endpoint-updated', onEndpointUpdate);
+  };
+}, [currentUser?.id, Boolean(monitoringData)]);
 
 useEffect(() => {
   let cancelled = false;
@@ -149,6 +190,7 @@ useEffect(() => {
   // SECURITY STATUS
   // ======================================================
   const riskScore = currentUser?.currentRiskScore ?? currentUser?.riskScore ?? 0;
+  const observedRiskScore = liveRiskState.analysis?.riskScore ?? null;
   const trustScore = currentUser?.currentTrustScore ?? currentUser?.trustScore ?? 0;
 
   const getSecurityStatus = (score) => {
@@ -307,16 +349,20 @@ useEffect(() => {
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">
-              CURRENT RISK
+              {monitoringData ? 'OBSERVED RISK · LAST 24H' : 'STORED POLICY RISK'}
             </span>
             <Activity className="w-4 h-4 text-[#D4AF37]" />
           </div>
           <div className="text-3xl font-light tracking-tight sm:text-4xl text-[#D4AF37]">
-            {riskScore}{" "}
-            <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>
+            {monitoringData
+              ? liveRiskState.loading && !liveRiskState.analysis ? 'Loading…' : observedRiskScore === null ? 'Not assessed' : observedRiskScore
+              : riskScore}{" "}
+            {(monitoringData ? observedRiskScore !== null : true) && <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>}
           </div>
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
-            Contextual risk; model evidence only when complete features are available
+            {monitoringData
+              ? `Read-only backend analysis of recent endpoint and security observations. Stored account policy risk: ${riskScore}/100${liveRiskState.error ? ` · Live refresh failed: ${liveRiskState.error}` : ''}`
+              : 'Latest persisted contextual policy assessment. Endpoint observations are reviewed separately in Risk Analysis.'}
           </p>
         </div>
 
@@ -336,6 +382,7 @@ useEffect(() => {
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             Account state: {currentUser?.status || "ACTIVE"}
           </p>
+          {monitoringData && <p className="mt-1 text-xs leading-5 text-[#7F8A96]">Posture follows stored account policy risk ({riskScore}/100); the observed 24-hour score is read-only.</p>}
         </div>
 
         {/* Active Sessions */}

@@ -20,6 +20,16 @@ test('absence of evidence and stored trust stays unavailable instead of becoming
   assert.ok(result.history.every(point => point.score === null));
 });
 
+test('live observed risk and stored account policy risk remain separate and explicit', () => {
+  const result = analyse({
+    user: { ...user, riskScore: 51, riskLevel: 'MEDIUM' },
+    activeEvents: [{ type: 'APPLICATION_USAGE', userId: user.id, occurredAt: new Date('2026-10-12T23:00:00Z') }],
+    counts: [group('APPLICATION_USAGE', 1, user.id)],
+  });
+  assert.equal(result.riskScore, 20, '24-hour observed score follows the configured off-hours evidence');
+  assert.deepEqual(result.accountRisk, { score: 51, level: 'MEDIUM' }, 'persisted account score remains available for policy context');
+});
+
 test('background processes, attached USB, file changes and connections do not become fabricated threats', () => {
   const result = analyse({ counts: [group('PROCESS_RUNNING', 16000), group('USB_CONNECTED', 1), group('FILE_CHANGE', 20), group('NETWORK_CONNECTION', 3)] });
   assert.equal(result.riskScore, 0);

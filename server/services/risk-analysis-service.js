@@ -81,6 +81,9 @@ export function analyzeRiskWindow({ user, activeEvents, counts, securityEvents, 
   ];
   return {
     userId: user.id, hasTelemetry,
+    // Keep the read-only 24-hour observation score distinct from the latest
+    // persisted account score used by authorization and policy enforcement.
+    accountRisk: { score: finiteScore(user.riskScore), level: user.riskLevel ?? null },
     window: { from: start.toISOString(), to: at.toISOString(), hours: 24, timezone: securityTimezone(), normalStartHour: startHour, normalEndHour: endHour },
     riskScore: hasTelemetry ? strongest.riskScore : null,
     riskLevel: hasTelemetry ? riskLevel(strongest.riskScore, policy) : null,

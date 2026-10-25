@@ -306,8 +306,9 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              Highest observed risk in the last 24 hours · {analysis?.riskLevel}
+              Highest read-only risk from the last 24 hours · {analysis?.riskLevel}
             </span>
+            <span className="mt-2 block text-[12px] text-[#A7B0BA]">Stored account policy risk: {analysis?.accountRisk?.score ?? "Unavailable"}/100{analysis?.accountRisk?.level ? ` · ${analysis.accountRisk.level}` : ''}. This persisted score is used for account policy posture; it is separate from the live observation score.</span>
           </div>
 
           {/* 2. Trust Score */}

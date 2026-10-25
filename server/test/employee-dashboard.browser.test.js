@@ -12,7 +12,7 @@ import {DEFAULT_CONFIG} from '../../agent/shared/contract.js';
 test('existing Employee Monitoring dashboard lists employees before rendering scoped detail', {skip:!process.env.DATABASE_URL,timeout:180000}, async()=>{
  const f=await deviceFixture();let server,b,sse,profile;
  try{
-  const nine=await f.prisma.user.update({where:{id:f.employee.id},data:{name:'Nine',employeeId:'EMP-NINE',email:'nine@test.invalid',departmentCode:'ENGINEERING',assignedAdminId:f.admin.id}});
+  const nine=await f.prisma.user.update({where:{id:f.employee.id},data:{name:'Nine',employeeId:'EMP-NINE',email:'nine@test.invalid',departmentCode:'ENGINEERING',assignedAdminId:f.admin.id,riskScore:51,riskLevel:'MEDIUM'}});
   const priyanka=await f.prisma.user.update({where:{id:f.employee2.id},data:{name:'Priyanka',employeeId:'EMP-PRIYANKA',email:'priyanka@test.invalid',departmentCode:'ENGINEERING',assignedAdminId:f.admin.id}});
   for(const [user,ip] of [[nine,'192.0.2.11'],[priyanka,'192.0.2.22'],[f.admin,'192.0.2.99']])await f.prisma.session.create({data:{sessionToken:randomUUID(),userId:user.id,ip,userAgent:'Synthetic browser fixture · Windows Chrome',expiresAt:new Date(Date.now()+3600000)}});
   const agent=await f.prisma.endpointDevice.create({data:{companyId:'A',userId:nine.id,name:'Nine test endpoint',platform:'win32',agentVersion:'test-fixture',lastSeen:new Date(),health:{queueEvents:0,queueBytes:0,collectors:{desktop:'synthetic test fixture'}},config:DEFAULT_CONFIG}});
@@ -35,6 +35,11 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
   assert.equal(apiRequests.includes(`/api/users/${f.admin.id}`),false,'no default request loads admin detail');
   await b.evaluate("Array.from(document.querySelectorAll('tr[aria-label]')).find(row=>row.getAttribute('aria-label')==='View Nine').click()");
   await waitUntil(b,"document.querySelector('main')?.textContent.includes('Nine') && document.querySelector('main')?.textContent.includes('Synthetic editor fixture') && document.querySelector('main')?.textContent.includes('192.0.2.11')",'selected employee details, sessions, and endpoint events render');
+  const riskResponse=await fetch(`${origin}/api/risk/analysis/${nine.id}`,{headers:{Authorization:`Bearer ${token}`}});
+  const riskBody=await riskResponse.json();assert.equal(riskResponse.status,200);assert.equal(riskBody.analysis.accountRisk.score,51);
+  await waitUntil(b,"document.querySelector('main')?.textContent.includes('OBSERVED RISK') && document.querySelector('main')?.textContent.includes('Stored account policy risk: 51/100')",'employee detail shows live observed risk separately from stored policy risk');
+  const liveScore=riskBody.analysis.riskScore;
+  assert.ok(body.includes(`${liveScore} / 100`) || (await b.evaluate('document.querySelector("main").innerText')).includes(`${liveScore} / 100`),'employee detail uses the same backend observed score as Risk Analysis');
   assert.ok(apiRequests.includes(`/api/users/${nine.id}`),'existing employee detail API receives the selected ID');
   body=await b.evaluate('document.querySelector("main").innerText');
   assert.equal(body.includes('Priyanka'),false,'Nine view does not include another employee');
