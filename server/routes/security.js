@@ -72,7 +72,7 @@ async function userChanges(req,create=false,current=null){
   }
   return fields;
 }
-router.post('/users',requireSecurityAdmin,api(async req=>{const fields=await userChanges(req,true);const user=await prisma.$transaction(async tx=>{await releaseDeletedIdentifiers(tx,req.user,fields);const u=await tx.user.create({data:{...fields,companyId:req.user.companyId,riskScore:0,trustScore:100}});await audit(tx,req.user,'USER_CREATED',{employeeId:u.employeeId},u.id);return u;});return{user:publicUser(user)};}));
+router.post('/users',requireSecurityAdmin,api(async req=>{const fields=await userChanges(req,true);const user=await prisma.$transaction(async tx=>{await releaseDeletedIdentifiers(tx,req.user,fields);const u=await tx.user.create({data:{...fields,companyId:req.user.companyId}});await audit(tx,req.user,'USER_CREATED',{employeeId:u.employeeId},u.id);return u;});return{user:{...publicUser(user),riskScore:null,currentRiskScore:null,riskLevel:null,currentRiskLevel:null,assessmentStatus:'NOT_ASSESSED'}};}));
 router.patch('/users/:id',requireSecurityAdmin,api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','Use Admin Management for this account.');const fields=await userChanges(req,false,u);if(fields.managerId===u.id)throw new SecurityError(400,'INVALID_MANAGER','An employee cannot manage themselves.');const user=await prisma.$transaction(async tx=>{if(u.roleCode==='MANAGER'&&fields.roleCode==='EMPLOYEE'&&await tx.user.count({where:{managerId:u.id}}))throw new SecurityError(400,'MANAGER_HAS_REPORTS','Reassign this manager’s employees before changing their role.');
 const updated=await tx.user.update({where:{id:u.id},data:{...fields,authVersion:{increment:1}}});
 if(updated.roleCode==='MANAGER'&&fields.assignedAdminId!==undefined&&fields.assignedAdminId!==u.assignedAdminId){
@@ -122,10 +122,10 @@ router.post('/telemetry/ingest',requireSecurityAdmin,api(async()=>{
 }));
 router.post('/risk/evaluate',requireSecurityAdmin,api(assess));
 router.get('/risk/analysis/:id',requireSecurityAdmin,api(async req=>({analysis:await getRiskAnalysis(prisma,req.user,req.params.id)})));
-router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{userId:u.id,riskScore:u.riskScore,riskLevel:u.riskLevel,latest:await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}})};}));
+router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});return{userId:u.id,riskScore:latest?u.riskScore:null,riskLevel:latest?u.riskLevel:null,latest};}));
 router.get('/risk/history/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.riskScore.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
 router.get('/trust/:id/history',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.trustHistory.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
-router.get('/trust/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{trustScore:u.trustScore};}));
+router.get('/trust/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{trustScore:u.trustUpdatedAt?u.trustScore:null,assessmentStatus:u.trustUpdatedAt?'ASSESSED':'NOT_ASSESSED'};}));
 router.post('/users/:id/baseline/rebuild',requireSecurityAdmin,api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{baseline:await learnBaseline(prisma,u.id)};}));
 
 router.get('/access-requests',api(async req=>({requests:(await prisma.accessRequest.findMany({where:subjectScope(req),include:{user:{select:{name:true}},resource:{select:{name:true}}},orderBy:{createdAt:'desc'},...pagination(req.query)})).map(decorateRequest)})));
@@ -170,15 +170,14 @@ router.get('/audit-logs',requireSecurityAdmin,api(async req=>{
 router.get('/dashboard/:section',requireSecurityAdmin,api(async req=>{
  const where={...userScope(req.user),roleCode:{in:['SYSTEM_ADMIN','SECURITY_ADMIN']}},scope={user:where},policy=await getPolicy(prisma,req.user.companyId);
  if(req.params.section==='summary'){
-  const [users,activeUsers,highRiskUsers,restrictedAccounts,pendingApprovals,criticalAlerts,administrators,departments,authenticationLogs]=await Promise.all([
+  const [users,activeUsers,highRiskUsers,restrictedAccounts,pendingApprovals,criticalAlerts,administrators,authenticationLogs]=await Promise.all([
    prisma.user.count({where}),
    prisma.user.count({where:{...where,status:'ACTIVE'}}),
-   prisma.user.count({where:{...where,riskScore:{gte:policy.mfaThreshold}}}),
+   prisma.user.count({where:{...where,riskScores:{some:{}},riskScore:{gte:policy.mfaThreshold}}}),
    prisma.user.count({where:{...where,status:{in:['FROZEN','RESTRICTED','INVESTIGATION']}}}),
    prisma.accessRequest.count({where:{...scope,status:'PENDING'}}),
    prisma.incident.count({where:{...scope,severity:'CRITICAL',status:{notIn:['RESOLVED','FALSE_POSITIVE']}}}),
    prisma.user.findMany({where,select:{id:true,name:true,email:true,roleCode:true,status:true,departmentCode:true,riskScore:true,trustScore:true,riskLevel:true,trustUpdatedAt:true,_count:{select:{activityEvents:true,trustHistories:true,riskScores:true}}},orderBy:{name:'asc'}}),
-   prisma.user.groupBy({by:['departmentCode'],where,_count:{_all:true},_avg:{riskScore:true}}),
    prisma.auditLog.findMany({where:{companyId:req.user.companyId,user:where,action:{in:['AUTH_LOGIN','AUTH_FAILED','MFA_SUCCESS','MFA_FAILED']}},select:{id:true,action:true,timestamp:true,severity:true},orderBy:{timestamp:'desc'},take:500}),
   ]);
   const administratorIds=administrators.map(user=>user.id),now=new Date();
@@ -190,10 +189,13 @@ router.get('/dashboard/:section',requireSecurityAdmin,api(async req=>{
   ]):[[],[],[],[]];
   const loginByUser=new Map(latestLogins.map(row=>[row.userId,row._max.createdAt]));
   const sessionsByUser=new Map(activeSessions.map(row=>[row.userId,row._count._all]));
-  const adminRows=administrators.map(user=>{const assessed=Boolean(user._count.activityEvents||user._count.trustHistories||user._count.riskScores||user.trustUpdatedAt);const{_count,...record}=user;const trustState=!assessed?'NOT_ASSESSED':user.trustScore<30?'FRESH_MFA_REQUIRED':user.trustScore<60?'SENSITIVE_APPROVAL_REQUIRED':'STANDARD';return{...record,assessmentStatus:assessed?'ASSESSED':'NOT_ASSESSED',trustState,lastLoginAt:loginByUser.get(user.id)||null,sessionState:(sessionsByUser.get(user.id)||0)>0?'ACTIVE':'INACTIVE'};});
-  return{summary:{users,activeUsers,highRiskUsers,restrictedAccounts,pendingApprovals,criticalAlerts},administrators:adminRows,departments:departments.map(row=>({name:row.departmentCode,count:row._count._all,risk:Math.round(row._avg.riskScore||0)})),authenticationActivity:authenticationLogs.map(row=>({id:row.id,eventType:row.action,timestamp:row.timestamp,severity:row.severity})),alerts:alerts.map(row=>({id:row.id,eventType:row.type,timestamp:row.timestamp,severity:row.severity,riskContribution:row.riskContribution,isAnomalous:['HIGH','VERY_HIGH','CRITICAL'].includes(row.severity),userName:row.user.name,userDepartment:row.user.departmentCode})),incidents:incidents.map(row=>{const{user,...incident}=row;return{...incident,userName:user.name,userDepartment:user.departmentCode};})};
+  const adminRows=administrators.map(user=>{const riskAssessed=Boolean(user._count.riskScores),trustAssessed=Boolean(user.trustUpdatedAt);const{_count,...record}=user;const trustState=!trustAssessed?'NOT_ASSESSED':user.trustScore<30?'FRESH_MFA_REQUIRED':user.trustScore<60?'SENSITIVE_APPROVAL_REQUIRED':'STANDARD';return{...record,...(!riskAssessed?{riskScore:null,riskLevel:null}:{}),...(!trustAssessed?{trustScore:null}:{}),assessmentStatus:riskAssessed||trustAssessed?'ASSESSED':'NOT_ASSESSED',trustState,lastLoginAt:loginByUser.get(user.id)||null,sessionState:(sessionsByUser.get(user.id)||0)>0?'ACTIVE':'INACTIVE'};});
+  const departmentMap=new Map();
+  for(const user of adminRows){const group=departmentMap.get(user.departmentCode)||{name:user.departmentCode,count:0,riskTotal:0,assessedCount:0};group.count++;if(user.riskScore!==null){group.riskTotal+=user.riskScore;group.assessedCount++;}departmentMap.set(user.departmentCode,group);}
+  const departments=[...departmentMap.values()].map(({name,count,riskTotal,assessedCount})=>({name,count,risk:assessedCount?Math.round(riskTotal/assessedCount):null}));
+  return{summary:{users,activeUsers,highRiskUsers,restrictedAccounts,pendingApprovals,criticalAlerts},administrators:adminRows,departments,authenticationActivity:authenticationLogs.map(row=>({id:row.id,eventType:row.action,timestamp:row.timestamp,severity:row.severity})),alerts:alerts.map(row=>({id:row.id,eventType:row.type,timestamp:row.timestamp,severity:row.severity,riskContribution:row.riskContribution,isAnomalous:['HIGH','VERY_HIGH','CRITICAL'].includes(row.severity),userName:row.user.name,userDepartment:row.user.departmentCode})),incidents:incidents.map(row=>{const{user,...incident}=row;return{...incident,userName:user.name,userDepartment:user.departmentCode};})};
  }
- if(req.params.section==='risk-distribution')return{distribution:await prisma.user.groupBy({by:['riskLevel'],where,_count:{_all:true}})};
+ if(req.params.section==='risk-distribution')return{distribution:await prisma.user.groupBy({by:['riskLevel'],where:{...where,riskScores:{some:{}}},_count:{_all:true}})};
  if(req.params.section==='risk-trends')return{history:await prisma.riskScore.findMany({where:{...scope,timestamp:{gte:new Date(Date.now()-30*86400000)}},orderBy:{timestamp:'asc'},take:2000})};
  if(req.params.section==='recent-alerts')return{incidents:await prisma.incident.findMany({where:scope,orderBy:{createdAt:'desc'},take:30})};
  throw new SecurityError(404,'DASHBOARD_SECTION_NOT_FOUND','Dashboard section not found.');

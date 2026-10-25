@@ -57,6 +57,12 @@ test('persisted trust gates authorization but cannot override risk, holds or rol
   assert.equal(request({roleCode:'MANAGER',approval:false}).decision,'RESTRICT');
   assert.equal(request({roleCode:'MANAGER',approval:true}).decision,'RESTRICT');
   assert.equal(request({trustScore:NaN}).decision,'REQUIRE_APPROVAL');
+  assert.equal(request({trustScore:null}).decision,'REQUIRE_APPROVAL');
+  assert.equal(request({trustScore:null,approval:true}).decision,'ALLOW','reviewed approval can resolve unassessed trust for an authorized resource');
+  assert.equal(request({trustScore:null,approval:true,roleCode:'MANAGER'}).decision,'RESTRICT','approval cannot grant a missing role');
+  assert.equal(request({trustScore:null,approval:true,riskAction:'FREEZE'}).decision,'FREEZE');
+  assert.equal(request({trustScore:null,approval:true,riskAction:'MFA'}).decision,'MFA');
+  assert.equal(request({trustScore:null,approval:true,riskAction:'MFA',mfaFresh:true}).decision,'MONITOR');
 });
 
 test('recovery requires reviewed status and three different prior benign days',()=>{

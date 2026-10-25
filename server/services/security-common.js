@@ -19,7 +19,7 @@ export function securityErrorHandler(e,req,res,next){
   res.status(status).json({success:false,error:{code,message:e instanceof SecurityError?e.message:status===409?'A record conflicts with an existing identifier or related record.':status===400?'Invalid request fields or JSON.':status===413?'Request exceeds the allowed size.':'Unable to complete this operation. Check server configuration and try again.',requestId,...(e instanceof SecurityError&&e.details?{details:e.details}:{})}});
 }
 export function text(value,label,max=256){if(typeof value!=='string'||!value.trim()||value.length>max)throw new SecurityError(400,'INVALID_INPUT',`${label} is required and must be at most ${max} characters.`);return value.trim();}
-export const publicUser=u=>{const{passwordHash,...safe}=u;return{...safe,role:u.roleCode,department:u.departmentCode,currentRiskScore:u.riskScore,currentTrustScore:u.trustScore,currentRiskLevel:u.riskLevel};};
+export const publicUser=u=>{const{passwordHash,...safe}=u;const trust=u.trustUpdatedAt?u.trustScore:null;return{...safe,trustScore:trust,role:u.roleCode,department:u.departmentCode,currentRiskScore:u.riskScore,currentTrustScore:trust,currentRiskLevel:u.riskLevel};};
 export function pagination(q={}){const limit=q.limit===undefined?100:Number(q.limit),offset=q.offset===undefined?0:Number(q.offset);if(!Number.isInteger(limit)||limit<1||limit>200||!Number.isInteger(offset)||offset<0||offset>100000)throw new SecurityError(400,'INVALID_PAGINATION','Limit must be 1–200 and offset a nonnegative integer.');return{take:limit,skip:offset};}
 export function safeMetadata(data,depth=0){
   if(depth>5)return '[omitted]';

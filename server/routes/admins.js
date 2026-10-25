@@ -18,7 +18,7 @@ async function fields(b,create=false){
  return data;
 }
 router.get('/',api(async req=>({admins:(await prisma.user.findMany({where:{companyId:req.user.companyId,deletedAt:null,roleCode:{in:['SECURITY_ADMIN','SYSTEM_ADMIN']}},orderBy:{name:'asc'},take:200})).map(publicUser)})));
-router.post('/',requireMainAdmin,api(async req=>{const data=await fields(req.body,true);const admin=await prisma.$transaction(async tx=>{await releaseDeletedIdentifiers(tx,req.user,data);const u=await tx.user.create({data:{...data,employeeId:'ADM-'+randomUUID(),companyId:req.user.companyId,isMainAdmin:false,riskScore:0}});await audit(tx,req.user,'ADMIN_CREATED',{id:u.id});return u;});return{admin:publicUser(admin)};}));
+router.post('/',requireMainAdmin,api(async req=>{const data=await fields(req.body,true);const admin=await prisma.$transaction(async tx=>{await releaseDeletedIdentifiers(tx,req.user,data);const u=await tx.user.create({data:{...data,employeeId:'ADM-'+randomUUID(),companyId:req.user.companyId,isMainAdmin:false}});await audit(tx,req.user,'ADMIN_CREATED',{id:u.id});return u;});return{admin:{...publicUser(admin),riskScore:null,currentRiskScore:null,riskLevel:null,currentRiskLevel:null,assessmentStatus:'NOT_ASSESSED'}};}));
 router.patch('/:id',requireMainAdmin,api(async req=>{
  const u=await locate(req),data=await fields(req.body);
  if(u.isMainAdmin&&(data.status==='DISABLED'||data.roleCode&&data.roleCode!==u.roleCode))throw new SecurityError(403,'MAIN_ADMIN_PROTECTED','The main administrator cannot be disabled or demoted.');

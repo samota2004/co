@@ -21,6 +21,13 @@ test('persisted trust, incident holds and request tampering affect protected res
       return{status:response.status,data:await response.json()};
     };
     const body={userId:f.employee.id,isOffHours:false,eventId:randomUUID()};
+    const unassessed=await call({...body,eventId:randomUUID()});
+    assert.equal(unassessed.status,200);
+    assert.equal(unassessed.data.decision.decision,'REQUIRE_APPROVAL');
+    assert.equal(unassessed.data.resourceView,undefined,'registration trust cannot grant protected data');
+    assert.equal(unassessed.data.decision.evaluation.trustScore,null);
+    assert.equal(await f.prisma.trustHistory.count({where:{userId:f.admin.id}}),0,'unchanged registration trust is not recorded as an assessment');
+    await f.prisma.user.update({where:{id:f.admin.id},data:{trustUpdatedAt:new Date()}});
     const normal=await call(body);
     assert.equal(normal.status,200);assert.equal(normal.data.decision.decision,'ALLOW');
     assert.equal(normal.data.user.id,f.admin.id);
@@ -76,6 +83,7 @@ test('validated model score reaches MFA and malformed service output records not
     mock=await new Promise(resolve=>{const handle=app.listen(0,'127.0.0.1',()=>resolve(handle));});
     process.env.ML_SERVICE_URL='http://127.0.0.1:'+mock.address().port;
     const features=Object.fromEntries(featureSchema.feature_names.map(key=>[key,0]));
+    await f.prisma.user.update({where:{id:f.employee.id},data:{trustUpdatedAt:new Date()}});
     const result=await securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'MODEL_ASSESSMENT',features,isOffHours:false},{aggregateImport:true});
     assert.equal(result.decision.evaluation.riskScore,73);
     assert.equal(result.decision.decision,'MFA');
@@ -190,6 +198,7 @@ test('real local admin MFA session guards protected data, expiry and logout',{ti
     const headers={Authorization:'Bearer '+verified.data.token};
     const catalog=await fetch(base+'/resources/'+resource.id,{headers});
     assert.equal(catalog.status,200);assert.equal((await catalog.json()).resource.protectedData,undefined);
+    await f.prisma.user.update({where:{id:f.admin.id},data:{trustUpdatedAt:new Date()}});
     const granted=await send('/resources/'+resource.id+'/access',{userId:f.employee.id,roleCode:'EMPLOYEE',trustScore:100,riskScore:0,approvalExists:true},headers);
     assert.equal(granted.status,200);assert.equal(granted.data.user.id,f.admin.id);
     assert.equal(granted.data.resourceView?.protectedData?.secret,'session fixture');

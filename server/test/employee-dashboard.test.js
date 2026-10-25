@@ -33,6 +33,10 @@ test('existing employee detail API returns only selected employee monitoring rec
 
   const nineResponse=await call(f.admin,`/users/${nine.id}`);
   assert.equal(nineResponse.status,200,JSON.stringify(nineResponse.body));assert.equal(nineResponse.body.user.id,nine.id);assert.equal(nineResponse.body.user.name,'Nine');
+  assert.equal(nineResponse.body.user.riskScore,null,'a manually populated number without risk history is not shown as measured');
+  assert.equal(nineResponse.body.user.trustScore,null,'registration trust without an assessed update is not shown as measured');
+  assert.equal((await call(f.admin,`/risk/users/${nine.id}`)).body.riskScore,null);
+  assert.equal((await call(f.admin,`/trust/${nine.id}`)).body.trustScore,null);
   assert.deepEqual(nineResponse.body.devices.map(row=>row.id),[nineDevice.id]);
   assert.equal(nineResponse.body.sessions.length,1);assert.equal(nineResponse.body.sessions[0].status,'ACTIVE');
   assert.ok(nineResponse.body.loginHistory.every(row=>row.action==='AUTH_LOGIN'));

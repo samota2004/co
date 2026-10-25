@@ -347,23 +347,25 @@ export const DashboardPage = ({
   const safeUsers = overview?.summary.pendingApprovals ?? "—";
   const criticalIncidents = overview?.summary.criticalAlerts ?? "—";
 
+  const assessedTrust = administrators.filter(user => typeof user.trustScore === 'number' && Number.isFinite(user.trustScore));
+  const assessedRisk = administrators.filter(user => typeof user.riskScore === 'number' && Number.isFinite(user.riskScore));
   const avgTrustScore =
-    administrators.length > 0
+    assessedTrust.length > 0
       ? Math.round(
-          administrators.reduce(
-            (sum, user) => sum + Number(user.trustScore ?? 0),
+          assessedTrust.reduce(
+            (sum, user) => sum + user.trustScore,
             0,
-          ) / administrators.length,
+          ) / assessedTrust.length,
         )
       : null;
 
   const avgRiskScore =
-    administrators.length > 0
+    assessedRisk.length > 0
       ? Math.round(
-          administrators.reduce(
-            (sum, user) => sum + Number(user.riskScore ?? 0),
+          assessedRisk.reduce(
+            (sum, user) => sum + user.riskScore,
             0,
-          ) / administrators.length,
+          ) / assessedRisk.length,
         )
       : null;
 
@@ -486,13 +488,13 @@ export const DashboardPage = ({
   ======================================================= */
 
   const postureData = useMemo(() => {
-    if (!administrators.length) return [];
+    if (avgRiskScore === null && avgTrustScore === null) return [];
 
     return [
       {
         label: "Current",
-        risk: avgRiskScore ?? 0,
-        trust: avgTrustScore ?? 0,
+        risk: avgRiskScore,
+        trust: avgTrustScore,
       },
     ];
   }, [administrators, avgRiskScore, avgTrustScore]);
@@ -1083,7 +1085,7 @@ export const DashboardPage = ({
                         }
                       `}
                     >
-                      {department.risk}/100
+                      {department.risk === null ? 'Not assessed' : `${department.risk}/100`}
                     </span>
                   </div>
 
@@ -1110,9 +1112,7 @@ export const DashboardPage = ({
                                 : "bg-emerald-500"
                         }
                       `}
-                      style={{
-                        width: `${Math.min(100, department.risk)}%`,
-                      }}
+                      style={{ width: department.risk === null ? '0%' : `${Math.min(100, department.risk)}%` }}
                     />
                   </div>
                 </div>
@@ -1238,8 +1238,8 @@ export const DashboardPage = ({
 
                 <tbody>
                   {administrators.map((user) => {
-                    const risk = Number(user.riskScore ?? 0);
-                    const trust = Number(user.trustScore ?? 0);
+                    const risk = user.riskScore;
+                    const trust = user.trustScore;
 
                     const initials =
                       user.name
@@ -1321,24 +1321,20 @@ export const DashboardPage = ({
                                 }
                               `}
                             >
-                              {risk}
+                              {risk === null ? 'Not assessed' : risk}
                             </span>
 
-                            <span className="text-[12px] font-mono text-[#7F8A96]">
-                              /100
-                            </span>
+                            {risk !== null && <span className="text-[12px] font-mono text-[#7F8A96]">/100</span>}
                           </div>
                         </td>
 
                         <td className="px-4 py-4">
                           <div>
                             <span className="text-sm font-mono font-semibold">
-                              {trust}
+                              {trust === null ? 'Not assessed' : trust}
                             </span>
 
-                            <span className="text-[12px] font-mono text-[#7F8A96]">
-                              /100
-                            </span>
+                            {trust !== null && <span className="text-[12px] font-mono text-[#7F8A96]">/100</span>}
                           </div>
                         </td>
 

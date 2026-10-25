@@ -278,8 +278,8 @@ export const AiRiskAnalysisPage = ({
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-[#D4AF37]/25 bg-[#D4AF37]/[0.04] text-[#D4AF37]">
               <ShieldCheck className="h-6 w-6" strokeWidth={1.5} />
             </div>
-            <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO TELEMETRY AVAILABLE</div>
-            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">No recorded activity is available for {targetUser.name} in the last 24 hours.</p>
+            <div className="mt-5 text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">NO ATTRIBUTED RISK EVIDENCE</div>
+            <p className="mx-auto mt-2 max-w-lg text-[13px] leading-5 text-[#7F8A96]">No employee-attributed interactive activity or scored security assessment is available for {targetUser.name} in the last 24 hours. Assigned-device observations remain visible separately and do not prove this employee acted.</p>
           </section>
         ) : (
           <>
@@ -302,11 +302,11 @@ export const AiRiskAnalysisPage = ({
             </div>
 
             <div className="mt-5 text-4xl font-light tracking-[-0.04em] text-[#D4AF37]">
-              {formatScore(analysis?.accountRisk?.score)} <span className="text-sm text-[#7F8A96]">/ 100</span>
+              {analysis?.accountRisk?.score === null || analysis?.accountRisk?.score === undefined ? 'Not assessed' : <>{formatScore(analysis.accountRisk.score)} <span className="text-sm text-[#7F8A96]">/ 100</span></>}
             </div>
 
             <span className="mt-2 block text-[12px] text-[#7F8A96]">
-              Saved account score used for policy decisions · {analysis?.accountRisk?.level ?? 'Not assessed'}
+              {analysis?.accountRisk?.score === null || analysis?.accountRisk?.score === undefined ? 'No recorded account risk assessment yet' : `Saved account score used for policy decisions · ${analysis.accountRisk.level}`}
             </span>
             <span className="mt-2 block text-[12px] text-[#A7B0BA]">Recent observed activity: {formatScore(riskScore)}/100 (last 24 hours, read-only). It does not reset the saved account score when the observation window moves.</span>
           </div>

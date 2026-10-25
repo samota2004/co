@@ -5,12 +5,18 @@ export function authorizeAssessment({riskAction,trustScore,status,resource,roleC
   if(['FROZEN','DISABLED'].includes(status)||criticalHold)return{decision:'FREEZE',reasons:['Active security hold or disabled account.']};
   if(['RESTRICTED','INVESTIGATION'].includes(status))return{decision:'RESTRICT',reasons:['Administrative restriction requires review and restoration.']};
   if(riskAction==='FREEZE'||riskAction==='RESTRICT')return{decision:riskAction,reasons:['Current risk policy requires containment.']};
-  const validTrust=typeof trustScore==='number'&&Number.isFinite(trustScore)&&trustScore>=0&&trustScore<=100;
-  if(!validTrust)return{decision:'REQUIRE_APPROVAL',reasons:['Persisted trust is invalid; manual review required.']};
   const hasRole=!resource||resource.requiredRoles.includes(roleCode)||['SECURITY_ADMIN','SYSTEM_ADMIN'].includes(roleCode);
   // Approval satisfies an additional risk gate; it cannot grant a role that
   // the resource does not permit. Role changes invalidate old approvals.
   if(!hasRole)return{decision:'RESTRICT',reasons:['Resource role is not authorized.']};
+  const validTrust=typeof trustScore==='number'&&Number.isFinite(trustScore)&&trustScore>=0&&trustScore<=100;
+  if(!validTrust){
+    if(resource&&approval){
+      reasons.push('Reviewed resource approval satisfies the unassessed trust gate, subject to current risk and MFA.');
+      return{decision:riskAction==='MFA'&&!mfaFresh?'MFA':riskAction==='MFA'||riskAction==='REQUIRE_APPROVAL'?'MONITOR':riskAction,reasons};
+    }
+    return{decision:'REQUIRE_APPROVAL',reasons:['Trust is not assessed; reviewed resource approval is required.']};
+  }
   let decision=riskAction;
   if(riskAction==='REQUIRE_APPROVAL'&&approval){decision='MONITOR';reasons.push('Recent reviewed resource approval satisfied the current policy.');}
   else if(riskAction==='MFA'&&mfaFresh){decision='MONITOR';reasons.push('Fresh verified MFA satisfied the current policy.');}

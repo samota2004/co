@@ -189,11 +189,13 @@ useEffect(() => {
   // ======================================================
   // SECURITY STATUS
   // ======================================================
-  const riskScore = currentUser?.currentRiskScore ?? currentUser?.riskScore ?? 0;
+  const riskScore = currentUser?.assessmentStatus === 'NOT_ASSESSED' ? null : currentUser?.currentRiskScore ?? currentUser?.riskScore ?? null;
   const observedRiskScore = liveRiskState.analysis?.riskScore ?? null;
-  const trustScore = currentUser?.currentTrustScore ?? currentUser?.trustScore ?? 0;
+  const trustScore = currentUser?.assessmentStatus === 'NOT_ASSESSED' ? null : currentUser?.currentTrustScore ?? currentUser?.trustScore ?? null;
 
   const getSecurityStatus = (score) => {
+    if (score === null || !Number.isFinite(score))
+      return { label: 'NOT ASSESSED', color: 'text-[#A7B0BA]', border: 'border-white/10' };
     if (score < 40)
       return {
         label: "HEALTHY & SAFE",
@@ -335,8 +337,8 @@ useEffect(() => {
             <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
           </div>
           <div className="text-3xl font-light tracking-tight sm:text-4xl text-current">
-            {trustScore}{" "}
-            <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>
+            {trustScore === null ? 'Not assessed' : trustScore}{" "}
+            {trustScore !== null && <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>}
           </div>
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             Recorded trust standing from contextual policy assessments
@@ -354,12 +356,12 @@ useEffect(() => {
             <Activity className="w-4 h-4 text-[#D4AF37]" />
           </div>
           <div className="text-3xl font-light tracking-tight sm:text-4xl text-[#D4AF37]">
-            {riskScore}{" "}
-            <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>
+            {riskScore === null ? 'Not assessed' : riskScore}{" "}
+            {riskScore !== null && <span className="text-sm font-mono text-[#A7B0BA]">/ 100</span>}
           </div>
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             {monitoringData
-              ? `Saved account risk used by policy. Recent observed activity: ${liveRiskState.loading && !liveRiskState.analysis ? 'Loading…' : observedRiskScore === null ? 'Not assessed' : `${observedRiskScore}/100`} (last 24 hours, read-only).${liveRiskState.error ? ` Analysis refresh failed: ${liveRiskState.error}` : ''}`
+              ? `${riskScore === null ? 'No recorded account risk assessment yet.' : 'Saved account risk used by policy.'} Recent observed activity: ${liveRiskState.loading && !liveRiskState.analysis ? 'Loading…' : observedRiskScore === null ? 'Not assessed' : `${observedRiskScore}/100`} (last 24 hours, read-only).${liveRiskState.error ? ` Analysis refresh failed: ${liveRiskState.error}` : ''}`
               : 'Latest persisted contextual policy assessment. Endpoint observations are reviewed separately in Risk Analysis.'}
           </p>
         </div>
@@ -380,7 +382,7 @@ useEffect(() => {
           <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">
             Account state: {currentUser?.status || "ACTIVE"}
           </p>
-          {monitoringData && <p className="mt-1 text-xs leading-5 text-[#7F8A96]">Posture follows the saved account risk ({riskScore}/100). Recent endpoint observations are reviewed separately and do not reset this score after 24 hours.</p>}
+          {monitoringData && <p className="mt-1 text-xs leading-5 text-[#7F8A96]">{riskScore === null ? 'No recorded policy assessment. Endpoint observations alone do not establish account risk or trust.' : `Posture follows the saved account risk (${riskScore}/100). Recent endpoint observations are reviewed separately and do not reset this score after 24 hours.`}</p>}
         </div>
 
         {/* Active Sessions */}

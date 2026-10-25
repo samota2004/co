@@ -13,6 +13,7 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
  const f=await deviceFixture();let server,b,sse,profile;
  try{
   const nine=await f.prisma.user.update({where:{id:f.employee.id},data:{name:'Nine',employeeId:'EMP-NINE',email:'nine@test.invalid',departmentCode:'ENGINEERING',assignedAdminId:f.admin.id,riskScore:51,riskLevel:'MEDIUM'}});
+  await f.prisma.riskScore.create({data:{userId:nine.id,score:51,level:'MEDIUM',factors:[{factor:'Synthetic test assessment',category:'TEST',scoreImpact:51}]}});
   const priyanka=await f.prisma.user.update({where:{id:f.employee2.id},data:{name:'Priyanka',employeeId:'EMP-PRIYANKA',email:'priyanka@test.invalid',departmentCode:'ENGINEERING',assignedAdminId:f.admin.id}});
   for(const [user,ip] of [[nine,'192.0.2.11'],[priyanka,'192.0.2.22'],[f.admin,'192.0.2.99']])await f.prisma.session.create({data:{sessionToken:randomUUID(),userId:user.id,ip,userAgent:'Synthetic browser fixture · Windows Chrome',expiresAt:new Date(Date.now()+3600000)}});
   const agent=await f.prisma.endpointDevice.create({data:{companyId:'A',userId:nine.id,name:'Nine test endpoint',platform:'win32',agentVersion:'test-fixture',lastSeen:new Date(),health:{queueEvents:0,queueBytes:0,collectors:{desktop:'synthetic test fixture'}},config:DEFAULT_CONFIG}});
@@ -52,6 +53,7 @@ test('existing Employee Monitoring dashboard lists employees before rendering sc
   await b.evaluate("Array.from(document.querySelectorAll('tr[aria-label]')).find(row=>row.getAttribute('aria-label')==='View Priyanka').click()");
   await waitUntil(b,"document.querySelector('main')?.textContent.includes('Priyanka') && document.querySelector('main')?.textContent.includes('No endpoint agent assigned to this employee.') && document.querySelector('main')?.textContent.includes('192.0.2.22')",'selected employee without an agent shows the correct empty state');
   body=await b.evaluate('document.querySelector("main").innerText');
+  assert.ok(body.includes('Not assessed'),'an employee without scored assessments does not show registration defaults');
   assert.ok(body.includes('Endpoint activity is unavailable because no endpoint agent is assigned to this employee.'),'endpoint timeline explains why this employee has no endpoint activity');
   assert.equal(body.includes('Select one assigned device to check its last contact'),false,'empty device state does not instruct the admin to select a nonexistent device');
   assert.equal(body.includes('No application observations received yet.'),false,'empty device state does not show a generic contradictory activity message');
