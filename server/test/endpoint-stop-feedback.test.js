@@ -20,6 +20,7 @@ test('stop action exposes specific MFA, authorization, validation, device, expir
   assert.match(stopCommandError({ status: 403, code: 'FRESH_MFA_REQUIRED' }), /recent administrator MFA/i);
   assert.match(stopCommandError({ status: 403, code: 'FORBIDDEN' }), /active Security Administrator/i);
   assert.match(stopCommandError({ status: 400, code: 'AGENT_ACTION_REASON_REQUIRED' }), /8–500 characters/i);
+  assert.equal(stopCommandError({ status: 400, code: 'ENDPOINT_JSON_OBJECT_REQUIRED', message: 'A JSON object is required.' }), 'A JSON object is required.', 'other 400s preserve their actual server reason');
   assert.match(stopCommandError({ status: 404 }), /company scope/i);
   assert.match(stopCommandError({ status: 409, message: 'Device is not a Windows service agent.' }), /not a Windows service agent/i);
   assert.match(stopCommandError({ status: 503 }), /Prisma migration/i);

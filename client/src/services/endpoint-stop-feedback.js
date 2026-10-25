@@ -25,7 +25,7 @@ export function stopCommandError(error) {
   const code = error?.code;
   const status = Number(error?.status);
   if (code === 'FRESH_MFA_REQUIRED') return 'Recent administrator MFA is required. Complete MFA again, then retry this action.';
-  if (code === 'AGENT_ACTION_REASON_REQUIRED' || status === 400) return 'The stop request was rejected. Enter a reason containing 8–500 characters and try again.';
+  if (code === 'AGENT_ACTION_REASON_REQUIRED') return 'The reason must contain 8–500 characters. Enter a valid audit reason and retry.';
   if (status === 401 || code === 'UNAUTHORIZED') return 'Your administrator session has expired. Sign in again, complete MFA, and retry.';
   if (status === 403 || code === 'FORBIDDEN') return 'Request denied. This action requires an active Security Administrator session with recent MFA.';
   if (status === 404) return 'The enrolled device was not found in your company scope. Refresh the device list and verify its assignment.';
