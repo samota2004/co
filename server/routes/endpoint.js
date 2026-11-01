@@ -76,5 +76,10 @@ router.post('/:id/stop-agent', requireSecurityAdmin, requireRecentMfa, handle(as
   sseManager.broadcast('ENDPOINT_UPDATED',{companyId:req.user.companyId,userId:result.userId});
   return result;
 }));
+router.post('/:id/start-agent', requireSecurityAdmin, requireRecentMfa, handle(async req => {
+  const result=await service.requestAgentStart(req.user,req.params.id,req.body);
+  sseManager.broadcast('ENDPOINT_UPDATED',{companyId:req.user.companyId,userId:result.userId});
+  return result;
+}));
 router.post('/:id/revoke', requireSecurityAdmin, requireRecentMfa, handle(req => service.change(req.user, req.params.id, req.body, true)));
 export default router;

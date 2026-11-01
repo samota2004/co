@@ -141,7 +141,7 @@ export class EndpointService {
     const report=body.accountControlReport;
     if(report!==undefined&&(!report||typeof report!=='object'||Array.isArray(report)||Object.keys(report).some(key=>!['commandId','resultCode','reportedAt'].includes(key))||typeof report.commandId!=='string'||report.commandId.length>80||typeof report.resultCode!=='string'||!['BLOCKED','ALLOWED','LOGOFF_PENDING','EXTERNALLY_DISABLED','RECOVERY_REQUIRED','UNSAFE_ACCOUNT','UNSAFE_RECOVERY','UNSUPPORTED_MACHINE','UNSAFE_STORAGE','ACCESS_DENIED','NATIVE_ERROR','CONTROL_DISABLED','CONTROL_REFUSED','NEEDS_REVIEW'].includes(report.resultCode)||!Number.isFinite(Date.parse(report.reportedAt))||Date.parse(report.reportedAt)>Date.now()+60000))throw new EndpointError(400,'Invalid account-control acknowledgement');
     const stopReport=body.agentCommandReport;
-    if(stopReport!==undefined&&(!stopReport||typeof stopReport!=='object'||Array.isArray(stopReport)||Object.keys(stopReport).some(key=>!['commandId','resultCode','reportedAt'].includes(key))||typeof stopReport.commandId!=='string'||!/^[0-9a-f-]{36}$/i.test(stopReport.commandId)||stopReport.resultCode!=='STOP_ACCEPTED'||!Number.isFinite(Date.parse(stopReport.reportedAt))||Date.parse(stopReport.reportedAt)>Date.now()+30000))throw new EndpointError(400,'Invalid agent-command acknowledgement');
+    if(stopReport!==undefined&&(!stopReport||typeof stopReport!=='object'||Array.isArray(stopReport)||Object.keys(stopReport).some(key=>!['commandId','resultCode','reportedAt'].includes(key))||typeof stopReport.commandId!=='string'||!/^[0-9a-f-]{36}$/i.test(stopReport.commandId)||!['STOP_ACCEPTED','START_ACCEPTED'].includes(stopReport.resultCode)||!Number.isFinite(Date.parse(stopReport.reportedAt))||Date.parse(stopReport.reportedAt)>Date.now()+30000))throw new EndpointError(400,'Invalid agent-command acknowledgement');
     const result=await withCitySchema(this.prisma,cityAvailable=>this.prisma.$transaction(async tx => {
       const d = await this.authenticate(tx, secret,cityAvailable);
       const observedAt=new Date();
@@ -164,14 +164,16 @@ export class EndpointService {
       let agentCommandAck=null;
       if(stopReport&&enforcement){
         const stop=await enforcement.findUnique({where:{commandId:stopReport.commandId}}),reportedAt=Date.parse(stopReport.reportedAt);
-        if(stop&&stop.action==='STOP_AGENT'&&stop.deviceId===d.id&&stop.userId===d.userId&&stop.companyId===d.companyId&&stop.status==='PENDING'&&stop.expiresAt&&stop.expiresAt>observedAt&&reportedAt>=stop.issuedAt.getTime()&&reportedAt<=stop.expiresAt.getTime()){
-          await enforcement.update({where:{id:stop.id},data:{status:'ACKNOWLEDGED',resultCode:'STOP_ACCEPTED',acknowledgedAt:observedAt}});
+        const expectedResult=stop?.action==='STOP_AGENT'?'STOP_ACCEPTED':stop?.action==='START_AGENT'?'START_ACCEPTED':null;
+        const expectedState=stop?.action==='STOP_AGENT'?'ADMIN_STOPPED':stop?.action==='START_AGENT'?'RUNNING':null;
+        if(stop&&expectedResult===stopReport.resultCode&&body.health.administrativeState===expectedState&&stop.deviceId===d.id&&stop.userId===d.userId&&stop.companyId===d.companyId&&['PENDING','PENDING_OFFLINE'].includes(stop.status)&&stop.expiresAt&&stop.expiresAt>observedAt&&reportedAt>=stop.issuedAt.getTime()&&reportedAt<=stop.expiresAt.getTime()){
+          await enforcement.update({where:{id:stop.id},data:{status:'ACKNOWLEDGED',resultCode:stopReport.resultCode,acknowledgedAt:observedAt}});
           agentCommandAck=stop.commandId;
         }
       }
       const eligible=['win32','linux','darwin'].includes(d.platform) && d.mappedIdentity && ['EMPLOYEE','MANAGER'].includes(d.user.roleCode);
       const desired=eligible?(d.user.status==='FROZEN'?'BLOCK':d.user.status==='ACTIVE'?'ALLOW':'HOLD'):'HOLD';
-      if(enforcement)await enforcement.updateMany({where:{deviceId:d.id,status:{in:['PENDING','PENDING_OFFLINE']},action:desired==='HOLD'?{not:'STOP_AGENT'}:{notIn:[desired,'STOP_AGENT']}},data:{status:'SUPERSEDED'}});
+      if(enforcement)await enforcement.updateMany({where:{deviceId:d.id,status:{in:['PENDING','PENDING_OFFLINE']},action:desired==='HOLD'?{notIn:['STOP_AGENT','START_AGENT']}:{notIn:[desired,'STOP_AGENT','START_AGENT']}},data:{status:'SUPERSEDED'}});
       let command=eligible&&enforcement?await enforcement.findFirst({where:{deviceId:d.id,status:{in:['PENDING','PENDING_OFFLINE']},action:desired},orderBy:{createdAt:'asc'}}):null;
       if(command){
         await tx.endpointEnforcementCommand.update({where:{id:command.id},data:{status:'PENDING',issuedAt:observedAt}});
@@ -187,9 +189,9 @@ export class EndpointService {
       const action=command?command.action:enforcement&&latestCommand?.action===desired?'HOLD':desired;
       let agentCommand=null;
       if(enforcement){
-        await enforcement.updateMany({where:{deviceId:d.id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:observedAt}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
-        const pendingStop=await enforcement.findFirst({where:{deviceId:d.id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:observedAt}},orderBy:{createdAt:'asc'}});
-        if(pendingStop){if(pendingStop.status==='PENDING_OFFLINE')await enforcement.update({where:{id:pendingStop.id},data:{status:'PENDING'}});agentCommand={commandId:pendingStop.commandId,deviceId:d.id,identity:d.mappedIdentity,action:'STOP_AGENT',issuedAt:pendingStop.issuedAt.toISOString(),expiresAt:pendingStop.expiresAt.toISOString()};}
+        await enforcement.updateMany({where:{deviceId:d.id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:observedAt}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
+        const pendingStop=await enforcement.findFirst({where:{deviceId:d.id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:observedAt}},orderBy:{createdAt:'asc'}});
+        if(pendingStop){if(pendingStop.status==='PENDING_OFFLINE')await enforcement.update({where:{id:pendingStop.id},data:{status:'PENDING'}});agentCommand={commandId:pendingStop.commandId,deviceId:d.id,identity:d.mappedIdentity,action:pendingStop.action,issuedAt:pendingStop.issuedAt.toISOString(),expiresAt:pendingStop.expiresAt.toISOString()};}
       }
       return { config: d.config, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:observedAt.toISOString(),...(command?{commandId:command.commandId}: {})},agentCommand,agentCommandAck, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
     }));
@@ -242,6 +244,13 @@ export class EndpointService {
       enforcementCommands:{orderBy:{createdAt:'desc'},take:5,select:{id:true,commandId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}},
       user: { select: { id: true, name: true, employeeId: true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true } } } }
     }, orderBy: { createdAt: 'desc' } })}));
+    // Preserve the newest Windows lifecycle command in the API even when a busy
+    // device has more than five newer OS-account enforcement records.
+    const lifecycleCommands=devices.length?await this.prisma.endpointEnforcementCommand.findMany({where:{companyId:user.companyId,deviceId:{in:devices.map(d=>d.id)},action:{in:['STOP_AGENT','START_AGENT']}},orderBy:{createdAt:'desc'},select:{id:true,commandId:true,deviceId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}}):[];
+    const latestLifecycleByDevice=new Map();
+    for(const command of lifecycleCommands)if(!latestLifecycleByDevice.has(command.deviceId))latestLifecycleByDevice.set(command.deviceId,command);
+    const commandsByDevice=new Map(devices.map(d=>[d.id,d.enforcementCommands||[]]));
+    for(const d of devices){const lifecycle=latestLifecycleByDevice.get(d.id),list=commandsByDevice.get(d.id);if(lifecycle&&!list.some(command=>command.id===lifecycle.id))list.push(lifecycle);list.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));}
     // A device filter must resolve inside the already-scoped company/employee
     // list. This keeps the dashboard filter from becoming an IDOR.
     if (deviceId && !devices.some(d => d.id === deviceId)) throw new EndpointError(404, 'Device not found');
@@ -298,11 +307,11 @@ export class EndpointService {
       events=rows.slice(0,150);hasMore=rows.length>150;
     }
     const incidents = isEndpointAdmin(user)||user.roleCode==='MANAGER' ? await this.prisma.incident.findMany({ where: { user: userScope(user), ...(userId ? { userId } : {}) }, take: 30, orderBy: { createdAt: 'desc' } }) : [];
-    const actorIds=[...new Set(devices.flatMap(d=>(d.enforcementCommands||[]).map(c=>c.createdById).filter(Boolean)))];
+    const actorIds=[...new Set(devices.flatMap(d=>(commandsByDevice.get(d.id)||[]).map(c=>c.createdById).filter(Boolean)))];
     const actors=actorIds.length?await this.prisma.user.findMany({where:{id:{in:actorIds},companyId:user.companyId},select:{id:true,name:true}}):[];
     const actorNames=new Map(actors.map(actor=>[actor.id,actor.name]));
     const employees = isEndpointAdmin(user) ? await this.prisma.user.findMany({ where: { ...userScope(user), status: 'ACTIVE', roleCode: { in: ['EMPLOYEE','MANAGER'] } }, select: { id: true, employeeId: true, name: true }, orderBy: { name: 'asc' } }) : [];
-    return { devices: devices.map(d => ({ ...d, enforcementCommands:(d.enforcementCommands||[]).map(command=>({...command,requestedBy:command.createdById?(actorNames.get(command.createdById)||'Administrator'):'Automatic policy'})),user: endpointMonitoringUser(d.user), ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: {...ML_AVAILABILITY, dataReadiness:createLiveModelDataReadiness({window:{date:readinessWindow.date,timezone:'UTC',startInclusive:readinessWindow.start.toISOString(),endExclusive:readinessWindow.end.toISOString(),state:readinessWindow.state},scopes:readinessScopes})} };
+    return { devices: devices.map(d => ({ ...d, enforcementCommands:(commandsByDevice.get(d.id)||[]).map(command=>({...command,requestedBy:command.createdById?(actorNames.get(command.createdById)||'Administrator'):'Automatic policy'})),user: endpointMonitoringUser(d.user), ipCityProvider:this.locator.provider===undefined?'ipapi.co':this.locator.provider,ipCitySchemaReady:cityAvailable,ipCityEnabled:cityAvailable&&d.ipCityEnabled===true,ipCity:cityAvailable?cityView(d):{status:'migration-required'},connectionStatus: d.revokedAt ? 'REVOKED' : !d.enrolledAt ? 'UNENROLLED' : !d.lastSeen || Date.now() - new Date(d.lastSeen).getTime() > 300000 ? 'OFFLINE' : Date.now() - new Date(d.lastSeen).getTime() > 90000 ? 'STALE' : 'CONNECTED' })), employees, events, timeline: { eventType: eventType || null, limit, hasMore }, incidents, ml: {...ML_AVAILABILITY, dataReadiness:createLiveModelDataReadiness({window:{date:readinessWindow.date,timezone:'UTC',startInclusive:readinessWindow.start.toISOString(),endExclusive:readinessWindow.end.toISOString(),state:readinessWindow.state},scopes:readinessScopes})} };
   }
   async change(admin, id, body, revoke = false) {
     if (!admin || !isEndpointAdmin(admin) || admin.status !== 'ACTIVE' || !admin.companyId) throw new EndpointError(403, 'Active administrator required');
@@ -313,7 +322,7 @@ export class EndpointService {
       const data = revoke ? { revokedAt: new Date(), credentialHash: null, enrollmentHash: null,...(cityAvailable?{ipCityEnabled:false,ipCityGeneration:{increment:1},ipCity:{status:'revoked'}}:{}) } : { config,...(cityAvailable?{ipCityGeneration:{increment:1},...(config.paused?{ipCity:{status:'paused'}}:{})}:{}) };
       const result = await tx.endpointDevice.updateMany({ where: { id, companyId: admin.companyId, user: userScope(admin) }, data });
       if (!result.count) throw new EndpointError(404, 'Device not found');
-      if(revoke&&tx.endpointEnforcementCommand)await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'CREDENTIAL_REVOKED'}});
+      if(revoke&&tx.endpointEnforcementCommand)await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'CREDENTIAL_REVOKED'}});
       await audit(tx, admin, revoke ? 'AGENT_REVOKED' : data.config.paused ? 'AGENT_PAUSED' : 'AGENT_CONFIGURATION_UPDATED', {
         deviceId: id, actorId: admin.id, actorRole: admin.roleCode, isMainAdmin: admin.isMainAdmin === true,
         ...(revoke ? { reason } : { paused: data.config.paused })
@@ -331,12 +340,35 @@ export class EndpointService {
       if(!device)throw new EndpointError(404,'Enrolled device not found in company');
       if(device.platform!=='win32')throw new EndpointError(409,'Remote service stop is currently supported only by the Windows service agent','AGENT_STOP_UNSUPPORTED');
       if(!device.mappedIdentity)throw new EndpointError(409,'A verified employee-to-Windows identity mapping is required before remote stop','AGENT_IDENTITY_UNVERIFIED');
+      await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:'START_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},data:{status:'SUPERSEDED',resultCode:'OPPOSING_ADMIN_COMMAND'}});
       const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},orderBy:{createdAt:'asc'}});
       if(prior)return{success:true,created:false,userId:device.userId,command:{commandId:prior.commandId,action:prior.action,status:prior.status,reason:prior.reason,issuedAt:prior.issuedAt,expiresAt:prior.expiresAt,requestedBy:admin.name||admin.email}};
-      await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:now}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
+      await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},data:{status:'SUPERSEDED',resultCode:'OPPOSING_ADMIN_COMMAND'}});
+      await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:now}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
       const online=Boolean(device.lastSeen&&now.getTime()-device.lastSeen.getTime()<=5*60*1000);
       const command=await tx.endpointEnforcementCommand.create({data:{companyId:device.companyId,userId:device.userId,deviceId:id,action:'STOP_AGENT',status:online?'PENDING':'PENDING_OFFLINE',reason,issuedAt:now,expiresAt,createdById:admin.id}});
       await audit(tx,admin,'AGENT_STOP_REQUESTED',{deviceId:id,commandId:command.commandId,reason,expiresAt:expiresAt.toISOString()},device.userId);
+      return{success:true,created:true,userId:device.userId,command:{commandId:command.commandId,action:command.action,status:command.status,reason:command.reason,issuedAt:command.issuedAt,expiresAt:command.expiresAt,requestedBy:admin.name||admin.email}};
+    });
+  }
+  async requestAgentStart(admin,id,body) {
+    if(!admin||!isEndpointAdmin(admin)||admin.status!=='ACTIVE'||!admin.companyId)throw new EndpointError(403,'Active administrator required');
+    const reason=String(body?.reason||'').trim();
+    if(reason.length<8||reason.length>500||Object.keys(body||{}).some(key=>key!=='reason'))throw new EndpointError(400,'Provide an audit reason of 8 to 500 characters','AGENT_ACTION_REASON_REQUIRED');
+    const now=new Date(),expiresAt=new Date(now.getTime()+2*60*1000);
+    return this.prisma.$transaction(async tx=>{
+      const device=await tx.endpointDevice.findFirst({where:{id,companyId:admin.companyId,user:userScope(admin),revokedAt:null,enrolledAt:{not:null}},select:{id:true,companyId:true,userId:true,platform:true,mappedIdentity:true,lastSeen:true}});
+      if(!device)throw new EndpointError(404,'Enrolled device not found in company');
+      if(device.platform!=='win32')throw new EndpointError(409,'Remote service resume is currently supported only by the Windows service agent','AGENT_START_UNSUPPORTED');
+      if(!device.mappedIdentity)throw new EndpointError(409,'A verified employee-to-Windows identity mapping is required before remote resume','AGENT_IDENTITY_UNVERIFIED');
+      await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},data:{status:'SUPERSEDED',resultCode:'OPPOSING_ADMIN_COMMAND'}});
+      const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:id,action:'START_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},orderBy:{createdAt:'asc'}});
+      if(prior)return{success:true,created:false,userId:device.userId,command:{commandId:prior.commandId,action:prior.action,status:prior.status,reason:prior.reason,issuedAt:prior.issuedAt,expiresAt:prior.expiresAt,requestedBy:admin.name||admin.email}};
+      await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},data:{status:'SUPERSEDED',resultCode:'OPPOSING_ADMIN_COMMAND'}});
+      await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:now}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
+      const online=Boolean(device.lastSeen&&now.getTime()-device.lastSeen.getTime()<=5*60*1000);
+      const command=await tx.endpointEnforcementCommand.create({data:{companyId:device.companyId,userId:device.userId,deviceId:id,action:'START_AGENT',status:online?'PENDING':'PENDING_OFFLINE',reason,issuedAt:now,expiresAt,createdById:admin.id}});
+      await audit(tx,admin,'AGENT_START_REQUESTED',{deviceId:id,commandId:command.commandId,reason,expiresAt:expiresAt.toISOString()},device.userId);
       return{success:true,created:true,userId:device.userId,command:{commandId:command.commandId,action:command.action,status:command.status,reason:command.reason,issuedAt:command.issuedAt,expiresAt:command.expiresAt,requestedBy:admin.name||admin.email}};
     });
   }

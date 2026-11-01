@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stopCommandError, stopCommandStatus, stopCommandSuccess } from '../../client/src/services/endpoint-stop-feedback.js';
+import { endpointLifecycleStatus, stopCommandError, stopCommandStatus, stopCommandSuccess } from '../../client/src/services/endpoint-stop-feedback.js';
 import { requestApi } from '../../client/src/services/api.js';
 
 const expiry = new Date(Date.now() + 60_000).toISOString();
@@ -9,11 +9,23 @@ const command = status => ({ commandId: 'synthetic-command-id', status, expiresA
 test('stop action success feedback distinguishes online, offline, acknowledged, and expired commands', () => {
   assert.match(stopCommandSuccess(command('PENDING')).message, /waiting for the agent heartbeat/i);
   assert.match(stopCommandSuccess(command('PENDING_OFFLINE')).message, /device is offline/i);
-  assert.match(stopCommandSuccess(command('ACKNOWLEDGED')).message, /not an independent Windows service status check/i);
+  assert.match(stopCommandSuccess(command('ACKNOWLEDGED')).message, /monitoring state and SCM state are shown separately/i);
   assert.equal(stopCommandSuccess(command('EXPIRED')).kind, 'error');
   assert.match(stopCommandSuccess(command('EXPIRED')).message, /expired/i);
   assert.equal(stopCommandSuccess({ ...command('PENDING_OFFLINE'), expiresAt: new Date(Date.now() - 1).toISOString() }).kind, 'error');
   assert.equal(stopCommandSuccess({ status: 'PENDING' }).kind, 'error', 'missing command identity/expiry is not reported as success');
+});
+
+test('stop and resume feedback and lifecycle status are separately represented',()=>{
+  const start={...command('PENDING'),action:'START_AGENT'};
+  assert.match(stopCommandSuccess(start).message,/Resume command recorded/i);
+  assert.match(stopCommandStatus({...start,status:'ACKNOWLEDGED'}),/resume command/i);
+  assert.deepEqual(endpointLifecycleStatus({lastSeen:new Date().toISOString(),health:{administrativeState:'ADMIN_STOPPED',serviceControlState:'RUNNING'}}),{state:'ADMIN_STOPPED',detail:'Monitoring is persistently stopped by an administrator. Windows SCM: RUNNING.'});
+  assert.equal(endpointLifecycleStatus({lastSeen:new Date().toISOString(),health:{administrativeState:'RUNNING',serviceControlState:'RUNNING'}}).state,'RUNNING');
+  assert.equal(endpointLifecycleStatus({enforcementCommands:[{action:'START_AGENT',status:'PENDING',expiresAt:new Date(Date.now()+10000).toISOString()}]}).state,'START_PENDING');
+  assert.equal(endpointLifecycleStatus({enforcementCommands:[{action:'STOP_AGENT',status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}]}).state,'STOP_FAILED');
+  assert.equal(endpointLifecycleStatus({}).state,'UNVERIFIED');
+  assert.equal(endpointLifecycleStatus({lastSeen:new Date(Date.now()-6*60*1000).toISOString(),health:{administrativeState:'ADMIN_STOPPED'}}).state,'UNVERIFIED','stale device telemetry is not current confirmation');
 });
 
 test('stop action exposes specific MFA, authorization, validation, device, expiry, and server failures', () => {
@@ -25,7 +37,7 @@ test('stop action exposes specific MFA, authorization, validation, device, expir
   assert.match(stopCommandError({ status: 409, message: 'Device is not a Windows service agent.' }), /not a Windows service agent/i);
   assert.match(stopCommandError({ status: 503 }), /Prisma migration/i);
   assert.match(stopCommandError({ status: 500 }), /server failed/i);
-  assert.match(stopCommandError(new Error('Cannot reach the backend. Check your connection and try again.')), /No stop command was confirmed/i);
+  assert.match(stopCommandError(new Error('Cannot reach the backend. Check your connection and try again.')), /No command was confirmed/i);
 });
 
 test('device command history presents current pending, expired, and acknowledged state clearly', () => {
@@ -33,7 +45,7 @@ test('device command history presents current pending, expired, and acknowledged
   assert.match(stopCommandStatus({ status: 'PENDING_OFFLINE', expiresAt: new Date(Date.now() - 1).toISOString() }), /^Expired/i);
   assert.match(stopCommandStatus({ status: 'PENDING', expiresAt: new Date(Date.now() - 1).toISOString() }), /^Expired/i);
   assert.match(stopCommandStatus({ status: 'PENDING' }), /authenticated agent heartbeat/i);
-  assert.match(stopCommandStatus({ status: 'ACKNOWLEDGED' }), /not independently verified/i);
+  assert.match(stopCommandStatus({ status: 'ACKNOWLEDGED' }), /see reported state below/i);
   assert.match(stopCommandStatus({ status: 'EXPIRED' }), /did not acknowledge/i);
 });
 

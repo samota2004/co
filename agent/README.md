@@ -420,22 +420,34 @@ powershell -NoProfile -File agent/packaging/windows/build.ps1
 
 The integration suite requires the configured PostgreSQL identity to CREATE/DROP a schema. It creates a random isolated `orbit_agent_test_*` schema, applies migrations there, creates test users, runs the authenticated endpoint/SSE routers, observes the actual Windows test process and its SID, verifies enrollment expiry/reuse, offline retry/queue restart, durable insertion/dedupe, correct employee dashboard data, cross-company/other-employee denial and revoked credential denial, then removes only its test schema. It does not enroll the developer laptop in the production database. See `VERIFICATION.md` for executed results and acceptance limits.
 
-### Administrator-requested Windows service stop
+### Administrator-controlled Windows monitoring stop and resume
 
-The Devices page offers **Request Windows service stop** only to a company security
-administrator. The API requires an MFA-authenticated session no older than 15 minutes,
-an 8–500 character audit reason, and a device in that administrator's company. The
-server records a unique command with a two-minute expiry and actor/reason audit data.
-The command is delivered only in a TLS-protected heartbeat authenticated by that
-device's enrollment credential; it is bound to the device ID and mapped employee SID.
-The service agent durably records the command ID, rejects expired/mismatched/replayed
-commands, acknowledges it on a later authenticated heartbeat, and exits gracefully
-only after the server accepts that acknowledgement. The Windows service host then
-requests its own normal SCM stop. The dashboard reports **ACKNOWLEDGED** as agent
-acceptance and shutdown request, not as an independent SCM status probe. Offline
-commands expire rather than executing later without a fresh administrator request.
-Credential revocation is a separate audited action: after the server invalidates the
-credential, the service stops when its next authenticated request is rejected.
+The Devices page offers administrator-only **Request persistent monitoring stop** and
+**Request administrator resume** actions. Both require recent MFA (no older than 15
+minutes), an 8-500 character audit reason, and an enrolled Windows device in the
+administrator's company. Each server command has a unique ID, a two-minute delivery
+expiry, actor/reason audit data, and device/SID binding. Commands are delivered only
+through the enrolled device's authenticated TLS heartbeat. Expired, mismatched,
+conflicting, and replayed commands are rejected.
+
+An accepted stop writes `authorized-stop-command.json` under the protected
+`C:\ProgramData\CYBERORBIT` data directory and sets monitoring to `ADMIN_STOPPED`.
+The worker stops collecting and uploading observations but keeps its authenticated
+heartbeat/control service alive so an administrator can resume it. Persistent state is
+read before collection starts after every service boot. Windows Automatic startup, SCM
+recovery, the desktop scheduled task, and the helper watchdog therefore cannot restart
+monitoring while the stop state is set. The helper checks the authenticated local
+service control response before starting its native collector. Only a valid fresh
+`START_AGENT` command from an authorized administrator clears the state. An offline
+command expires and must be requested again later.
+
+The dashboard distinguishes agent-reported monitoring state (`RUNNING`,
+`ADMIN_STOPPED`, pending, failed, or `UNVERIFIED`) from the separately queried Windows
+Service Control Manager state. The SCM service intentionally stays running while
+monitoring is administratively stopped so it can receive an authenticated resume. Its
+SCM status is not a claim that monitoring is active. An offline or stale heartbeat is
+not current confirmation. Credential revocation remains a separate audited action and
+stops communications when the server rejects the credential.
 
 On an installed Windows endpoint, an administrator can inspect the protections without
 changing them:

@@ -1,5 +1,6 @@
 import os from 'node:os';
 import {knownLock,usageEligible} from './desktop-usage.js';
+import {exec} from './native.js';
 export function heartbeatMetadata() { return {uptimeSeconds:Math.floor(os.uptime()),freeMemoryBytes:os.freemem()}; }
 export function desktopSampleStatus(sample) {
   if (knownLock(sample)===true) return 'healthy: helper connected; session locked, usage excluded';
@@ -23,4 +24,15 @@ export function desktopDiagnosticStatus(status) {
     'desktop-query-failed':'unavailable: check desktop permissions and GNOME/KDE integration'};
   return typeof status==='string' && Object.hasOwn(statuses,status)?statuses[status]:null;
 }
-export function healthReport(queue, collectors, config, helperLastSeen) { return {...queue.health(),collectors:{...collectors},paused:config.paused,helperLastSeen}; }
+export function healthReport(queue, collectors, config, helperLastSeen, administrativeState, serviceControlState) {
+  return {...queue.health(),collectors:{...collectors},paused:config.paused,helperLastSeen,
+    ...(administrativeState?{administrativeState}:{}),...(serviceControlState?{serviceControlState}:{})};
+}
+export async function windowsServiceControlState(platform=process.platform,run=exec) {
+  if(platform!=='win32')return 'UNVERIFIED';
+  try {
+    const {stdout}=await run('sc.exe',['query','CyberOrbitAgent'],{timeout:3000,windowsHide:true,maxBuffer:16384});
+    const match=/\bSTATE\s*:\s*(\d+)/i.exec(stdout||'');
+    return ({1:'STOPPED',2:'START_PENDING',3:'STOP_PENDING',4:'RUNNING'})[Number(match?.[1])]||'UNVERIFIED';
+  }catch{return 'UNVERIFIED';}
+}

@@ -68,10 +68,12 @@ export function validateConfig(c) {
 }
 export function validateHealth(h) {
   if (!h || typeof h !== 'object' || Array.isArray(h) || Buffer.byteLength(JSON.stringify(h)) > 8192) throw new Error('Invalid health');
-  const allowed = ['queueEvents', 'queueBytes', 'droppedEvents', 'collectors', 'helperLastSeen', 'paused'];
+  const allowed = ['queueEvents', 'queueBytes', 'droppedEvents', 'collectors', 'helperLastSeen', 'paused', 'administrativeState', 'serviceControlState'];
   if (Object.keys(h).some(k => !allowed.includes(k))) throw new Error('Unknown health field');
   for (const k of ['queueEvents', 'queueBytes', 'droppedEvents']) if (!Number.isSafeInteger(h[k]) || h[k] < 0) throw new Error(`Invalid ${k}`);
   if (typeof h.paused !== 'boolean') throw new Error('Invalid paused');
+  if (h.administrativeState !== undefined && !['RUNNING','ADMIN_STOPPED','UNVERIFIED'].includes(h.administrativeState)) throw new Error('Invalid administrative state');
+  if (h.serviceControlState !== undefined && !['RUNNING','STOP_PENDING','START_PENDING','STOPPED','UNVERIFIED'].includes(h.serviceControlState)) throw new Error('Invalid service control state');
   if (h.helperLastSeen !== null && !Number.isFinite(Date.parse(h.helperLastSeen))) throw new Error('Invalid helper last seen');
   if (!h.collectors || typeof h.collectors !== 'object' || Array.isArray(h.collectors) || Object.keys(h.collectors).length > 12 || Object.entries(h.collectors).some(([k,v]) => k.length > 40 || typeof v !== 'string' || v.length > 240)) throw new Error('Invalid collectors');
   return h;

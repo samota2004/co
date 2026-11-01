@@ -79,13 +79,21 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
     await click(b,'Refresh devices');await waitUntil(b,`${panel}.querySelector('button') && ${panel}.getAttribute('aria-busy')==='false'`,'enrolled synthetic device refresh');
     await b.evaluate("window.confirm=()=>true;window.prompt=()=> 'Approved browser regression maintenance'");
     await b.evaluate(`window.__endpointStopOriginalFetch=window.fetch.bind(window);window.fetch=async(input,options)=>String(input).includes('/stop-agent')?new Response(JSON.stringify({success:false,error:{code:'FRESH_MFA_REQUIRED',message:'Verify administrator MFA again, then retry this device-control action.'}}),{status:403,headers:{'Content-Type':'application/json'}}):window.__endpointStopOriginalFetch(input,options)`);
-    await click(b,'Request Windows service stop');await waitUntil(b,`${panel}.querySelector('[data-stop-feedback="${stored.id}"]')?.textContent.includes('Recent administrator MFA is required')`,'visible device-specific recent-MFA error');
+    await click(b,'Request persistent monitoring stop');await waitUntil(b,`${panel}.querySelector('[data-stop-feedback="${stored.id}"]')?.textContent.includes('Recent administrator MFA is required')`,'visible device-specific recent-MFA error');
     assert.equal(await f.prisma.endpointEnforcementCommand.count({where:{deviceId:stored.id,action:'STOP_AGENT'}}),0,'MFA error does not persist a command');
     await b.evaluate('window.fetch=window.__endpointStopOriginalFetch;delete window.__endpointStopOriginalFetch');
-    await click(b,'Request Windows service stop');await waitUntil(b,contains('Stop command recorded and waiting for the agent heartbeat.'),'visible successful stop-command state');
+    await click(b,'Request persistent monitoring stop');await waitUntil(b,contains('Stop command recorded and waiting for the agent heartbeat.'),'visible successful stop-command state');
     const savedStop=await f.prisma.endpointEnforcementCommand.findFirst({where:{deviceId:stored.id,action:'STOP_AGENT'},orderBy:{createdAt:'desc'}});
     assert.equal(savedStop.status,'PENDING');assert.ok(savedStop.expiresAt instanceof Date);assert.ok(network.some(r=>r.path.endsWith('/stop-agent')&&r.status===200),'authorized stop request receives success');
-    assert.ok(await b.evaluate(`${panel}.textContent.includes('waiting for authenticated agent heartbeat')`),'device history shows pending delivery state');
+    await waitUntil(b,`${panel}.textContent.includes('waiting for authenticated agent heartbeat')`,'device history shows pending delivery state');
+    await f.prisma.endpointEnforcementCommand.update({where:{id:savedStop.id},data:{status:'ACKNOWLEDGED',resultCode:'STOP_ACCEPTED',acknowledgedAt:new Date()}});
+    await f.prisma.endpointDevice.update({where:{id:stored.id},data:{lastSeen:new Date(),health:{queueEvents:0,queueBytes:0,droppedEvents:0,collectors:{},helperLastSeen:null,paused:false,administrativeState:'ADMIN_STOPPED',serviceControlState:'RUNNING'}}});
+    await click(b,'Refresh devices');await waitUntil(b,`${panel}.textContent.includes('Agent monitoring: ADMIN STOPPED')`,'dashboard distinguishes monitoring stop from running SCM control service');
+    assert.ok(await b.evaluate(`${panel}.textContent.includes('Windows SCM: RUNNING.')`),'SCM control service remains explicitly distinct from stopped monitoring');
+    await click(b,'Request administrator resume');await waitUntil(b,contains('Resume command recorded and waiting for the agent heartbeat.'),'visible administrator resume command state');
+    const savedStart=await f.prisma.endpointEnforcementCommand.findFirst({where:{deviceId:stored.id,action:'START_AGENT'},orderBy:{createdAt:'desc'}});
+    assert.equal(savedStart.status,'PENDING');assert.ok(network.some(r=>r.path.endsWith('/start-agent')&&r.status===200),'resume uses the authenticated API route');
+    assert.equal((await f.prisma.endpointEnforcementCommand.findUnique({where:{id:savedStop.id}})).status,'ACKNOWLEDGED','confirmed stop history remains preserved after resume');
     // Registry Refresh reloads both stores, including a row added after initial load.
     await f.prisma.device.create({data:{deviceId:'browser-refresh-device',userId:f.employee.id,name:'Registry refresh laptop',os:'Windows',browser:'Chrome',ip:'127.0.0.1',location:'Test'}});
     slowDashboard=true;await b.evaluate('document.querySelector(\'[aria-label="Refresh device registry"]\').click()');
