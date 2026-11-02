@@ -33,11 +33,19 @@ const macos=process.env.CYBERORBIT_RELEASE_MACOS_ARCHIVE;
 
 test('Windows release ZIP is valid, complete, source-versioned, and platform-scoped',{skip:!windows&&'No newly built Windows release archive supplied'},async()=>{
   const {files,sha256}=await readZip(windows);
-  const required=['runtime/node.exe','CyberOrbitService.exe','src/service.js','src/remote-stop.js','src/macos-user.js','shared/contract.js','native/windows-usb-policy.ps1','packaging/windows/install.ps1','packaging/windows/uninstall.ps1','packaging/windows/update-installed.ps1','packaging/windows/update-source-files.ps1','packaging/windows/desktop-watchdog.ps1','package-manifest.json'];
+  const required=['runtime/node.exe','CyberOrbitService.exe','packaging/windows/ServiceHost.cs','src/service.js','src/local-operation-auth.js','src/local-operation-client.js','src/remote-stop.js','src/macos-user.js','shared/contract.js','native/windows-api.cs','native/windows-snapshot.ps1','native/windows-desktop.ps1','native/windows-account-control.ps1','native/windows-usb-policy.ps1','native/windows-uninstall-schedule.ps1','native/vault.ps1','packaging/windows/install.ps1','packaging/windows/configure-startup.ps1','packaging/windows/request-operation.ps1','packaging/windows/uninstall.ps1','packaging/windows/update-installed.ps1','packaging/windows/update-source-files.ps1','packaging/windows/desktop-watchdog.ps1','package-manifest.json'];
   for(const name of required)assert.ok(files.has(name),`missing Windows package component ${name}; archive entries: ${[...files.keys()].slice(0,20).join(', ')}`);
   assert.ok(![...files.keys()].some(n=>/\.map$|(^|\/)(test|node_modules|\.git)(\/|$)|native\/(macos-|linux-)|packaging\/(macos|linux)\//i.test(n)),'development or other-platform file included');
   const manifest=JSON.parse(files.get('package-manifest.json').toString('utf8'));assert.equal(manifest.platform,'windows');assert.equal(manifest.packageVersion,AGENT_VERSION);assert.ok(manifest.builtAtUtc);assert.ok(/^[a-f0-9]{64}$/.test(sha256));
   for(const entry of manifest.files){const payload=files.get(entry.path);assert.ok(payload,`manifest file absent from ZIP: ${entry.path}`);assert.equal(crypto.createHash('sha256').update(payload).digest('hex'),entry.sha256,`checksum mismatch: ${entry.path}`);}
+  assert.deepEqual([...files.keys()].filter(name=>name!=='package-manifest.json').sort(),manifest.files.map(entry=>entry.path).sort(),'manifest inventory covers every packaged file except its necessarily self-referential manifest');
+  assert.match(files.get('packaging/windows/install.ps1').toString('utf8'),/0x2008D;;;BU/,'built-in Users retain query-only service access');
+  assert.match(files.get('packaging/windows/request-operation.ps1').toString('utf8'),/SERVICE_STOP.*AGENT_UNINSTALL|AGENT_UNINSTALL.*SERVICE_STOP/s,'standard-user helper exposes only the two reviewable local operations');
+  assert.match(files.get('packaging/windows/uninstall.ps1').toString('utf8'),/consume-local-operation-grant[\s\S]*AGENT_UNINSTALL/,'uninstaller checks the signed uninstall authorization');
+  assert.match(files.get('src/local-operation-auth.js').toString('utf8'),/verifyLocalOperationGrant/);
+  assert.match(files.get('native/windows-uninstall-schedule.ps1').toString('utf8'),/S-1-5-18/,'only LocalSystem schedules the authorized uninstall');
+  const updater=files.get('packaging/windows/update-installed.ps1').toString('utf8');
+  for(const relative of ['src/local-operation-auth.js','src/local-operation-client.js','native/windows-uninstall-schedule.ps1','packaging/windows/request-operation.ps1','packaging/windows/uninstall.ps1'])assert.ok(updater.includes(`'${relative}'`),`updater omits authorization workflow file ${relative}`);
 });
 
 test('macOS release ZIP is valid, checksummed, and excludes Windows-only components',{skip:!macos&&'No newly built macOS release archive supplied'},async()=>{
@@ -54,7 +62,7 @@ test('macOS release ZIP is valid, checksummed, and excludes Windows-only compone
     for(const fragment of ['Build-Mac-Install-Kit.command','README.txt','MACOS-VERIFICATION.md','build-kit-manifest.json','SHA256SUMS','runtime-archives/node-v22.23.3-darwin-arm64.tar.gz','runtime-archives/node-v22.23.3-darwin-x64.tar.gz','agent/native/macos-lock.swift','agent/native/macos-desktop.swift','agent/packaging/macos/install.sh','agent/packaging/macos/uninstall.sh','agent/packaging/macos/com.cyberorbit.agent.plist'])assert.ok(names.some(n=>n.endsWith(fragment)),`missing macOS build-kit component ${fragment}`);
     const buildManifestPath=names.find(n=>n.endsWith('build-kit-manifest.json'));const buildManifest=JSON.parse(files.get(buildManifestPath).toString('utf8'));assert.equal(buildManifest.platform,'darwin');assert.equal(buildManifest.employeeInstallable,false);assert.equal(buildManifest.agentVersion,AGENT_VERSION);
   }else{
-    for(const fragment of ['Install-CYBERORBIT.command','Uninstall-CYBERORBIT.command','Update-CYBERORBIT.command','kit-manifest.json','payloads/arm64/runtime/node','payloads/x64/runtime/node','payloads/arm64/native/macos-lock','payloads/x64/native/macos-lock'])assert.ok(names.some(n=>n.endsWith(fragment)),`missing macOS package component ${fragment}`);
+    for(const fragment of ['install.sh','uninstall.sh','update.sh','Install-CYBERORBIT.command','Uninstall-CYBERORBIT.command','Update-CYBERORBIT.command','kit-manifest.json','payloads/arm64/runtime/node','payloads/x64/runtime/node','payloads/arm64/native/macos-lock','payloads/x64/native/macos-lock'])assert.ok(names.some(n=>n.endsWith(fragment)),`missing macOS package component ${fragment}`);
     const manifestFile=names.find(n=>n.endsWith('kit-manifest.json'));const manifest=JSON.parse(files.get(manifestFile).toString('utf8'));assert.equal(manifest.platform,'darwin');assert.equal(manifest.buildComplete,true);assert.equal(manifest.agentVersion,AGENT_VERSION);
   }
 });

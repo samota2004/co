@@ -17,9 +17,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Service host compilation failed' }
 $agentVersion = (Get-Content -LiteralPath (Join-Path $agentRoot 'package.json') -Raw | ConvertFrom-Json).version
 @{ agentVersion=$agentVersion; nodeVersion=$runtimeVersion; runtimeSha256=(Get-FileHash -LiteralPath (Join-Path $output 'runtime/node.exe') -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'build-manifest.json') -Encoding UTF8
 Get-ChildItem -LiteralPath $output -Recurse -File | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash )  $($_.FullName.Substring($output.Length+1))" } | Set-Content -LiteralPath (Join-Path $agentRoot 'dist/windows-sha256.txt')
-Compress-Archive -Path (Join-Path $output '*') -DestinationPath (Join-Path $agentRoot 'dist/CYBERORBIT-windows.zip') -Force
-# Keep the documented extracted kit current too. Rebuilding the ZIP alone left
-# existing install-kit users running old installers and hiding useful errors.
+# Keep the extracted development kit current. This script does not write a ZIP;
+# the release builder owns the canonical Windows release archive.
 $distRoot = [IO.Path]::GetFullPath((Join-Path $agentRoot 'dist'))
 $kitRoot = [IO.Path]::GetFullPath((Join-Path $distRoot 'install-kit'))
 if ([IO.Path]::GetDirectoryName($kitRoot) -ne $distRoot) { throw 'Unexpected installation kit path' }
@@ -31,8 +30,8 @@ if (Test-Path -LiteralPath $kitRoot) {
   })
   if ($state.Count -gt 0) { throw 'Installation kit contains local state or reparse points; preserve/review it before refreshing' }
 }
-Expand-Archive -LiteralPath (Join-Path $distRoot 'CYBERORBIT-windows.zip') -DestinationPath $kitRoot -Force
-& $NodeExe --test --test-isolation=none (Join-Path $agentRoot 'test/release-package.test.js')
-if ($LASTEXITCODE -ne 0) { throw 'Release verification failed; do not distribute this package' }
-Write-Output "Built $agentRoot/dist/CYBERORBIT-windows.zip ($runtimeVersion included). Unsigned development package."
+New-Item -ItemType Directory -Path $kitRoot -Force | Out-Null
+Copy-Item -Path (Join-Path $output '*') -Destination $kitRoot -Recurse -Force
+Write-Output "Built extracted Windows development package at $output ($runtimeVersion included). No release ZIP was created."
+Write-Output 'Use packaging/release/build-windows.ps1 to create the canonical CYBERORBIT-Windows.zip.'
 Write-Output "Refreshed $kitRoot (agent $agentVersion)."

@@ -6,7 +6,8 @@ and double-click `Build-Mac-Install-Kit.command`. The verified Node runtimes are
 included; Apple Command Line Tools are required on the builder only. This creates
 `output/CYBERORBIT-macOS-Install-Kit.zip` inside the extracted build kit, containing
 both architecture payloads. Employees extract that output ZIP and double-click
-`Install-CYBERORBIT.command`. See the included short `README.txt` for the employee
+`Install-CYBERORBIT.command`, or run `./install.sh` from Terminal. `./update.sh`
+and `./uninstall.sh` are Terminal aliases for the same protected flows. See the included short `README.txt` for the employee
 flow. The Build Kit itself is for the builder and is not employee-installable.
 The older per-architecture tar workflow below remains supported separately.
 

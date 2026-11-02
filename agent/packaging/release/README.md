@@ -16,6 +16,8 @@ The build creates a staging tree under the system temporary directory, compiles
 the service host, includes the pinned host Node executable, validates the
 allowlisted Windows package, runs release tests against the archive, then writes
 `agent/dist/CYBERORBIT-Windows.zip`. It refuses to overwrite an existing output.
+The separate `agent/packaging/windows/build.ps1` command creates extracted
+development trees only; it does not write a second Windows ZIP.
 
 ## macOS
 
@@ -29,8 +31,9 @@ runtime archives for both architectures. Set
 sh agent/packaging/release/build-macos.sh
 ```
 
-The existing Mac builder compiles and validates both native payloads and runs
-its native/privacy tests before the release wrapper validates the actual ZIP.
+Set `CYBERORBIT_MACOS_RUNTIME_ARCHIVES` to a directory containing the pinned
+official runtime archives. The Mac builder compiles and validates both native
+payloads and runs its native/privacy tests before the release wrapper validates the actual ZIP.
 It then writes `agent/dist/CYBERORBIT-macOS.zip`. This Windows host cannot run
 that build and must not create a pretend Mac package.
 

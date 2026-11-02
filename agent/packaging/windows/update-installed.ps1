@@ -87,13 +87,13 @@ $relativeFiles = @(
   'src/account-control.js','src/browser-privacy.js','src/cli.js',
   'src/collectors/files.js','src/collectors/index.js','src/collectors/linux.js','src/collectors/macos.js','src/collectors/windows.js',
   'src/config.js','src/credential-store.js','src/desktop-control.js','src/desktop-helper.js','src/desktop-usage.js','src/enrollment.js',
-  'src/health.js','src/ipc.js','src/linux-credentials.js','src/macos-user.js','src/native.js','src/normalizer.js',
+  'src/health.js','src/ipc.js','src/linux-credentials.js','src/local-operation-auth.js','src/local-operation-client.js','src/macos-user.js','src/native.js','src/normalizer.js',
   'src/queue.js','src/remote-stop.js','src/service.js','src/usb-policy.js','src/unix-account-control.js','src/unix-desktop-supervisor.js',
   'src/uploader.js','src/user-desktop-supervisor.js','src/user-lock.js','src/user-revocation.js',
   # Explicit Windows support files used by the updater, service and desktop helper.
   'src/windows-service-diagnostic.js','shared/contract.js','shared/app-identity.js',
-  'native/windows-api.cs','native/vault.ps1','native/windows-snapshot.ps1','native/windows-desktop.ps1','native/windows-account-control.ps1','native/windows-usb-policy.ps1',
-  'packaging/windows/configure-browser-titles.ps1','packaging/windows/configure-startup.ps1',
+  'native/windows-api.cs','native/vault.ps1','native/windows-snapshot.ps1','native/windows-desktop.ps1','native/windows-account-control.ps1','native/windows-usb-policy.ps1','native/windows-uninstall-schedule.ps1',
+  'packaging/windows/configure-browser-titles.ps1','packaging/windows/configure-startup.ps1','packaging/windows/request-operation.ps1',
   'packaging/windows/desktop-watchdog.ps1','packaging/windows/uninstall.ps1',
   'packaging/windows/update-source-files.ps1','package.json'
 )

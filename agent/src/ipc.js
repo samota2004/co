@@ -19,8 +19,8 @@ export function startIpc(secrets, onSample, {port=IPC_PORT,controls=()=>({})}={}
       const data=JSON.parse(body);
       if (data.identity!==secrets.mappedIdentity) {res.writeHead(403).end();return;}
       const task=serial.then(()=>onSample({...data,identity:secrets.mappedIdentity}));
-      serial=task.catch(()=>{});await task;
-      const reply=JSON.stringify({accepted:true,...controls()});
+      serial=task.catch(()=>{});const result=await task;
+      const reply=JSON.stringify({accepted:true,...(result&&typeof result==='object'?result:{}),...controls()});
       res.writeHead(200,{'Content-Type':'application/json','x-orbit-signature':sign(secrets.helperKey,`${nonce}\n${reply}`)}); res.end(reply);
     } catch { if(!res.headersSent) res.writeHead(400);res.end(); }
   });

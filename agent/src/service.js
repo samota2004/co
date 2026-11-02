@@ -24,6 +24,7 @@ import {acceptBrowserProof, titleAllowed} from './browser-privacy.js';
 import {acquireUserLock} from './user-lock.js';
 import {setTimeout as pause} from 'node:timers/promises';
 import {userRevoked,markUserRevoked} from './user-revocation.js';
+import {LOCAL_OPERATION_ACTIONS,persistVerifiedLocalOperationGrant,localOperationKey,clearLocalOperationGrant} from './local-operation-auth.js';
 export async function runService(local) {
   if(local.installMode==='user') { const c=assertUserConfig(local);await ownedPath(local.dataDirectory,c.uid,{directory:true}); }
   if(local.installMode==='user') {
@@ -89,6 +90,10 @@ async function runEnrolledService(local) {
   const ipc=await startIpc(secrets,async s=> {
     if(stopping)return;
     if(s.kind==='browser-control' || s.kind==='desktop-control') return;
+    if(s.kind==='local-operation-request'){
+      if(!LOCAL_OPERATION_ACTIONS.includes(s.action)||typeof s.requestId!=='string'||typeof s.requestedAt!=='string'||typeof s.reason!=='string'||s.reason.trim().length<8||s.reason.trim().length>500||Math.abs(Date.now()-Date.parse(s.requestedAt))>60000)throw new Error('Invalid local operation request');
+      return{localOperationRequest:await transport.post('local-operation-requests',{action:s.action,requestId:s.requestId,requestedAt:s.requestedAt,identity:secrets.mappedIdentity,deviceId:secrets.deviceId,reason:s.reason.trim()})};
+    }
     if(s.kind==='browser-proof') {
       if(process.platform==='darwin' && config.browserTitles && !config.paused && !uploader.revoked) acceptBrowserProof(proofs,s);
       return;
@@ -160,7 +165,7 @@ async function runEnrolledService(local) {
     }
   };
   const upload=async()=> {while(!stopping){if(adminStopped){await sleep(1000);continue;}const before=uploader.lastAcceptedUsage?.eventId;await uploader.tick();if(uploader.lastAcceptedUsage?.eventId!==before)await writeDesktopStatus(true);if(uploader.revoked)await revoke();await sleep(1000);}};
-  let accountControlReport=null,adminCommandReport=null,adminCommandExpiresAt=null,usbPolicyReport=null,usbPolicyCommandExpiresAt=null;
+  let accountControlReport=null,adminCommandReport=null,adminCommandExpiresAt=null,usbPolicyReport=null,usbPolicyCommandExpiresAt=null,localOperationReport=null;
   const heartbeat=async()=> {
     let failures=0;
     while(!stopping) {
@@ -175,13 +180,30 @@ async function runEnrolledService(local) {
         const sentAdminReport=adminCommandReport;
         const windowsServiceState=windowsService?await windowsServiceControlState():undefined;
         const lifecycle=monitoringLifecycleState({adminStopped,configPaused:config.paused,revoked:uploader.revoked,resuming:resumeTransition,collectionReady:monitoringReady});
-        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen,windowsService?(adminStopped?'ADMIN_STOPPED':'RUNNING'):undefined,windowsServiceState,lifecycle),...(accountControlReport?{accountControlReport}:{}),...(sentAdminReport?{agentCommandReport:sentAdminReport}:{}),...(usbPolicyReport?{usbPolicyReport}:{})});
+        const {action:localReportAction,...localReportWire}=localOperationReport||{};
+        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen,windowsService?(adminStopped?'ADMIN_STOPPED':'RUNNING'):undefined,windowsServiceState,lifecycle),...(accountControlReport?{accountControlReport}:{}),...(sentAdminReport?{agentCommandReport:sentAdminReport}:{}),...(usbPolicyReport?{usbPolicyReport}:{}),...(localOperationReport?{localOperationReport:localReportWire}:{})});
+        if(localOperationReport&&r.localOperationAck===localOperationReport.requestId){
+          const operation=localOperationReport;localOperationReport=null;
+          if(operation.action==='SERVICE_STOP'){
+            console.log('Main Admin authorization accepted. Stopping the CYBERORBIT Windows service; it cannot receive remote commands until a local Windows Administrator starts it again.');
+            try{await clearLocalOperationGrant(local.dataDirectory);}catch{console.warn('Consumed service-stop grant could not be removed; it will expire and is no longer authorized server-side.');}
+            await writeDesktopStatus(true);stop();
+          }else if(operation.action==='AGENT_UNINSTALL'&&operation.resultCode==='GRANT_ACCEPTED'){
+            try{await nativeInput('windows-uninstall-schedule.ps1',{requestId:operation.requestId});localOperationReport={...operation,resultCode:'UNINSTALL_SCHEDULED',reportedAt:new Date().toISOString()};}
+            catch{try{await clearLocalOperationGrant(local.dataDirectory);}catch{}localOperationReport={...operation,resultCode:'UNINSTALL_SCHEDULE_FAILED',reportedAt:new Date().toISOString()};}
+          }
+        }
         accountControlReport=null;
         if(sentAdminReport&&r.agentCommandAck===sentAdminReport.commandId){
           const acknowledged=await acknowledgeAdminCommand(local.dataDirectory,sentAdminReport.commandId);
           if(acknowledged.accepted){adminStopped=acknowledged.adminStopped;adminCommandReport=null;adminCommandExpiresAt=null;console.log(adminStopped?'Administrator stop is persistent; telemetry collection is disabled while authenticated control heartbeats remain active.':'Administrator resume accepted; endpoint monitoring is active.');}
         }
         if(usbPolicyReport&&r.usbPolicyCommandAck===usbPolicyReport.commandId){if(await acknowledgeUsbPolicyCommand(local.dataDirectory,usbPolicyReport.commandId)){usbPolicyReport=null;usbPolicyCommandExpiresAt=null;}}
+        if(r.localOperationGrant&&windowsService){
+          const accepted=await persistVerifiedLocalOperationGrant(local.dataDirectory,localOperationKey(secrets.credential),r.localOperationGrant,secrets);
+          if(accepted)localOperationReport={requestId:r.localOperationGrant.requestId,nonce:r.localOperationGrant.nonce,action:r.localOperationGrant.action,resultCode:'GRANT_ACCEPTED',reportedAt:new Date().toISOString()};
+          else console.warn('Local operation grant rejected by device, identity, signature, expiry or replay validation.');
+        }
         if(windowsService&&r.agentCommand){
           const received=await receiveAdminCommand(local.dataDirectory,secrets,r.agentCommand);
           if(received.accepted){

@@ -15,7 +15,7 @@ try {
   New-Item -ItemType Directory -Path $stage | Out-Null
   foreach ($folder in @('src','shared','browser-companion')) { Copy-Item -LiteralPath (Join-Path $agentRoot $folder) -Destination $stage -Recurse }
   New-Item -ItemType Directory -Path (Join-Path $stage 'native'),(Join-Path $stage 'packaging/windows'),(Join-Path $stage 'runtime') -Force | Out-Null
-  foreach ($file in @('windows-api.cs','windows-snapshot.ps1','windows-desktop.ps1','windows-account-control.ps1','windows-usb-policy.ps1','vault.ps1')) { Copy-Item -LiteralPath (Join-Path $agentRoot "native/$file") -Destination (Join-Path $stage 'native') }
+  foreach ($file in @('windows-api.cs','windows-snapshot.ps1','windows-desktop.ps1','windows-account-control.ps1','windows-usb-policy.ps1','windows-uninstall-schedule.ps1','vault.ps1')) { Copy-Item -LiteralPath (Join-Path $agentRoot "native/$file") -Destination (Join-Path $stage 'native') }
   Get-ChildItem -LiteralPath (Join-Path $agentRoot 'packaging/windows') -File | Where-Object { $_.Extension -in @('.ps1','.cs') -and $_.Name -ne 'build.ps1' } | Copy-Item -Destination (Join-Path $stage 'packaging/windows')
   Copy-Item -LiteralPath (Join-Path $agentRoot 'package.json') -Destination $stage
   foreach ($doc in @('README.md','CHANGES.md','VERIFICATION.md')) { Copy-Item -LiteralPath (Join-Path $agentRoot $doc) -Destination $stage }
@@ -29,7 +29,7 @@ try {
     $manifest.files += [ordered]@{ path=$relative; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
   }
   [IO.File]::WriteAllText((Join-Path $stage 'package-manifest.json'),($manifest | ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
-  $required = @('runtime/node.exe','CyberOrbitService.exe','src/service.js','src/remote-stop.js','src/macos-user.js','shared/contract.js','native/windows-usb-policy.ps1','packaging/windows/install.ps1','packaging/windows/uninstall.ps1','packaging/windows/update-installed.ps1','packaging/windows/update-source-files.ps1','packaging/windows/desktop-watchdog.ps1','package-manifest.json')
+  $required = @('runtime/node.exe','CyberOrbitService.exe','packaging/windows/ServiceHost.cs','src/service.js','src/local-operation-auth.js','src/local-operation-client.js','src/remote-stop.js','src/macos-user.js','shared/contract.js','native/windows-api.cs','native/windows-snapshot.ps1','native/windows-desktop.ps1','native/windows-account-control.ps1','native/windows-usb-policy.ps1','native/windows-uninstall-schedule.ps1','native/vault.ps1','packaging/windows/install.ps1','packaging/windows/configure-startup.ps1','packaging/windows/request-operation.ps1','packaging/windows/uninstall.ps1','packaging/windows/update-installed.ps1','packaging/windows/update-source-files.ps1','packaging/windows/desktop-watchdog.ps1','package-manifest.json')
   foreach ($relative in $required) { if (-not (Test-Path -LiteralPath (Join-Path $stage $relative) -PathType Leaf)) { throw "Required Windows package component missing: $relative" } }
   $excluded = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object { $_.Extension -in @('.map','.test.js','.tmp') -or $_.FullName -match '[\\/](node_modules|\.git|__pycache__)[\\/]' })
   if ($excluded.Count) { throw 'Development artifact found in Windows release stage' }

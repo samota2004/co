@@ -45,6 +45,12 @@ const getToken = () => localStorage.getItem("zero_trust_token");
 const getErrorMessage = (data, fallback) =>
   data?.error?.message || data?.message || fallback;
 
+const localOperationStatusLabel=(status)=>({
+  AUTH_REQUESTED:'Pending Main Admin review',AUTH_APPROVED:'Approved · waiting for endpoint heartbeat',
+  AUTH_GRANT_ISSUED:'Grant issued · awaiting endpoint confirmation',AUTH_EXECUTING:'Agent accepted authorization · Windows state is separate',
+  AUTH_REJECTED:'Rejected',AUTH_EXPIRED:'Expired',AUTH_FAILED:'Operation failed',AUTH_COMPLETED:'Uninstalled · credential revoked',
+}[status]||String(status||'Unknown').replaceAll('_',' '));
+
 const normalizeAdmin = (admin) => ({
   ...admin,
   department: admin.department || admin.departmentCode || "ENGINEERING",
@@ -118,6 +124,9 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [localOperationRequests, setLocalOperationRequests] = useState([]);
+  const [localOperationRequestsError, setLocalOperationRequestsError] = useState("");
+  const [reviewingOperation, setReviewingOperation] = useState("");
 
   const [showForm, setShowForm] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState(null);
@@ -190,6 +199,36 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
   useEffect(() => {
     loadAdmins();
   }, []);
+
+  const loadLocalOperationRequests = async () => {
+    const token=getToken();
+    if(!token)return;
+    try {
+      const response=await fetch('/api/endpoint/local-operation-requests',{headers:{Authorization:`Bearer ${token}`}});
+      const data=await response.json();
+      if(!response.ok)throw new Error(getErrorMessage(data,'Unable to load local operation requests.'));
+      setLocalOperationRequests(data.requests||[]);setLocalOperationRequestsError("");
+    } catch(error) { setLocalOperationRequestsError(error.message||'Unable to load local operation requests.'); }
+  };
+  useEffect(()=>{
+    if(!isMainAdmin)return;
+    loadLocalOperationRequests();
+    const timer=setInterval(loadLocalOperationRequests,15000);
+    return()=>clearInterval(timer);
+  },[isMainAdmin]);
+  const reviewLocalOperation=async(request,decision)=>{
+    const reason=window.prompt(`${decision==='APPROVE'?'Approve':'Reject'} ${request.action} for ${request.device?.user?.name||'employee'} on ${request.device?.name||request.deviceId}. Enter an audit reason (8–500 characters):`);
+    if(reason===null)return;
+    if(reason.trim().length<8||reason.trim().length>500){setError('Enter an audit reason containing 8–500 characters.');return;}
+    setReviewingOperation(request.commandId);setError('');setSuccess('');
+    try{
+      const response=await fetch(`/api/endpoint/local-operation-requests/${encodeURIComponent(request.commandId)}/review`,{method:'POST',headers:{Authorization:`Bearer ${getToken()}`,'Content-Type':'application/json'},body:JSON.stringify({decision,reason})});
+      const data=await response.json();if(!response.ok)throw new Error(getErrorMessage(data,'Unable to review authorization request.'));
+      setSuccess(`${request.action} ${decision.toLowerCase()}d. The device must still complete the operation before the grant expires.`);
+      await loadLocalOperationRequests();
+    }catch(error){setError(error.message||'Unable to review authorization request.');await loadLocalOperationRequests();}
+    finally{setReviewingOperation('');}
+  };
 
   const openCreateForm = () => {
     setEditingAdmin(null);
@@ -496,6 +535,14 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           {success}
         </div>
       )}
+
+      {isMainAdmin&&<section className="mt-4 rounded-2xl border border-[#D4AF37]/35 bg-[#050A10] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold text-[#F4F7FA]">Local agent operation requests</h2><p className="mt-1 text-sm text-[#A7B0BA]">SERVICE_STOP and AGENT_UNINSTALL require your fresh MFA approval. Monitoring pause/resume remains a separate operation.</p></div><button type="button" onClick={loadLocalOperationRequests} className="rounded-lg border border-[#67E8F9]/40 px-3 py-2 text-sm text-[#67E8F9]">Refresh requests</button></div>
+        {localOperationRequestsError?<p role="alert" className="mt-4 rounded-lg border border-red-400/30 p-4 text-sm text-red-300">{localOperationRequestsError}</p>:!localOperationRequests.length?<p className="mt-4 rounded-lg border border-white/10 p-4 text-sm text-[#A7B0BA]">No local agent operation requests.</p>:<div className="mt-4 space-y-3">{localOperationRequests.map(request=><article key={request.commandId} className="rounded-xl border border-white/10 bg-[#0B1320] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><strong className="text-[#F4F7FA]">{request.action.replace('_',' ')}</strong><div className="mt-1 text-sm text-[#A7B0BA]">{request.device?.user?.name||'Unknown employee'} ({request.device?.user?.employeeId||'no employee ID'}) · {request.device?.name||'Unknown device'} · {request.deviceId}</div><div className="mt-1 text-xs text-[#7F8A96]">Requested {new Date(request.requestedAt||request.createdAt).toLocaleString()} · expires {request.expiresAt?new Date(request.expiresAt).toLocaleString():'unknown'}{request.reviewedBy?` · reviewed by ${request.reviewedBy} at ${new Date(request.reviewedAt).toLocaleString()}`:''}</div><p className="mt-2 whitespace-pre-line text-sm text-[#C8D1DC]">{request.reason}</p></div><span className="max-w-[300px] rounded-full border border-[#D4AF37]/30 px-3 py-1 text-xs text-[#D4AF37]">{localOperationStatusLabel(request.status)}</span></div>
+          {request.status==='AUTH_REQUESTED'&&<div className="mt-3 flex gap-2"><button disabled={Boolean(reviewingOperation)} onClick={()=>reviewLocalOperation(request,'APPROVE')} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{reviewingOperation===request.commandId?'Working…':'Approve'}</button><button disabled={Boolean(reviewingOperation)} onClick={()=>reviewLocalOperation(request,'REJECT')} className="rounded-lg border border-red-400/40 px-3 py-2 text-sm text-red-300 disabled:opacity-50">Reject</button></div>}
+        </article>)}</div>}
+      </section>}
 
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Panel

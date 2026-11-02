@@ -12,11 +12,13 @@ async function download(url) {
   return Buffer.concat(chunks);
 }
 export async function prepare(args=[]) {
-  let cache=path.join(agent,'dist/macos-runtime-cache'),output=path.join(agent,'dist/CYBERORBIT-macOS-Build-Kit.zip');
+  let cache=null,output=path.join(agent,'dist/CYBERORBIT-macOS-Build-Kit.zip');
   for(let i=0;i<args.length;i+=2){if(!['--runtime-archives','--output'].includes(args[i])||!args[i+1])throw new Error('Use --runtime-archives DIRECTORY --output ZIP');if(args[i]==='--runtime-archives')cache=path.resolve(args[i+1]);else output=path.resolve(args[i+1]);}
   const spec=JSON.parse(await fs.readFile(path.join(packaging,'node-runtime.json'),'utf8'));
-  await fs.mkdir(cache,{recursive:true,mode:0o700});
-  for(const arch of architectures) {
+  const ownedCache=!cache;
+  if(ownedCache)cache=await fs.mkdtemp(path.join(os.tmpdir(),'cyberorbit-macos-runtime-cache-'));
+  else await fs.mkdir(cache,{recursive:true,mode:0o700});
+  try { for(const arch of architectures) {
     const archive=spec.archives[arch],file=path.join(cache,archive.file);
     let data;
     try {data=await fs.readFile(file);}catch(error){if(error.code!=='ENOENT')throw error;}
@@ -29,6 +31,7 @@ export async function prepare(args=[]) {
     if(sha256(data)!==archive.sha256)throw new Error('Cached Node archive checksum mismatch; preserve/review it before rebuilding');
   }
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'cyberorbit-macos-build-kit-'));
+  try {
   const root=path.join(temp,'CYBERORBIT-macOS-Build-Kit');await fs.mkdir(root,{mode:0o700});
   await fs.mkdir(path.join(root,'agent'));
   // Explicit public-source allowlist. Never copy repository secrets, live data,
@@ -59,9 +62,9 @@ export async function prepare(args=[]) {
   for(const file of files){packageManifest.files.push({path:file,sha256:sha256(await fs.readFile(path.join(root,file)))});}
   await fs.writeFile(path.join(root,'package-manifest.json'),JSON.stringify(packageManifest,null,2)+'\n');
   await fs.writeFile(path.join(root,'SHA256SUMS'),packageManifest.files.map(f=>`${f.sha256}  ${f.path}`).join('\n')+'\n');
-  try {
-    const result=await createZip(root,output,{folder:'CYBERORBIT-macOS-Build-Kit'});
-    console.log(JSON.stringify({...result,employeeInstallable:false,next:'Transfer this build kit to macOS and run Build-Mac-Install-Kit.command'},null,2));return result;
+  const result=await createZip(root,output,{folder:'CYBERORBIT-macOS-Build-Kit'});
+  console.log(JSON.stringify({...result,employeeInstallable:false,next:'Transfer this build kit to macOS and run Build-Mac-Install-Kit.command'},null,2));return result;
   } finally {await fs.rm(temp,{recursive:true,force:true});}
+  } finally {if(ownedCache)await fs.rm(cache,{recursive:true,force:true});}
 }
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url))prepare(process.argv.slice(2)).catch(error=>{console.error(error.message);process.exitCode=1;});

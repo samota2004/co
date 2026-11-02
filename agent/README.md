@@ -183,6 +183,23 @@ JavaScript agent, independent of the website. The Windows package includes Node;
 
 Express (`server/server.js`, router `server/routes/index.js`), PostgreSQL/Prisma, MFA-verified bearer JWTs, React and SSE. The repository already contained uncommitted `EndpointDevice`, `EndpointEvent` and company schema additions; these are reused. A pre-existing empty `20260918000000_remove_default_risk_scores` migration directory is repaired with a no-op SQL file so deployment preserves existing risk defaults. Endpoint routes fail closed if durable PostgreSQL is unavailable.
 
+### Windows local service stop and uninstall approval
+
+`SERVICE_STOP` and `AGENT_UNINSTALL` are separate from dashboard `MONITORING_STOP` / `MONITORING_RESUME`. On a mapped employee Windows session, submit a request with an elevated or non-elevated ordinary PowerShell window:
+
+```powershell
+Set-Location "$env:ProgramFiles\CYBERORBIT\packaging\windows"
+.\request-operation.ps1 -Action SERVICE_STOP -Reason "Employee-requested service maintenance"
+# Or request an uninstall; the script itself remains non-destructive until Main Admin approval.
+.\uninstall.ps1
+```
+
+The running LocalSystem service receives the mapped desktop request over the existing nonce/HMAC-protected loopback IPC and submits it using its enrolled device credential. A Main Admin reviews it under **Admin Management → Local agent operation requests**; the review endpoint requires the existing fresh MFA session. The resulting grant is HMAC-authenticated with the enrolled credential-derived key, bound to the request ID, device ID, Windows identity, action, nonce and a two-minute expiry, and delivered on that device's TLS heartbeat. Duplicate delivery is idempotent; database status and the endpoint's protected ProgramData grant record prevent a second operation. Backend outage, rejection, expiry, invalid binding, or signature failure never executes the operation.
+
+An approved `SERVICE_STOP` stops the Windows service itself. No remote command can be received while SCM reports it stopped; automatic startup means a later Windows reboot can start it again. `AGENT_UNINSTALL` is scheduled by the LocalSystem service; the uninstaller validates the signed grant, stops the service, then asks the backend to consume the grant and revoke the device credential before removing installed files. If SCM cannot stop or backend revocation fails, installed files and enrollment data are preserved; when revocation fails after a successful stop, the script requests service restart. Local enrollment/queue data stays in ProgramData unless an administrator explicitly adds `-PurgeData` to the authorized uninstall. Updating an existing installation preserves data and does not require reenrollment.
+
+The installer and startup configurator retain the DACL `SYSTEM: full`, `BUILTIN\Administrators: full`, `BUILTIN\Users: query-only`; standard users cannot stop, delete, change, or rewrite the service using `Stop-Service` or `sc.exe`. This is not tamper-proofing against a person with Windows local Administrator or SYSTEM access: such a principal can alter SCM, task, filesystem or OS policy outside CYBERORBIT. CYBERORBIT never requests a web-admin password in PowerShell. The authenticated authorization is an approval record and short-lived operation grant; Windows local Administrator remains a distinct OS authority.
+
 ## Backend setup
 
 From the repository root, with the existing database/JWT environment configured:
@@ -201,14 +218,14 @@ Local development only: set `ENDPOINT_ALLOW_LOOPBACK_HTTP=true` on a non-product
 
 ## Windows build, assignment and installation
 
-Target: Windows 10/11, x64 package when built with x64 Node. Build machine needs Node >=22, Windows PowerShell 5.1 and the Windows .NET Framework C# compiler. The default script includes the current build machine's Node executable; pin `-NodeExe` to a reviewed runtime binary for release builds. A SHA256 build manifest and file list accompany the package. No runtime downloads occur on employee laptops.
+Target: Windows 10/11, x64 package when built with x64 Node. Build machine needs Node >=22, Windows PowerShell 5.1 and the Windows .NET Framework C# compiler. The development staging script includes the current build machine's Node executable; pin `-NodeExe` to a reviewed runtime binary when staging. The official release builder writes only the canonical `CYBERORBIT-Windows.zip` and refuses to overwrite it. No runtime downloads occur on employee laptops.
 
 ```powershell
-# From repository root on the build machine:
-powershell -NoProfile -File agent\packaging\windows\build.ps1
-# Optional runtime pin:
+# Development staging only; refreshes extracted dist/windows and install-kit, no ZIP:
 powershell -NoProfile -File agent\packaging\windows\build.ps1 -NodeExe C:\BuildTools\node-v24.20.0-win-x64\node.exe
-# The build also refreshes agent/dist/install-kit after checking it has no local state.
+
+# Official release ZIP, from repository root:
+powershell -NoProfile -ExecutionPolicy Bypass -File agent\packaging\release\build-windows.ps1
 ```
 
 1. Verify the employee's Windows SID **on the assigned laptop**, in their session: `whoami /user`. Match the directory account to the employee before mapping it. A shared account is not a verified employee identity.

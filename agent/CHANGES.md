@@ -46,7 +46,7 @@ Pre-existing frontend, backend and schema edits were preserved. The existing `En
 - `package.json` — agent test/build convenience scripts
 - `.gitignore` — dependency/build/agent local credential/queue artifacts ignored
 
-Generated, ignored build artifacts: `agent/dist/CYBERORBIT-windows.zip`, `agent/dist/windows/`, `agent/dist/windows-sha256.txt`, root `dist/`. No credentials or enrollment tokens are committed.
+Generated, ignored development artifacts: `agent/dist/windows/`, `agent/dist/install-kit/`, `agent/dist/windows-sha256.txt`, root `dist/`. Official release archives use the canonical names and release builder documented in `agent/packaging/release/README.md`. No credentials or enrollment tokens are committed.
 
 ## Enrollment diagnostics fix (agent 1.0.1)
 

@@ -35,7 +35,7 @@ export function nativeStderrCategory(child) {
   return () => nativeErrorCategory(stderr);
 }
 export function nativeInput(file, input, { policyOverride = true } = {}) {
-  if (!['vault.ps1','windows-snapshot.ps1','windows-desktop.ps1','windows-account-control.ps1','windows-usb-policy.ps1','keychain','macos-desktop'].includes(file)) return Promise.reject(nativeFailure('unknown',null,'HELPER_NOT_ALLOWED'));
+  if (!['vault.ps1','windows-snapshot.ps1','windows-desktop.ps1','windows-account-control.ps1','windows-usb-policy.ps1','windows-uninstall-schedule.ps1','keychain','macos-desktop'].includes(file)) return Promise.reject(nativeFailure('unknown',null,'HELPER_NOT_ALLOWED'));
   let payload;
   try { payload = JSON.stringify(input); } catch { return Promise.reject(nativeFailure(file,null,'INPUT_INVALID')); }
   return new Promise((resolve, reject) => {

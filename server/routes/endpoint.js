@@ -1,6 +1,6 @@
 import express from 'express';
 import { prisma, isValidPostgresUrl } from '../models/prisma.js';
-import { requireAuth, requireSecurityAdmin } from '../middleware/auth.js';
+import { requireAuth, requireSecurityAdmin, requireMainAdmin } from '../middleware/auth.js';
 import { EndpointService, EndpointError } from '../services/endpoint-service.js';
 import { endpointRequestContext, endpointFailure } from '../middleware/endpoint-errors.js';
 import { sseManager } from '../services/sse.js';
@@ -64,10 +64,20 @@ router.post('/ingest', handle(async req => {
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
   return { acceptedEventIds: result.acceptedEventIds };
 }));
+router.post('/local-operation-requests',handle(req=>service.requestLocalOperation(credential(req),req.body)));
+router.get('/local-operation-requests',requireMainAdmin,handle(req=>service.listLocalOperationRequests(req.user)));
+router.post('/local-operation-requests/:requestId/review',requireMainAdmin,requireRecentMfa,handle(req=>service.reviewLocalOperationRequest(req.user,req.params.requestId,req.body?.decision,req.body?.reason)));
+router.get('/local-operation-requests/:requestId/status',handle(async req=>{
+  const device=await service.authenticate(prisma,credential(req));
+  const request=await prisma.endpointEnforcementCommand.findFirst({where:{commandId:req.params.requestId,deviceId:device.id,companyId:device.companyId,userId:device.userId,action:{in:['SERVICE_STOP','AGENT_UNINSTALL']}}});
+  if(!request)throw new EndpointError(404,'Authorization request not found for this device.','LOCAL_OPERATION_REQUEST_NOT_FOUND');
+  return{requestId:request.commandId,status:request.status,action:request.action,expiresAt:request.expiresAt};
+}));
+router.post('/local-operation-requests/:requestId/complete',handle(req=>service.completeLocalOperation(credential(req),req.params.requestId,req.body)));
 router.post('/heartbeat', handle(async req => {
   const result = await service.heartbeat(credential(req), req.body,cityRequestAddress(req),cityAddressDiagnostics(req));
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
-  return { config: result.config, accountControl: result.accountControl, agentCommand: result.agentCommand, agentCommandAck: result.agentCommandAck, usbPolicyCommand: result.usbPolicyCommand, usbPolicyCommandAck: result.usbPolicyCommandAck };
+  return { config: result.config, accountControl: result.accountControl, agentCommand: result.agentCommand, agentCommandAck: result.agentCommandAck, localOperationGrant:result.localOperationGrant,localOperationAck:result.localOperationAck,usbPolicyCommand: result.usbPolicyCommand, usbPolicyCommandAck: result.usbPolicyCommandAck };
 }));
 router.get('/dashboard', requireAuth, handle(req => service.dashboard(req.user, req.query.userId, req.query.eventType, req.query.deviceId, req.query.readinessDate)));
 router.put('/:id/config', requireSecurityAdmin, handle(req => service.change(req.user, req.params.id, req.body)));

@@ -7,6 +7,7 @@ import {reportCityAddress} from './proxy-policy.js';
 import {createLiveModelDataReadiness,parseReadinessDate} from './ml-data-readiness.js';
 import {featureSchema} from './ml-service.js';
 import {validateUsbPolicy,signUsbPolicyCommand} from '../../agent/src/usb-policy.js';
+import {LOCAL_OPERATION_ACTIONS,signLocalOperationGrant} from '../../agent/src/local-operation-auth.js';
 export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
@@ -163,6 +164,8 @@ export class EndpointService {
     if(report!==undefined&&(!report||typeof report!=='object'||Array.isArray(report)||Object.keys(report).some(key=>!['commandId','resultCode','reportedAt'].includes(key))||typeof report.commandId!=='string'||report.commandId.length>80||typeof report.resultCode!=='string'||!['BLOCKED','ALLOWED','LOGOFF_PENDING','EXTERNALLY_DISABLED','RECOVERY_REQUIRED','UNSAFE_ACCOUNT','UNSAFE_RECOVERY','UNSUPPORTED_MACHINE','UNSAFE_STORAGE','ACCESS_DENIED','NATIVE_ERROR','CONTROL_DISABLED','CONTROL_REFUSED','NEEDS_REVIEW'].includes(report.resultCode)||!Number.isFinite(Date.parse(report.reportedAt))||Date.parse(report.reportedAt)>Date.now()+60000))throw new EndpointError(400,'Invalid account-control acknowledgement');
     const stopReport=body.agentCommandReport;
     if(stopReport!==undefined&&(!stopReport||typeof stopReport!=='object'||Array.isArray(stopReport)||Object.keys(stopReport).some(key=>!['commandId','resultCode','reportedAt'].includes(key))||typeof stopReport.commandId!=='string'||!/^[0-9a-f-]{36}$/i.test(stopReport.commandId)||!['STOP_ACCEPTED','START_ACCEPTED'].includes(stopReport.resultCode)||!Number.isFinite(Date.parse(stopReport.reportedAt))||Date.parse(stopReport.reportedAt)>Date.now()+30000))throw new EndpointError(400,'Invalid agent-command acknowledgement');
+    const localReport=body.localOperationReport;
+    if(localReport!==undefined&&(!localReport||typeof localReport!=='object'||Array.isArray(localReport)||Object.keys(localReport).sort().join('|')!=='nonce|reportedAt|requestId|resultCode'||typeof localReport.requestId!=='string'||!/^[0-9a-f-]{36}$/i.test(localReport.requestId)||typeof localReport.nonce!=='string'||!/^[0-9a-f-]{36}$/i.test(localReport.nonce)||!['GRANT_ACCEPTED','UNINSTALL_SCHEDULED','UNINSTALL_SCHEDULE_FAILED'].includes(localReport.resultCode)||!Number.isFinite(Date.parse(localReport.reportedAt))||Date.parse(localReport.reportedAt)>Date.now()+30000))throw new EndpointError(400,'Invalid local operation acknowledgement');
     const result=await withCitySchema(this.prisma,cityAvailable=>this.prisma.$transaction(async tx => {
       const d = await this.authenticate(tx, secret,cityAvailable);
       const observedAt=new Date();
@@ -205,6 +208,17 @@ export class EndpointService {
           agentCommandAck=stop.commandId;
         }
       }
+      let localOperationAck=null;
+      if(localReport&&enforcement){
+        const operation=await enforcement.findUnique({where:{commandId:localReport.requestId}});
+        const actionReportMatches=operation?.action==='SERVICE_STOP'?localReport.resultCode==='GRANT_ACCEPTED':operation?.action==='AGENT_UNINSTALL';
+        if(operation&&actionReportMatches&&LOCAL_OPERATION_ACTIONS.includes(operation.action)&&operation.deviceId===d.id&&operation.userId===d.userId&&operation.companyId===d.companyId&&operation.resultCode===`GRANT:${localReport.nonce}`&&operation.expiresAt>observedAt&&['AUTH_GRANT_ISSUED','AUTH_EXECUTING'].includes(operation.status)){
+          const failed=localReport.resultCode==='UNINSTALL_SCHEDULE_FAILED';
+          if(operation.status==='AUTH_GRANT_ISSUED'||failed)await enforcement.update({where:{id:operation.id},data:{status:failed?'AUTH_FAILED':'AUTH_EXECUTING',resultCode:failed?'UNINSTALL_SCHEDULE_FAILED':operation.resultCode,acknowledgedAt:observedAt}});
+          localOperationAck=operation.commandId;
+          if(failed)await audit(tx,d.user,'LOCAL_AGENT_OPERATION_FAILED',{requestId:operation.commandId,deviceId:d.id,action:operation.action,result:'UNINSTALL_SCHEDULE_FAILED'},d.userId);
+        }
+      }
       const usbReport=body.usbPolicyReport;
       if(usbReport!==undefined&&(!usbReport||typeof usbReport!=='object'||Array.isArray(usbReport)||Object.keys(usbReport).sort().join('|')!=='commandId|policy|reportedAt|resultCode'||typeof usbReport.commandId!=='string'||!['POLICY_APPLIED_UNVERIFIED','POLICY_FAILED','POLICY_UNSUPPORTED','POLICY_UNVERIFIED'].includes(usbReport.resultCode)||!Number.isFinite(Date.parse(usbReport.reportedAt))||Date.parse(usbReport.reportedAt)>Date.now()+60000))throw new EndpointError(400,'Invalid USB policy acknowledgement');
       let usbPolicyCommandAck=null;
@@ -240,13 +254,18 @@ export class EndpointService {
         const pendingStop=await enforcement.findFirst({where:{deviceId:d.id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:observedAt}},orderBy:{createdAt:'asc'}});
         if(pendingStop){if(pendingStop.status==='PENDING_OFFLINE')await enforcement.update({where:{id:pendingStop.id},data:{status:'PENDING'}});agentCommand={commandId:pendingStop.commandId,deviceId:d.id,identity:d.mappedIdentity,action:pendingStop.action,issuedAt:pendingStop.issuedAt.toISOString(),expiresAt:pendingStop.expiresAt.toISOString()};}
       }
+      let localOperationGrant=null;
+      if(enforcement&&d.platform==='win32'&&d.mappedIdentity){
+        await enforcement.updateMany({where:{deviceId:d.id,action:{in:LOCAL_OPERATION_ACTIONS},status:{in:['AUTH_REQUESTED','AUTH_APPROVED','AUTH_GRANT_ISSUED']},expiresAt:{lte:observedAt}},data:{status:'AUTH_EXPIRED',resultCode:'AUTHORIZATION_EXPIRED'}});
+        localOperationGrant=await this.issueLocalOperationGrantForHeartbeat(tx,d,observedAt);
+      }
       let usbPolicyCommand=null;
       if(enforcement&&d.platform==='win32'&&d.mappedIdentity){
         await enforcement.updateMany({where:{deviceId:d.id,action:'SET_USB_POLICY',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:observedAt}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
         const pending=await enforcement.findFirst({where:{deviceId:d.id,action:'SET_USB_POLICY',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:observedAt}},orderBy:{createdAt:'asc'}});
         if(pending){if(pending.status==='PENDING_OFFLINE')await enforcement.update({where:{id:pending.id},data:{status:'PENDING',issuedAt:observedAt}});usbPolicyCommand={action:'SET_USB_POLICY',commandId:pending.commandId,deviceId:d.id,identity:d.mappedIdentity,issuedAt:(pending.status==='PENDING_OFFLINE'?observedAt:pending.issuedAt).toISOString(),expiresAt:pending.expiresAt.toISOString(),policy:validateUsbPolicy(d.config.usbPolicy||DEFAULT_CONFIG.usbPolicy)};usbPolicyCommand.signature=signUsbPolicyCommand(Buffer.from(d.credentialHash,'hex'),usbPolicyCommand);}
       }
-      return { config: {...DEFAULT_CONFIG,...d.config,usbPolicy:validateUsbPolicy(d.config.usbPolicy||DEFAULT_CONFIG.usbPolicy)}, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:observedAt.toISOString(),...(command?{commandId:command.commandId}: {})},agentCommand,agentCommandAck,usbPolicyCommand,usbPolicyCommandAck, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
+      return { config: {...DEFAULT_CONFIG,...d.config,usbPolicy:validateUsbPolicy(d.config.usbPolicy||DEFAULT_CONFIG.usbPolicy)}, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:observedAt.toISOString(),...(command?{commandId:command.commandId}: {})},agentCommand,agentCommandAck,localOperationGrant,localOperationAck,usbPolicyCommand,usbPolicyCommandAck, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
     }));
     const {cityDevice:d,generation,observedAt,...response}=result;
     // Optional lookup cannot roll back or fail an authenticated heartbeat.
@@ -294,7 +313,7 @@ export class EndpointService {
     const {devices,cityAvailable} = await withCitySchema(this.prisma,async cityAvailable=>({cityAvailable,devices:await this.prisma.endpointDevice.findMany({ where, select: {
       id: true, userId: true, name: true, platform: true, mappedIdentity: true, enrolledAt: true,
       revokedAt: true, lastSeen: true, agentVersion: true, health: true, config: true,...(cityAvailable?{ipCityEnabled:true,ipCity:true}:{}),
-      enforcementCommands:{where:{action:{in:['BLOCK','ALLOW','STOP_AGENT','START_AGENT','SET_USB_POLICY']}},orderBy:{createdAt:'desc'},take:10,select:{id:true,commandId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}},
+      enforcementCommands:{where:{action:{in:['BLOCK','ALLOW','STOP_AGENT','START_AGENT','SET_USB_POLICY','SERVICE_STOP','AGENT_UNINSTALL']}},orderBy:{createdAt:'desc'},take:10,select:{id:true,commandId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}},
       user: { select: { id: true, name: true, employeeId: true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true } } } }
     }, orderBy: { createdAt: 'desc' } })}));
     const applicationActivity=devices.length?await this.prisma.endpointEvent.groupBy({
@@ -306,11 +325,11 @@ export class EndpointService {
     for(const row of applicationActivity){const device=devices.find(item=>item.id===row.deviceId);if(device?.userId===row.userId&&row._max.occurredAt)lastApplicationByDevice.set(row.deviceId,row._max.occurredAt.toISOString());}
     // Preserve the newest Windows lifecycle command in the API even when a busy
     // device has more than five newer OS-account enforcement records.
-    const lifecycleCommands=devices.length?await this.prisma.endpointEnforcementCommand.findMany({where:{companyId:user.companyId,deviceId:{in:devices.map(d=>d.id)},action:{in:['STOP_AGENT','START_AGENT','SET_USB_POLICY']}},orderBy:{createdAt:'desc'},select:{id:true,commandId:true,deviceId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}}):[];
+    const lifecycleCommands=devices.length?await this.prisma.endpointEnforcementCommand.findMany({where:{companyId:user.companyId,deviceId:{in:devices.map(d=>d.id)},action:{in:['STOP_AGENT','START_AGENT','SET_USB_POLICY','SERVICE_STOP','AGENT_UNINSTALL']}},orderBy:{createdAt:'desc'},select:{id:true,commandId:true,deviceId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}}):[];
     const latestLifecycleByDeviceAction=new Map();
     for(const command of lifecycleCommands){const key=`${command.deviceId}:${command.action}`;if(!latestLifecycleByDeviceAction.has(key))latestLifecycleByDeviceAction.set(key,command);}
     const commandsByDevice=new Map(devices.map(d=>[d.id,d.enforcementCommands||[]]));
-    for(const d of devices){const list=commandsByDevice.get(d.id);for(const action of ['STOP_AGENT','START_AGENT','SET_USB_POLICY']){const latest=latestLifecycleByDeviceAction.get(`${d.id}:${action}`);if(latest&&!list.some(command=>command.id===latest.id))list.push(latest);}list.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));}
+    for(const d of devices){const list=commandsByDevice.get(d.id);for(const action of ['STOP_AGENT','START_AGENT','SET_USB_POLICY','SERVICE_STOP','AGENT_UNINSTALL']){const latest=latestLifecycleByDeviceAction.get(`${d.id}:${action}`);if(latest&&!list.some(command=>command.id===latest.id))list.push(latest);}list.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));}
     // A device filter must resolve inside the already-scoped company/employee
     // list. This keeps the dashboard filter from becoming an IDOR.
     if (deviceId && !devices.some(d => d.id === deviceId)) throw new EndpointError(404, 'Device not found');
@@ -389,7 +408,10 @@ export class EndpointService {
       const data = revoke ? { revokedAt: new Date(), credentialHash: null, enrollmentHash: null,...(cityAvailable?{ipCityEnabled:false,ipCityGeneration:{increment:1},ipCity:{status:'revoked'}}:{}) } : { config,...(cityAvailable?{ipCityGeneration:{increment:1},...(config.paused?{ipCity:{status:'paused'}}:{})}:{}) };
       const result = await tx.endpointDevice.updateMany({ where: { id, companyId: admin.companyId, user: userScope(admin) }, data });
       if (!result.count) throw new EndpointError(404, 'Device not found');
-      if(revoke&&tx.endpointEnforcementCommand)await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'CREDENTIAL_REVOKED'}});
+      if(revoke&&tx.endpointEnforcementCommand){
+        await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:['STOP_AGENT','START_AGENT']},status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'CREDENTIAL_REVOKED'}});
+        await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:{in:LOCAL_OPERATION_ACTIONS},status:{in:['AUTH_REQUESTED','AUTH_APPROVED','AUTH_GRANT_ISSUED']}},data:{status:'SUPERSEDED',resultCode:'CREDENTIAL_REVOKED'}});
+      }
       await audit(tx, admin, revoke ? 'AGENT_REVOKED' : data.config.paused ? 'AGENT_PAUSED' : 'AGENT_CONFIGURATION_UPDATED', {
         deviceId: id, actorId: admin.id, actorRole: admin.roleCode, isMainAdmin: admin.isMainAdmin === true,
         ...(revoke ? { reason } : { paused: data.config.paused })
@@ -437,6 +459,77 @@ export class EndpointService {
       const command=await tx.endpointEnforcementCommand.create({data:{companyId:device.companyId,userId:device.userId,deviceId:id,action:'START_AGENT',status:online?'PENDING':'PENDING_OFFLINE',reason,issuedAt:now,expiresAt,createdById:admin.id}});
       await audit(tx,admin,'AGENT_START_REQUESTED',{deviceId:id,commandId:command.commandId,reason,expiresAt:expiresAt.toISOString()},device.userId);
       return{success:true,created:true,userId:device.userId,command:{commandId:command.commandId,action:command.action,status:command.status,reason:command.reason,issuedAt:command.issuedAt,expiresAt:command.expiresAt,requestedBy:admin.name||admin.email}};
+    });
+  }
+  async requestLocalOperation(secret,body) {
+    const action=body?.action,requestId=body?.requestId,requestedAt=Date.parse(body?.requestedAt),identity=body?.identity,deviceId=body?.deviceId,reason=String(body?.reason||'').trim();
+    if(Object.keys(body||{}).some(key=>!['action','requestId','requestedAt','identity','deviceId','reason'].includes(key))||!LOCAL_OPERATION_ACTIONS.includes(action)||typeof requestId!=='string'||!/^[0-9a-f-]{36}$/i.test(requestId)||!Number.isFinite(requestedAt)||Math.abs(Date.now()-requestedAt)>60000||typeof identity!=='string'||reason.length<8||reason.length>500)throw new EndpointError(400,'A valid action, request ID, timestamp, enrolled identity and 8–500 character reason are required.','LOCAL_OPERATION_REQUEST_INVALID');
+    return this.prisma.$transaction(async tx=>{
+      const device=await this.authenticate(tx,secret);
+      if(device.id!==deviceId||device.mappedIdentity!==identity||device.platform!=='win32'||!device.enrolledAt)throw new EndpointError(403,'Request device or employee identity does not match this enrolled Windows device.','LOCAL_OPERATION_DEVICE_MISMATCH');
+      if(device.user.status!=='ACTIVE'||!['EMPLOYEE','MANAGER'].includes(device.user.roleCode))throw new EndpointError(403,'Only the active employee assigned to this device may request a local operation.','LOCAL_OPERATION_REQUEST_FORBIDDEN');
+      const existing=await tx.endpointEnforcementCommand.findUnique({where:{commandId:requestId}});
+      if(existing){if(existing.deviceId!==device.id||existing.action!==action)throw new EndpointError(409,'Request ID was already used for another action or device.','LOCAL_OPERATION_REQUEST_REPLAY');return{requestId,status:existing.status,expiresAt:existing.expiresAt};}
+      const active=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:device.id,action:{in:LOCAL_OPERATION_ACTIONS},status:{in:['AUTH_REQUESTED','AUTH_APPROVED','AUTH_GRANT_ISSUED','AUTH_EXECUTING']},expiresAt:{gt:new Date()}},orderBy:{createdAt:'desc'}});
+      if(active)return{requestId:active.commandId,status:active.status,expiresAt:active.expiresAt,existing:true};
+      const expiresAt=new Date(Date.now()+15*60*1000);
+      const request=await tx.endpointEnforcementCommand.create({data:{commandId:requestId,companyId:device.companyId,userId:device.userId,deviceId:device.id,action,status:'AUTH_REQUESTED',reason,issuedAt:new Date(),expiresAt}});
+      await audit(tx,device.user,'LOCAL_AGENT_OPERATION_REQUESTED',{requestId,requestedAt:new Date(requestedAt).toISOString(),deviceId:device.id,employeeId:device.user.employeeId,action,reason,expiresAt:expiresAt.toISOString()},device.userId);
+      return{requestId,status:request.status,expiresAt:request.expiresAt};
+    });
+  }
+  async issueLocalOperationGrantForHeartbeat(tx,device,now) {
+    const request=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:device.id,companyId:device.companyId,userId:device.userId,action:{in:LOCAL_OPERATION_ACTIONS},status:{in:['AUTH_APPROVED','AUTH_GRANT_ISSUED']},expiresAt:{gt:now}},orderBy:{createdAt:'asc'}});
+    if(!request)return null;
+    let issued=request;
+    if(request.status==='AUTH_APPROVED'){
+      const nonce=randomUUID(),expiresAt=new Date(Math.min(now.getTime()+120000,request.expiresAt.getTime()));
+      const changed=await tx.endpointEnforcementCommand.updateMany({where:{id:request.id,status:'AUTH_APPROVED',expiresAt:{gt:now}},data:{status:'AUTH_GRANT_ISSUED',issuedAt:now,expiresAt,resultCode:`GRANT:${nonce}`}});
+      if(changed.count!==1)return null;
+      issued={...request,status:'AUTH_GRANT_ISSUED',issuedAt:now,expiresAt,resultCode:`GRANT:${nonce}`};
+    }
+    const nonce=issued.resultCode?.startsWith('GRANT:')?issued.resultCode.slice(6):'';
+    if(!/^[0-9a-f-]{36}$/i.test(nonce))return null;
+    const grant={version:1,requestId:issued.commandId,deviceId:device.id,identity:device.mappedIdentity,action:issued.action,issuedAt:issued.issuedAt.toISOString(),expiresAt:issued.expiresAt.toISOString(),nonce};
+    grant.signature=signLocalOperationGrant(Buffer.from(device.credentialHash,'hex'),grant);
+    return grant;
+  }
+  async completeLocalOperation(secret,requestId,body) {
+    const nonce=body?.nonce,result=body?.result;
+    if(Object.keys(body||{}).some(key=>!['nonce','result'].includes(key))||typeof nonce!=='string'||!/^[0-9a-f-]{36}$/i.test(nonce)||!['SUCCEEDED','FAILED'].includes(result))throw new EndpointError(400,'Invalid operation completion report.','LOCAL_OPERATION_REPORT_INVALID');
+    return this.prisma.$transaction(async tx=>{
+      const device=await this.authenticate(tx,secret),request=await tx.endpointEnforcementCommand.findUnique({where:{commandId:requestId}}),now=new Date();
+      if(!request||request.action!=='AGENT_UNINSTALL'||request.deviceId!==device.id||request.companyId!==device.companyId||request.userId!==device.userId||request.status!=='AUTH_EXECUTING'||request.expiresAt<=now||request.resultCode!==`GRANT:${nonce}`)throw new EndpointError(409,'Authorization grant is invalid, expired, or already consumed.','LOCAL_OPERATION_GRANT_REPLAY');
+      const success=result==='SUCCEEDED';
+      await tx.endpointEnforcementCommand.update({where:{id:request.id},data:{status:success?'AUTH_COMPLETED':'AUTH_FAILED',resultCode:result,acknowledgedAt:now}});
+      if(success&&request.action==='AGENT_UNINSTALL'){
+        const revoked=await tx.endpointDevice.updateMany({where:{id:device.id,companyId:device.companyId,userId:device.userId,credentialHash:device.credentialHash,revokedAt:null},data:{revokedAt:now,credentialHash:null,enrollmentHash:null}});
+        if(revoked.count!==1)throw new EndpointError(409,'Device credential changed before authorized uninstallation.','LOCAL_OPERATION_DEVICE_CHANGED');
+      }
+      await audit(tx,device.user,success?'LOCAL_AGENT_OPERATION_COMPLETED':'LOCAL_AGENT_OPERATION_FAILED',{requestId,deviceId:device.id,action:request.action,result,reason:request.reason},device.userId);
+      return{requestId,status:success?'AUTH_COMPLETED':'AUTH_FAILED',credentialRevoked:success&&request.action==='AGENT_UNINSTALL'};
+    });
+  }
+  async listLocalOperationRequests(admin) {
+    if(!admin?.isMainAdmin||admin.status!=='ACTIVE')throw new EndpointError(403,'Main Admin access required.','MAIN_ADMIN_REQUIRED');
+    const now=new Date();
+    await this.prisma.endpointEnforcementCommand.updateMany({where:{companyId:admin.companyId,action:{in:LOCAL_OPERATION_ACTIONS},status:{in:['AUTH_REQUESTED','AUTH_APPROVED']},expiresAt:{lte:now}},data:{status:'AUTH_EXPIRED',resultCode:'AUTHORIZATION_EXPIRED'}});
+    const requests=await this.prisma.endpointEnforcementCommand.findMany({where:{companyId:admin.companyId,action:{in:LOCAL_OPERATION_ACTIONS}},include:{device:{select:{id:true,name:true,platform:true,user:{select:{id:true,name:true,employeeId:true,companyId:true}}}}},orderBy:{createdAt:'desc'},take:100});
+    const reviewerIds=[...new Set(requests.map(request=>request.createdById).filter(Boolean))],reviewers=reviewerIds.length?await this.prisma.user.findMany({where:{id:{in:reviewerIds},companyId:admin.companyId},select:{id:true,name:true,email:true}}):[],reviewerById=new Map(reviewers.map(reviewer=>[reviewer.id,reviewer]));
+    const requestIds=new Set(requests.map(request=>request.commandId)),requesterIds=[...new Set(requests.map(request=>request.userId))],reviewLogs=requests.length?await this.prisma.auditLog.findMany({where:{companyId:admin.companyId,userId:{in:requesterIds},action:{in:['LOCAL_AGENT_OPERATION_APPROVED','LOCAL_AGENT_OPERATION_REJECTED']}},select:{timestamp:true,action:true,metadata:true},orderBy:{timestamp:'desc'},take:500}):[],reviewByRequest=new Map(reviewLogs.filter(row=>requestIds.has(row.metadata?.requestId)).map(row=>[row.metadata.requestId,row]));
+    return{requests:requests.map(request=>{const review=reviewByRequest.get(request.commandId);return{...request,requestedAt:request.createdAt,reviewedAt:review?.timestamp||null,reviewedBy:request.createdById?reviewerById.get(request.createdById)?.name||'Administrator':null};})};
+  }
+  async reviewLocalOperationRequest(admin,requestId,decision,reason) {
+    if(!admin?.isMainAdmin||admin.status!=='ACTIVE')throw new EndpointError(403,'Main Admin access required.','MAIN_ADMIN_REQUIRED');
+    if(!['APPROVE','REJECT'].includes(decision)||typeof reason!=='string'||reason.trim().length<8||reason.trim().length>500)throw new EndpointError(400,'Choose approve or reject and provide an 8–500 character review reason.','LOCAL_OPERATION_REVIEW_INVALID');
+    return this.prisma.$transaction(async tx=>{
+      const request=await tx.endpointEnforcementCommand.findFirst({where:{commandId:requestId,companyId:admin.companyId,action:{in:LOCAL_OPERATION_ACTIONS},status:'AUTH_REQUESTED',expiresAt:{gt:new Date()},device:{user:{companyId:admin.companyId}}},include:{device:{select:{name:true}}}});
+      if(!request)throw new EndpointError(404,'Pending authorization request not found or expired.','LOCAL_OPERATION_REQUEST_NOT_FOUND');
+      const status=decision==='APPROVE'?'AUTH_APPROVED':'AUTH_REJECTED';
+      const changed=await tx.endpointEnforcementCommand.updateMany({where:{id:request.id,status:'AUTH_REQUESTED',expiresAt:{gt:new Date()}},data:{status,createdById:admin.id,reason:`${request.reason}\nMain Admin review: ${reason.trim()}`}});
+      if(changed.count!==1)throw new EndpointError(409,'Request was already reviewed.','LOCAL_OPERATION_ALREADY_REVIEWED');
+      await audit(tx,admin,decision==='APPROVE'?'LOCAL_AGENT_OPERATION_APPROVED':'LOCAL_AGENT_OPERATION_REJECTED',{requestId,deviceId:request.deviceId,employeeId:request.userId,action:request.action,reason:reason.trim()},request.userId);
+      return{requestId,status,action:request.action,deviceId:request.deviceId,deviceName:request.device.name,reviewedAt:new Date(),reviewedBy:admin.name||admin.email};
     });
   }
   async setUsbPolicy(admin,id,body) {
