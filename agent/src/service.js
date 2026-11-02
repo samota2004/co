@@ -14,7 +14,7 @@ import { startIpc } from './ipc.js';
 import { desktopSampleStatus, desktopDiagnosticStatus, heartbeatMetadata, healthReport, windowsServiceControlState } from './health.js';
 import { AGENT_VERSION, DEFAULT_CONFIG } from '../shared/contract.js';
 import { reconcileAccountControl } from './account-control.js';
-import {acknowledgeAdminCommand,administrativeStopState,pendingAdminCommandExpiry,pendingAdminCommandReport,receiveAdminCommand} from './remote-stop.js';
+import {acknowledgeAdminCommand,administrativeStopState,pendingAdminCommandExpiry,pendingAdminCommandReport,receiveAdminCommand,heartbeatIntervalMs} from './remote-stop.js';
 import {UnixDesktopSupervisor} from './unix-desktop-supervisor.js';
 import {UserDesktopSupervisor} from './user-desktop-supervisor.js';
 import {assertUserConfig,assertEnrollment,ownedPath,macosFacts} from './macos-user.js';
@@ -181,7 +181,7 @@ async function runEnrolledService(local) {
         if(local.installMode==='user') await fs.writeFile(path.join(local.dataDirectory,'heartbeat-status.json'),JSON.stringify({deviceId:secrets.deviceId,identity:secrets.mappedIdentity,acknowledgedAt:new Date().toISOString()}),{mode:0o600});
         await writeDesktopStatus();
       }catch(e){if(e.status===401 || e.status===403){uploader.revoked=true;await revoke();break;}failures++;}
-      await sleep(failures?1000+Math.random()*Math.min(300000,1000*2**Math.min(failures,12)):30000);
+      await sleep(failures?1000+Math.random()*Math.min(300000,1000*2**Math.min(failures,12)):heartbeatIntervalMs({pendingCommandAck:Boolean(adminCommandReport)}));
     }
   };
   console.log(adminStopped?'CYBERORBIT control service running; monitoring persistently stopped by administrator.':'CYBERORBIT agent running; authorized employee monitoring enabled.');

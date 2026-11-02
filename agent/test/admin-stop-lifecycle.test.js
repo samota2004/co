@@ -4,6 +4,12 @@ import fs from 'node:fs/promises';
 import {desktopControls} from '../src/desktop-control.js';
 import {windowsServiceControlState} from '../src/health.js';
 import {validateHealth} from '../shared/contract.js';
+import {heartbeatIntervalMs} from '../src/remote-stop.js';
+
+test('accepted lifecycle commands trigger a prompt authenticated confirmation heartbeat',()=>{
+  assert.equal(heartbeatIntervalMs(),30000,'ordinary telemetry keeps its normal interval');
+  assert.equal(heartbeatIntervalMs({pendingCommandAck:true}),1000,'stop/resume acknowledgement is sent promptly');
+});
 
 test('persistent admin stop disables desktop collection controls without stopping the control service',()=>{
   const controls=desktopControls({paused:false,activeApplication:true,browserTitles:true},{adminStopped:true});

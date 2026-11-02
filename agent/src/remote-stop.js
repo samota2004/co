@@ -7,6 +7,12 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
 const actions=new Set(['STOP_AGENT','START_AGENT']);
 const initialState=()=>({version:2,seen:[],pending:null,adminStopped:false,lastTransitionCommandId:null});
 
+// Keep normal health traffic at 30 seconds, but promptly confirm a locally
+// accepted administrative lifecycle command on the authenticated heartbeat.
+export function heartbeatIntervalMs({pendingCommandAck=false}={}){
+  return pendingCommandAck?1000:30000;
+}
+
 async function readState(directory){
   try{
     const state=JSON.parse(await fs.readFile(path.join(directory,filename),'utf8'));

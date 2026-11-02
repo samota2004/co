@@ -430,6 +430,11 @@ expiry, actor/reason audit data, and device/SID binding. Commands are delivered 
 through the enrolled device's authenticated TLS heartbeat. Expired, mismatched,
 conflicting, and replayed commands are rejected.
 
+After a lifecycle command is accepted locally, the agent sends its authenticated
+confirmation heartbeat after about one second instead of waiting for the normal
+30-second health interval. If the acknowledgement cannot be confirmed, the
+command remains subject to its original two-minute expiry.
+
 An accepted stop writes `authorized-stop-command.json` under the protected
 `C:\ProgramData\CYBERORBIT` data directory and sets monitoring to `ADMIN_STOPPED`.
 The worker stops collecting and uploading observations but keeps its authenticated
