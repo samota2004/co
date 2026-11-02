@@ -30,7 +30,7 @@ test('macOS contract over real HTTP/PostgreSQL: assignment guards, heartbeat, of
     await assert.rejects(transport.post('enroll',request),e=>e.status===401);
     const device=new Transport(config,r.credential),health={queueEvents:0,queueBytes:0,droppedEvents:0,paused:false,helperLastSeen:null,collectors:{accountControl:'unsupported: user mode cannot change OS accounts',browserTitles:'unavailable: grant Accessibility to desktop helper'}};
     await device.post('heartbeat',{agentVersion:'1.2.0',health});
-    const saved=await f.prisma.endpointDevice.findUnique({where:{id:a.deviceId}});assert.ok(saved.lastSeen);assert.deepEqual(saved.health,health);
+    const saved=await f.prisma.endpointDevice.findUnique({where:{id:a.deviceId}});assert.ok(saved.lastSeen);assert.equal(saved.health.lastHeartbeatAt,saved.lastSeen.toISOString(),'server stamps heartbeat time separately from endpoint-controlled health');const {lastHeartbeatAt,...storedHealth}=saved.health;assert.deepEqual(storedHealth,health);
     directory=await fs.mkdtemp(path.join(os.tmpdir(),'orbit-mac-contract-'));const key=randomBytes(32).toString('base64');
     let q=await new EncryptedQueue(directory,key).init();
     const events=[normalize(a.deviceId,'APPLICATION_FOREGROUND',{identity,pid:42,name:'Google Chrome',appId:'com.google.Chrome',sessionId:'desktop:724'}),

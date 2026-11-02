@@ -317,11 +317,31 @@ Run elevated. It removes service/task/code, retains protected data by default, a
 | Processes | Native process enumeration + process token SID, polling | `/proc` UID/start ticks, polling | `ps` UID/start time, polling | `PROCESS_RUNNING` initially/every five minutes; starts/stops are snapshot differences, short processes/PID reuse with unknown start time can be missed |
 | Application usage | Desktop helper: GetForegroundWindow, GetLastInputInfo, WTS lock state, 2s polling | X11 `xprop`/`xprintidle`; GNOME/KDE Wayland integration (see UNIX.md) | Swift NSWorkspace app/bundle identity + session/idle state, 2s polling | Duration approximates sampled foreground activity while idle <60s; gaps >5s are not counted. Running background processes are never treated as foreground use. Opt-in active browser titles only; no URLs/command lines |
 | Sessions | WTS session snapshots; helper polls actual WTS lock/unlock | loginctl snapshots / LockedHint | who login/logout snapshots; GUI helper lock/unlock | Initial state is `SESSION_STATE`, not a fabricated login. Windows disconnect/reconnect uses state events; logouts between samples may be missed. Only assigned SID's helper can report lock changes |
-| USB | Present Win32_PnPEntity USB nodes, CIM polling | sysfs USB nodes, polling | system_profiler USB tree, polling | Current devices initially reported; connection/removal observations, not transfers or file reads. Can miss rapid reconnects; composite nodes may yield multiple observations |
+| USB | Present Win32_PnPEntity USB nodes, CIM polling | sysfs USB nodes, polling | system_profiler USB tree, polling | First inventory establishes a baseline; newly observed connection/removal events are device-presence observations, not transfers or file reads. Can miss rapid reconnects; composite nodes may yield multiple observations |
 | File change | Node fs.watch OS notifications, per-directory recursion | Same | Same | Approved roots only, no file contents. Symlinks are not followed; up to 2,000 directories. Rename is ambiguous create/delete/rename; not reads. Notifications may coalesce/drop; new directory races/network mounts can miss changes |
 | Network | Get-NetTCPConnection snapshots | `ss` TCP snapshots | lsof established TCP snapshots | Optional, TCP only, no browsing history/DNS/payload/bytes. May miss short connections; visibility depends on privileges |
 
 Collector errors are reported independently; a failure does not invent events or suppress all other sources. The MVP uses polling for process/session/USB/network and OS change notifications for files. Physical USB insert/remove, fast-user switching/RDP, actual lock/logout transitions, reboot, service/task installation, recovery and ACL behavior under a second user still require administrator acceptance testing on the target laptop. The automated Windows suite queries actual APIs and desktop state without disrupting the user's session.
+
+Newly observed `USB_CONNECTED` events create a company/assignment-scoped MEDIUM
+in-app administrator notification. The message explicitly says that attachment
+was observed; it does not claim that files were opened or transferred. The first
+inventory after service start is only a baseline and does not alert on devices
+that were already attached. Windows administrators can request per-device
+USB mass-storage, WPD portable-device, and CD/DVD policies in Devices. Every
+setting defaults to ALLOW. Commands require an active same-company Main/System
+or Security Admin session with recent MFA, a mapped enrolled Windows device,
+and an 8–500 character reason; they are delivered over the device-authenticated
+TLS heartbeat, expire after 24 hours, and have replay protection. The Windows
+service applies only Microsoft's [Removable Storage Access class policy keys](https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-removablestorage)
+and stores no web administrator password on the endpoint. The agent reports
+`UNVERIFIED` after the registry settings match: this does not prove effective
+OS/device access denial, because domain policy, Windows edition, policy refresh,
+and attached-device behavior require a real endpoint test. Keyboard, mouse,
+HID/security-key, and other peripheral classes are never changed by storage
+policy; input-device blocking is not implemented. Existing Windows service ACLs
+continue to deny standard users service stop/start/change rights. A person with
+local Windows Administrator privileges can still override software controls.
 
 The capability-authenticated helper channel binds only to `127.0.0.1:47731`. Each request and response has HMAC authentication with a random secret, timestamps and replay nonces; secret capabilities have OS access controls. No device credential or queue key reaches the helper. A compromised mapped user can forge their own helper observations; a compromised local administrator/service or stolen device credential can forge device telemetry. This is not hardware attestation or tamper-proof evidence.
 
@@ -480,3 +500,25 @@ with physical device control can still stop, alter, replace, or remove software;
 controls deter standard-user tampering and do not make the agent impossible to stop.
 
 Production release still requires reviewed/pinned runtime, Authenticode signing of host/PowerShell/package, code-signing/notarization on macOS, signed Linux distribution packaging, staged installation/upgrade testing, enterprise credential lifecycle/rotation, tenant provisioning and server retention controls. The included unsigned development ZIP is not a production-ready signed installer.
+
+### USB access acceptance test (dedicated disposable hardware only)
+
+`agent/test/windows-usb-access.integration.ps1` is a manual, non-elevated test probe. It does not apply policy or report a result to the server. Run it as the mapped **standard employee account**, on a dedicated empty USB test volume labeled exactly `CYBERORBIT-USB-TEST`. Never point it at a production or employee data volume. The Prepare step creates one uniquely named disposable marker file; Cleanup removes only that marker. Verify steps attempt directory listing, reading that marker, and writing/removing one uniquely named disposable probe file.
+
+If the enrolled test laptop does not have the repository, an administrator should copy only this reviewed test script to it through the approved test-media process. From the repository root (or the folder where that script was copied) on the enrolled test laptop, prepare the marker before requesting BLOCK in Devices:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent\test\windows-usb-access.integration.ps1 -Mode Prepare -DriveRoot 'E:\'
+```
+
+Copy the emitted `marker` value. After the authenticated administrator policy command is applied, test as the same standard user:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent\test\windows-usb-access.integration.ps1 -Mode VerifyBlocked -DriveRoot 'E:\' -MarkerName 'CYBERORBIT-USB-TEST-<emitted-guid>.txt'
+```
+
+`ACCESS_DENIED_VERIFIED_FOR_THIS_VOLUME` means listing, read, and write were all denied for that one mounted volume in that user context. It is not a report about other device classes or other attached hardware. After requesting ALLOW, run `VerifyAllowed`, then `Cleanup` with the same marker name. Record output and Windows edition/build separately. Repeat with dedicated disposable flash, USB HDD, and USB SSD devices. Test MTP and PTP phones, CD/DVD media, keyboard, mouse, and security keys separately; this script does not test those classes. Repeat access checks after service restart, Windows restart, full shutdown/power-on, offline policy interval, and reconnection. Do not report reboot persistence or a device class as verified until its corresponding physical test was run.
+
+The agent persists the last authenticated desired policy under the ACL-protected ProgramData directory and reapplies it when the LocalSystem service starts. This restart reconciliation only reports the native helper result; it does not independently verify effective access. The dashboard therefore remains `UNVERIFIED` after registry readback and shows `BLOCK_PENDING` / `ALLOW_PENDING` only while the command awaits an endpoint report. `BLOCKED` / `ALLOW` are reserved for a separate authenticated access-verification result, which the current management API does not accept. Policy configuration is per machine; Windows Group Policy or device-specific behavior can still conflict. Windows standard-user access testing and actual class/hardware behavior remain deployment acceptance work.
+
+The helper’s supported edition gate is Windows Pro, Enterprise, Education, and IoT Enterprise. It accepts Windows 10 builds 19041–19043 only at UBR 1202 or later, Windows 10 build 19044 or later, and Windows 11 build 22000 or later. Home editions are reported `UNSUPPORTED`; this checkout currently runs Windows `CoreSingleLanguage` build 26200 and has no USB-bus disk attached, so it cannot apply or physically verify this policy. These software gates follow Microsoft’s documented [Removable Storage Access policy support matrix](https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-removablestorage); actual media and domain-policy behavior still requires endpoint testing.

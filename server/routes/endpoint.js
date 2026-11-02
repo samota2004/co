@@ -60,13 +60,14 @@ router.post('/ingest', handle(async req => {
     const days = new Map(accepted.map(event => [`${event.userId}:${event.occurredAt.toISOString().slice(0,10)}`, event]));
     for (const event of days.values()) try { await refreshDailyRiskSnapshot(prisma, { userId: event.userId, day: event.occurredAt }); } catch (error) { console.warn('Endpoint daily snapshot refresh deferred:', error?.code || error?.name || 'unavailable'); }
   }
+  for(const notification of result.notifications||[])sseManager.broadcast('SECURITY_NOTIFICATION',{companyId:notification.companyId,userId:notification.targetUserId,recipientId:notification.recipientId,notification});
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
   return { acceptedEventIds: result.acceptedEventIds };
 }));
 router.post('/heartbeat', handle(async req => {
   const result = await service.heartbeat(credential(req), req.body,cityRequestAddress(req),cityAddressDiagnostics(req));
   sseManager.broadcast('ENDPOINT_UPDATED', { companyId: result.companyId, userId: result.userId });
-  return { config: result.config, accountControl: result.accountControl, agentCommand: result.agentCommand, agentCommandAck: result.agentCommandAck };
+  return { config: result.config, accountControl: result.accountControl, agentCommand: result.agentCommand, agentCommandAck: result.agentCommandAck, usbPolicyCommand: result.usbPolicyCommand, usbPolicyCommandAck: result.usbPolicyCommandAck };
 }));
 router.get('/dashboard', requireAuth, handle(req => service.dashboard(req.user, req.query.userId, req.query.eventType, req.query.deviceId, req.query.readinessDate)));
 router.put('/:id/config', requireSecurityAdmin, handle(req => service.change(req.user, req.params.id, req.body)));
@@ -78,6 +79,11 @@ router.post('/:id/stop-agent', requireSecurityAdmin, requireRecentMfa, handle(as
 }));
 router.post('/:id/start-agent', requireSecurityAdmin, requireRecentMfa, handle(async req => {
   const result=await service.requestAgentStart(req.user,req.params.id,req.body);
+  sseManager.broadcast('ENDPOINT_UPDATED',{companyId:req.user.companyId,userId:result.userId});
+  return result;
+}));
+router.put('/:id/usb-policy', requireSecurityAdmin, requireRecentMfa, handle(async req => {
+  const result=await service.setUsbPolicy(req.user,req.params.id,req.body);
   sseManager.broadcast('ENDPOINT_UPDATED',{companyId:req.user.companyId,userId:result.userId});
   return result;
 }));

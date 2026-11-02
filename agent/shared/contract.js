@@ -21,7 +21,8 @@ export function validateEnrollment(body) {
 }
 export const DEFAULT_CONFIG = Object.freeze({ paused: false, pollSeconds: 15,
   processes: true, sessions: true, usb: true, activeApplication: true,
-  network: false, browserTitles: false, approvedDirectories: [] });
+  network: false, browserTitles: false, approvedDirectories: [],
+  usbPolicy: Object.freeze({ storage: 'ALLOW', portable: 'ALLOW', optical: 'ALLOW' }) });
 const shapes = {
   HEARTBEAT: { uptimeSeconds: 'number', freeMemoryBytes: 'number' },
   PROCESS_RUNNING: { pid: 'number', name: 'string', startedAt: 'string', sessionId: 'string', appId:'string' },
@@ -34,8 +35,8 @@ const shapes = {
   SESSION_LOCK: { sessionId: 'string', state: 'string' },
   SESSION_UNLOCK: { sessionId: 'string', state: 'string' },
   SESSION_STATE: { sessionId: 'string', state: 'string' },
-  USB_CONNECTED: { hardwareId: 'string', name: 'string' },
-  USB_REMOVED: { hardwareId: 'string', name: 'string' },
+  USB_CONNECTED: { hardwareId: 'string', name: 'string', category:'string' },
+  USB_REMOVED: { hardwareId: 'string', name: 'string', category:'string' },
   FILE_CHANGE: { directory: 'string', relativePath: 'string', change: 'string' },
   NETWORK_CONNECTION: { pid: 'number', protocol: 'string', localAddress: 'string', localPort: 'number', remoteAddress: 'string', remotePort: 'number', state: 'string' }
 };
@@ -53,6 +54,7 @@ export function validateEvent(e, now = Date.now()) {
     const type = k === 'identity' ? 'string' : shapes[e.type][k];
     if (!type || typeof v !== type || (type === 'string' && v.length > 1024) || (type === 'number' && (!Number.isFinite(v) || v < 0))) throw new Error(`Invalid metadata field: ${k}`);
   }
+  if(e.type.startsWith('USB_')&&e.metadata.category!==undefined&&!['USB_STORAGE','PORTABLE_DEVICE','CD_DVD','KEYBOARD','MOUSE','HID_PERIPHERAL','OTHER'].includes(e.metadata.category))throw new Error('Invalid USB device category');
   if (e.type === 'APPLICATION_USAGE' && (!Number.isFinite(e.metadata.durationSeconds) || e.metadata.durationSeconds > 120)) throw new Error('Invalid usage duration');
   if (e.metadata.identitySource!==undefined && !identitySources.includes(e.metadata.identitySource)) throw new Error('Invalid application identity source');
   if ('browserTitle' in e.metadata && (!isBrowser(e.metadata) || !e.metadata.browserTitle.trim() || e.metadata.browserTitle.length>256 || /[\x00-\x1f\x7f]/.test(e.metadata.browserTitle))) throw new Error('Invalid browser title');
@@ -64,16 +66,20 @@ export function validateConfig(c) {
   for (const k of ['paused', 'processes', 'sessions', 'usb', 'activeApplication', 'network', 'browserTitles']) if (typeof out[k] !== 'boolean') throw new Error(`Invalid ${k}`);
   if (!Number.isInteger(out.pollSeconds) || out.pollSeconds < 5 || out.pollSeconds > 300) throw new Error('pollSeconds must be 5..300');
   if (!Array.isArray(out.approvedDirectories) || out.approvedDirectories.length > 20 || out.approvedDirectories.some(p => typeof p !== 'string' || !p || p.length > 1024)) throw new Error('Invalid approved directories');
+  if (!out.usbPolicy || typeof out.usbPolicy !== 'object' || Array.isArray(out.usbPolicy) || Object.keys(out.usbPolicy).some(k => !['storage','portable','optical'].includes(k)) || ['storage','portable','optical'].some(k => !['ALLOW','BLOCK'].includes(out.usbPolicy[k]))) throw new Error('Invalid USB policy');
+  out.usbPolicy = { storage: out.usbPolicy.storage, portable: out.usbPolicy.portable, optical: out.usbPolicy.optical };
   return out;
 }
 export function validateHealth(h) {
   if (!h || typeof h !== 'object' || Array.isArray(h) || Buffer.byteLength(JSON.stringify(h)) > 8192) throw new Error('Invalid health');
-  const allowed = ['queueEvents', 'queueBytes', 'droppedEvents', 'collectors', 'helperLastSeen', 'paused', 'administrativeState', 'serviceControlState'];
+  const allowed = ['queueEvents', 'queueBytes', 'droppedEvents', 'collectors', 'helperLastSeen', 'paused', 'administrativeState', 'monitoringState', 'pauseReason', 'serviceControlState'];
   if (Object.keys(h).some(k => !allowed.includes(k))) throw new Error('Unknown health field');
   for (const k of ['queueEvents', 'queueBytes', 'droppedEvents']) if (!Number.isSafeInteger(h[k]) || h[k] < 0) throw new Error(`Invalid ${k}`);
   if (typeof h.paused !== 'boolean') throw new Error('Invalid paused');
   if (h.administrativeState !== undefined && !['RUNNING','ADMIN_STOPPED','UNVERIFIED'].includes(h.administrativeState)) throw new Error('Invalid administrative state');
-  if (h.serviceControlState !== undefined && !['RUNNING','STOP_PENDING','START_PENDING','STOPPED','UNVERIFIED'].includes(h.serviceControlState)) throw new Error('Invalid service control state');
+  if (h.monitoringState !== undefined && !['ACTIVE','PAUSED_BY_ADMIN','PAUSED_LOCALLY','RESUMING','UNKNOWN'].includes(h.monitoringState)) throw new Error('Invalid monitoring state');
+  if (h.pauseReason !== undefined && (typeof h.pauseReason !== 'string' || !['ADMIN_STOP_COMMAND','ADMIN_CONFIGURATION','LOCAL_CONFIGURATION','CREDENTIAL_REVOKED', 'COLLECTOR_STARTING', 'NONE'].includes(h.pauseReason))) throw new Error('Invalid pause reason');
+  if (h.serviceControlState !== undefined && !['RUNNING','STOP_PENDING','START_PENDING','STOPPED','UNKNOWN','UNVERIFIED'].includes(h.serviceControlState)) throw new Error('Invalid service control state');
   if (h.helperLastSeen !== null && !Number.isFinite(Date.parse(h.helperLastSeen))) throw new Error('Invalid helper last seen');
   if (!h.collectors || typeof h.collectors !== 'object' || Array.isArray(h.collectors) || Object.keys(h.collectors).length > 12 || Object.entries(h.collectors).some(([k,v]) => k.length > 40 || typeof v !== 'string' || v.length > 240)) throw new Error('Invalid collectors');
   return h;

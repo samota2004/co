@@ -8,10 +8,10 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const read=file=>fs.readFile(path.join(root,file),'utf8');
 
 test('Windows installer protects SCM, files and scheduled tasks from standard users',async()=>{
-  const [install,startup,watchdog,host,updater,updateFiles]=await Promise.all([
+  const [install,startup,watchdog,host,updater,updateFiles,usbPolicy,service,policyModule]=await Promise.all([
     read('packaging/windows/install.ps1'),read('packaging/windows/configure-startup.ps1'),
     read('packaging/windows/desktop-watchdog.ps1'),read('packaging/windows/ServiceHost.cs'),
-    read('packaging/windows/update-installed.ps1'),read('packaging/windows/update-source-files.ps1')
+    read('packaging/windows/update-installed.ps1'),read('packaging/windows/update-source-files.ps1'),read('native/windows-usb-policy.ps1'),read('src/service.js'),read('src/usb-policy.js')
   ]);
   const serviceSddl="D:P(A;;0xF01FF;;;SY)(A;;0xF01FF;;;BA)(A;;0x2008D;;;BU)";
   assert.ok(install.includes(serviceSddl),'new installs apply SYSTEM/Admin full access and Users query-only service rights');
@@ -23,6 +23,15 @@ test('Windows installer protects SCM, files and scheduled tasks from standard us
   assert.match(watchdog,/\$service\.Status\s+-eq\s+'Running'/);assert.match(watchdog,/\$task\.State\s+-eq\s+'Ready'/);
   assert.match(host,/worker\.ExitCode==0/);assert.match(host,/controller\.Stop\(\)/,'authorized child exit requests a normal SCM service stop');
   assert.match(updater,/'src\/remote-stop\.js'/,'existing installs receive the authenticated stop-command module');
+  assert.match(updater,/'src\/usb-policy\.js'/,'existing installs receive the authenticated USB policy command module');
+  assert.match(updater,/'native\/windows-usb-policy\.ps1'/,'existing installs receive the scoped removable-storage policy helper');
+  assert.ok(usbPolicy.includes('RemovableStorageDevices'),'USB enforcement uses removable-storage class policy');
+  assert.ok(usbPolicy.includes('POLICY_APPLIED_UNVERIFIED'),'registry state is not presented as verified device access control');
+  assert.match(service,/reapplyPersistedUsbPolicy\(local\.dataDirectory/,'Windows service reconciles the persisted authenticated USB policy at boot');
+  assert.match(policyModule,/activePolicy=policy/,'last authenticated policy is retained separately from pending acknowledgement');
+  assert.match(policyModule,/export async function reapplyPersistedUsbPolicy/,'restart reconciliation remains directly testable');
+  assert.doesNotMatch(usbPolicy,/4d36e96b-e325-11ce-bfc1-08002be10318/i,'keyboard class remains untouched');
+  assert.doesNotMatch(usbPolicy,/4d36e96f-e325-11ce-bfc1-08002be10318/i,'mouse class remains untouched');
   assert.match(updater,/\$updateSources\['CyberOrbitService\.exe'\]=\$compiledHost/,'existing installs receive a rebuilt graceful-stop service host');
   assert.match(updater,/Save-CyberOrbitUpdateFiles\s+-Sources\s+\$updateSources/,'all preflighted sources use the shared update transaction');
   assert.match(updateFiles,/ReadAllBytes\(\$Sources\[\$relative\]\)/,'transaction reads the validated source map');

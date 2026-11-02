@@ -2,6 +2,13 @@ import os from 'node:os';
 import {knownLock,usageEligible} from './desktop-usage.js';
 import {exec} from './native.js';
 export function heartbeatMetadata() { return {uptimeSeconds:Math.floor(os.uptime()),freeMemoryBytes:os.freemem()}; }
+export function monitoringLifecycleState({adminStopped=false,configPaused=false,revoked=false,resuming=false,collectionReady=false}={}) {
+  if(adminStopped)return {monitoringState:'PAUSED_BY_ADMIN',pauseReason:'ADMIN_STOP_COMMAND'};
+  if(configPaused)return {monitoringState:'PAUSED_BY_ADMIN',pauseReason:'ADMIN_CONFIGURATION'};
+  if(revoked)return {monitoringState:'UNKNOWN',pauseReason:'CREDENTIAL_REVOKED'};
+  if(resuming||!collectionReady)return {monitoringState:'RESUMING',pauseReason:'COLLECTOR_STARTING'};
+  return {monitoringState:'ACTIVE',pauseReason:'NONE'};
+}
 export function desktopSampleStatus(sample) {
   if (knownLock(sample)===true) return 'healthy: helper connected; session locked, usage excluded';
   if(sample.consoleActive===false)return 'unavailable: employee console inactive; usage excluded';
@@ -24,15 +31,15 @@ export function desktopDiagnosticStatus(status) {
     'desktop-query-failed':'unavailable: check desktop permissions and GNOME/KDE integration'};
   return typeof status==='string' && Object.hasOwn(statuses,status)?statuses[status]:null;
 }
-export function healthReport(queue, collectors, config, helperLastSeen, administrativeState, serviceControlState) {
+export function healthReport(queue, collectors, config, helperLastSeen, administrativeState, serviceControlState, lifecycle) {
   return {...queue.health(),collectors:{...collectors},paused:config.paused,helperLastSeen,
-    ...(administrativeState?{administrativeState}:{}),...(serviceControlState?{serviceControlState}:{})};
+    ...(administrativeState?{administrativeState}:{}),...(lifecycle||{}),...(serviceControlState?{serviceControlState}:{})};
 }
 export async function windowsServiceControlState(platform=process.platform,run=exec) {
   if(platform!=='win32')return 'UNVERIFIED';
   try {
     const {stdout}=await run('sc.exe',['query','CyberOrbitAgent'],{timeout:3000,windowsHide:true,maxBuffer:16384});
     const match=/\bSTATE\s*:\s*(\d+)/i.exec(stdout||'');
-    return ({1:'STOPPED',2:'START_PENDING',3:'STOP_PENDING',4:'RUNNING'})[Number(match?.[1])]||'UNVERIFIED';
-  }catch{return 'UNVERIFIED';}
+    return ({1:'STOPPED',2:'START_PENDING',3:'STOP_PENDING',4:'RUNNING'})[Number(match?.[1])]||'UNKNOWN';
+  }catch{return 'UNKNOWN';}
 }

@@ -20,12 +20,23 @@ test('stop and resume feedback and lifecycle status are separately represented',
   const start={...command('PENDING'),action:'START_AGENT'};
   assert.match(stopCommandSuccess(start).message,/Resume command recorded/i);
   assert.match(stopCommandStatus({...start,status:'ACKNOWLEDGED'}),/resume command/i);
-  assert.deepEqual(endpointLifecycleStatus({lastSeen:new Date().toISOString(),health:{administrativeState:'ADMIN_STOPPED',serviceControlState:'RUNNING'}}),{state:'ADMIN_STOPPED',detail:'Monitoring is persistently stopped by an administrator. Windows SCM: RUNNING.'});
-  assert.equal(endpointLifecycleStatus({lastSeen:new Date().toISOString(),health:{administrativeState:'RUNNING',serviceControlState:'RUNNING'}}).state,'RUNNING');
+  const now=Date.now(),heartbeat=new Date(now).toISOString();
+  const stopped=endpointLifecycleStatus({platform:'win32',lastHeartbeatAt:heartbeat,health:{monitoringState:'PAUSED_BY_ADMIN',pauseReason:'ADMIN_STOP_COMMAND',serviceControlState:'RUNNING'}} ,now);
+  assert.equal(stopped.state,'ADMIN_STOPPED');assert.equal(stopped.monitoringState,'PAUSED_BY_ADMIN');assert.equal(stopped.serviceState,'RUNNING');assert.equal(stopped.telemetryState,'RECEIVING');
+  const active=endpointLifecycleStatus({platform:'win32',lastHeartbeatAt:heartbeat,health:{monitoringState:'ACTIVE',administrativeState:'RUNNING',serviceControlState:'RUNNING'}},now);
+  assert.equal(active.state,'RUNNING');assert.equal(active.monitoringState,'ACTIVE');assert.equal(active.commandAcknowledgement,'NONE');
+  const legacyRunning=endpointLifecycleStatus({platform:'win32',lastHeartbeatAt:heartbeat,health:{administrativeState:'RUNNING',serviceControlState:'RUNNING'}},now);
+  assert.equal(legacyRunning.monitoringState,'UNKNOWN','legacy RUNNING only means no admin stop flag; it does not confirm collectors');
+  const pending=endpointLifecycleStatus({platform:'win32',lastHeartbeatAt:heartbeat,enforcementCommands:[{action:'STOP_AGENT',status:'ACKNOWLEDGED',resultCode:'STOP_ACCEPTED'}],health:{monitoringState:'ACTIVE',serviceControlState:'RUNNING'}},now);
+  assert.equal(pending.monitoringState,'ACTIVE','an acknowledged stop cannot override actual active state report');assert.equal(pending.commandAcknowledgement,'ACKNOWLEDGED');
   assert.equal(endpointLifecycleStatus({enforcementCommands:[{action:'START_AGENT',status:'PENDING',expiresAt:new Date(Date.now()+10000).toISOString()}]}).state,'START_PENDING');
   assert.equal(endpointLifecycleStatus({enforcementCommands:[{action:'STOP_AGENT',status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}]}).state,'STOP_FAILED');
-  assert.equal(endpointLifecycleStatus({}).state,'UNVERIFIED');
-  assert.equal(endpointLifecycleStatus({lastSeen:new Date(Date.now()-6*60*1000).toISOString(),health:{administrativeState:'ADMIN_STOPPED'}}).state,'UNVERIFIED','stale device telemetry is not current confirmation');
+  assert.equal(endpointLifecycleStatus({}).state,'UNKNOWN');
+  const stale=endpointLifecycleStatus({platform:'win32',lastSeen:new Date(now).toISOString(),lastHeartbeatAt:new Date(now-6*60*1000).toISOString(),health:{monitoringState:'PAUSED_BY_ADMIN',serviceControlState:'RUNNING',lastApplicationActivityAt:new Date(now-7*60*1000).toISOString()}},now);
+  assert.equal(stale.state,'UNKNOWN');assert.equal(stale.serviceState,'UNKNOWN');assert.equal(stale.telemetryState,'NOT_RECEIVING','recent event receipt does not make an old heartbeat current');
+  assert.equal(stale.reportedMonitoringState,'PAUSED_BY_ADMIN','last reported state remains available as history');
+  const noHeartbeat=endpointLifecycleStatus({platform:'win32',lastSeen:new Date(now).toISOString(),health:{monitoringState:'ACTIVE',serviceControlState:'RUNNING'}},now);
+  assert.equal(noHeartbeat.telemetryState,'UNKNOWN','Windows lastSeen cannot substitute for heartbeat because queued telemetry may arrive late');
 });
 
 test('stop action exposes specific MFA, authorization, validation, device, expiry, and server failures', () => {

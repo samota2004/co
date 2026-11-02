@@ -51,17 +51,31 @@ export function stopCommandStatus(command, now = Date.now()) {
 }
 
 export function endpointLifecycleStatus(device, now=Date.now()) {
-  const reported=device?.health?.administrativeState;
-  const control=device?.health?.serviceControlState;
+  const health=device?.health||{};
+  const reported=health.monitoringState||(health.administrativeState==='ADMIN_STOPPED'?'PAUSED_BY_ADMIN':'UNKNOWN');
+  const lastHeartbeatAt=device?.lastHeartbeatAt||health.lastHeartbeatAt||(device?.platform==='win32'?null:device?.lastSeen);
+  const heartbeatTime=Date.parse(lastHeartbeatAt||'');
+  const heartbeatAge=Number.isFinite(heartbeatTime)?Math.max(0,now-heartbeatTime):null;
+  const telemetryState=heartbeatAge===null?'UNKNOWN':heartbeatAge<=90000?'RECEIVING':heartbeatAge<=300000?'STALE':'NOT_RECEIVING';
+  const fresh=telemetryState==='RECEIVING';
+  const rawControl=fresh?health.serviceControlState||'UNKNOWN':'UNKNOWN';
+  const control=rawControl==='UNVERIFIED'?'UNKNOWN':rawControl;
   const command=(device?.enforcementCommands||[]).find(item=>['STOP_AGENT','START_AGENT'].includes(item.action));
-  if(command){
-    const prefix=command.action==='START_AGENT'?'START':'STOP';
-    if(['PENDING','PENDING_OFFLINE'].includes(command.status)&&Date.parse(command.expiresAt)>now)return{state:`${prefix}_PENDING`,detail:command.status==='PENDING_OFFLINE'?'Waiting for this offline device to check in.':'Waiting for authenticated agent confirmation.'};
-    if(['FAILED','UNSUPPORTED','EXPIRED'].includes(command.status))return{state:`${prefix}_FAILED`,detail:command.resultCode||'The endpoint did not confirm the requested state.'};
-  }
-  const lastSeen=Date.parse(device?.lastSeen||'');
-  if(!Number.isFinite(lastSeen)||now-lastSeen>5*60*1000)return{state:'UNVERIFIED',detail:`The latest endpoint heartbeat is missing or stale${reported?`; last reported monitoring state: ${reported}`:''}.`};
-  if(reported==='ADMIN_STOPPED')return{state:'ADMIN_STOPPED',detail:`Monitoring is persistently stopped by an administrator. Windows SCM: ${control||'UNVERIFIED'}.`};
-  if(reported==='RUNNING')return{state:'RUNNING',detail:`Monitoring is reported active. Windows SCM: ${control||'UNVERIFIED'}.`};
-  return{state:'UNVERIFIED',detail:'The latest authenticated heartbeat has not reported the administrative and Windows service states.'};
+  const commandStatus=command&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&Date.parse(command.expiresAt||'')<=now?'EXPIRED':command?.status||'NONE';
+  const monitoringState=fresh?reported:'UNKNOWN';
+  const serviceState=control;
+  const lastApplicationActivityAt=device?.lastApplicationActivityAt||null;
+  const actionPrefix=command?.action==='START_AGENT'?'START':'STOP';
+  const state=['PENDING','PENDING_OFFLINE'].includes(commandStatus)?`${actionPrefix}_PENDING`:['FAILED','UNSUPPORTED','EXPIRED'].includes(commandStatus)?`${actionPrefix}_FAILED`:monitoringState==='PAUSED_BY_ADMIN'?'ADMIN_STOPPED':monitoringState==='ACTIVE'?'RUNNING':monitoringState;
+  let detail;
+  if(telemetryState==='UNKNOWN')detail='No authenticated heartbeat has reported lifecycle state yet.';
+  else if(telemetryState==='NOT_RECEIVING')detail=`No heartbeat for ${Math.floor(heartbeatAge/1000)} seconds; the last reported state is historical, not current.`;
+  else if(telemetryState==='STALE')detail=`Heartbeat is stale (${Math.floor(heartbeatAge/1000)} seconds old); reported lifecycle values are not current.`;
+  else if(monitoringState==='PAUSED_BY_ADMIN')detail=`Monitoring is paused by administrator policy (${health.pauseReason||'administrator pause'}).`;
+  else if(monitoringState==='PAUSED_LOCALLY')detail='Monitoring is paused by local configuration; administrator policy remains unchanged.';
+  else if(monitoringState==='RESUMING')detail='The agent accepted resume and is restarting authorized collectors; active monitoring is not confirmed yet.';
+  else if(monitoringState==='ACTIVE')detail='Monitoring collectors are active according to the latest authenticated state report.';
+  else detail='The latest authenticated heartbeat did not confirm a monitoring state.';
+  const lastCommand=command?{action:command.action,status:commandStatus,resultCode:command.resultCode||null,createdAt:command.createdAt||null,acknowledgedAt:command.acknowledgedAt||null}:null;
+  return {state,detail,serviceState,reportedServiceState:health.serviceControlState||'UNKNOWN',monitoringState,reportedMonitoringState:reported,telemetryState,lastHeartbeatAt:Number.isFinite(heartbeatTime)?new Date(heartbeatTime).toISOString():null,heartbeatAgeSeconds:heartbeatAge===null?null:Math.floor(heartbeatAge/1000),lastApplicationActivityAt,lastLifecycleCommand:lastCommand,commandAcknowledgement:commandStatus==='ACKNOWLEDGED'?'ACKNOWLEDGED':commandStatus};
 }

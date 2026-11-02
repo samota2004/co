@@ -11,10 +11,12 @@ import { Transport, Uploader } from './uploader.js';
 import { SystemCollectors } from './collectors/index.js';
 import { FileCollector } from './collectors/files.js';
 import { startIpc } from './ipc.js';
-import { desktopSampleStatus, desktopDiagnosticStatus, heartbeatMetadata, healthReport, windowsServiceControlState } from './health.js';
+import { desktopSampleStatus, desktopDiagnosticStatus, heartbeatMetadata, healthReport, windowsServiceControlState, monitoringLifecycleState } from './health.js';
 import { AGENT_VERSION, DEFAULT_CONFIG } from '../shared/contract.js';
 import { reconcileAccountControl } from './account-control.js';
 import {acknowledgeAdminCommand,administrativeStopState,pendingAdminCommandExpiry,pendingAdminCommandReport,receiveAdminCommand,heartbeatIntervalMs} from './remote-stop.js';
+import {receiveUsbPolicyCommand,acknowledgeUsbPolicyCommand,reapplyPersistedUsbPolicy} from './usb-policy.js';
+import {nativeInput} from './native.js';
 import {UnixDesktopSupervisor} from './unix-desktop-supervisor.js';
 import {UserDesktopSupervisor} from './user-desktop-supervisor.js';
 import {assertUserConfig,assertEnrollment,ownedPath,macosFacts} from './macos-user.js';
@@ -46,7 +48,13 @@ async function runEnrolledService(local) {
   const transport=new Transport(local,secrets.credential), uploader=new Uploader(queue,transport);
   let remote=DEFAULT_CONFIG;
   try {remote=JSON.parse(await fs.readFile(path.join(local.dataDirectory,'collector-config.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
-  let config=effectiveConfig(remote,local), stopping=false, finalUsage=false, helperLastSeen=null, health={};
+  let config=effectiveConfig(remote,local), stopping=false, finalUsage=false, helperLastSeen=null, health={}, monitoringReady=false, resumeTransition=false, collectorBaselinePending=adminStopped;
+  if(windowsService){
+    try{
+      const result=await reapplyPersistedUsbPolicy(local.dataDirectory,async policy=>JSON.parse(await nativeInput('windows-usb-policy.ps1',{policy})));
+      if(result.applied)console.log(`Persisted Windows USB policy re-applied at service startup: ${result.status}.`);
+    }catch{console.warn('Persisted Windows USB policy could not be loaded or re-applied; effective device access remains unverified.');}
+  }
   const desktopStats={revision:2,samples:0,queuedUsage:0,lastQueuedUsage:null,lastSample:null};
   let lastDesktopLog='',lastDesktopLogAt=0,lastStatusWrite=0,statusSerial=Promise.resolve();
   const proofs=new Map();
@@ -61,6 +69,9 @@ async function runEnrolledService(local) {
     health.installation=`user mode: ${facts.username} (${facts.identity}); ${facts.hostname}; macOS ${facts.osVersion}; ${facts.arch}`.slice(0,240);
   }
   const usageOptions=()=>({identity:secrets.mappedIdentity,activeApplication:config.activeApplication,sessions:config.sessions,browserTitles:config.browserTitles});
+  const suspendCollectorHealth=reason=>{
+    for(const key of ['processes','sessions','usb','files','desktop','network','browserTitles','sessionEvents'])if(Object.hasOwn(health,key))health[key]=`disabled: ${reason}`;
+  };
   const usage=new DesktopUsage(emit,{onUsage:record=>{desktopStats.queuedUsage++;desktopStats.lastQueuedUsage=record;}});
   const writeDesktopStatus=async(force=false)=>{
     if(local.installMode!=='user' || (!force && Date.now()-lastStatusWrite<15000))return;
@@ -131,8 +142,12 @@ async function runEnrolledService(local) {
         const log=path.join(path.dirname(local.dataDirectory),'logs','launchd.log');
         try {await ownedPath(log,process.getuid());if((await fs.stat(log)).size>5*1024*1024)await fs.truncate(log,0);}catch(e){if(e.code!=='ENOENT')health.logging='error: log ownership or rotation';}
       }
-      if(!adminStopped && !config.paused && !uploader.revoked) {await desktopSupervisor.tick();await collectors.poll(config);await files.configure(config.approvedDirectories);await usage.expire(usageOptions());}
-      else {files.close();files.signature='';await usage.reset();proofs.clear();desktopSupervisor.suspend?.();health.desktop=adminStopped?'disabled: administrator stop':'disabled: paused or revoked';}
+      if(!adminStopped && !config.paused && !uploader.revoked) {
+        monitoringReady=false;
+        await desktopSupervisor.tick();await collectors.poll(config,{baselineOnly:collectorBaselinePending});await files.configure(config.approvedDirectories);await usage.expire(usageOptions());
+        if(!adminStopped&&!config.paused&&!uploader.revoked){collectorBaselinePending=false;monitoringReady=true;resumeTransition=false;}
+      }
+      else {monitoringReady=false;files.close();files.signature='';await usage.reset();proofs.clear();desktopSupervisor.suspend?.();suspendCollectorHealth(adminStopped?'administrator stop':config.paused?'administrator configuration':'credential revoked');health.desktop=adminStopped?'disabled: administrator stop':'disabled: paused or revoked';}
       if(local.installMode==='user') {health.usb='unsupported: device-wide source excluded in user mode';health.network='unsupported: device-wide source excluded in user mode';}
       if(!helperLastSeen || Date.now()-Date.parse(helperLastSeen)>15000) health.desktop=config.activeApplication?'unavailable: desktop helper not connected':'disabled';
       if(local.installMode==='user')health.sessionEvents=config.sessions?'partial: observed sessions; final logout delivery is best effort':'disabled';
@@ -145,7 +160,7 @@ async function runEnrolledService(local) {
     }
   };
   const upload=async()=> {while(!stopping){if(adminStopped){await sleep(1000);continue;}const before=uploader.lastAcceptedUsage?.eventId;await uploader.tick();if(uploader.lastAcceptedUsage?.eventId!==before)await writeDesktopStatus(true);if(uploader.revoked)await revoke();await sleep(1000);}};
-  let accountControlReport=null,adminCommandReport=null,adminCommandExpiresAt=null;
+  let accountControlReport=null,adminCommandReport=null,adminCommandExpiresAt=null,usbPolicyReport=null,usbPolicyCommandExpiresAt=null;
   const heartbeat=async()=> {
     let failures=0;
     while(!stopping) {
@@ -156,18 +171,33 @@ async function runEnrolledService(local) {
         if(adminCommandExpiresAt&&Date.parse(adminCommandExpiresAt)<=Date.now()){await pendingAdminCommandReport(local.dataDirectory);adminCommandReport=null;adminCommandExpiresAt=null;}
         adminCommandReport=adminCommandReport||await pendingAdminCommandReport(local.dataDirectory);
         if(adminCommandReport&&!adminCommandExpiresAt)adminCommandExpiresAt=await pendingAdminCommandExpiry(local.dataDirectory);
+        if(usbPolicyReport&&usbPolicyCommandExpiresAt&&Date.parse(usbPolicyCommandExpiresAt)<=Date.now()){await acknowledgeUsbPolicyCommand(local.dataDirectory,usbPolicyReport.commandId);usbPolicyReport=null;usbPolicyCommandExpiresAt=null;}
         const sentAdminReport=adminCommandReport;
         const windowsServiceState=windowsService?await windowsServiceControlState():undefined;
-        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen,windowsService?(adminStopped?'ADMIN_STOPPED':'RUNNING'):undefined,windowsServiceState),...(accountControlReport?{accountControlReport}:{}),...(sentAdminReport?{agentCommandReport:sentAdminReport}:{})});
+        const lifecycle=monitoringLifecycleState({adminStopped,configPaused:config.paused,revoked:uploader.revoked,resuming:resumeTransition,collectionReady:monitoringReady});
+        const r=await transport.post('heartbeat',{agentVersion:AGENT_VERSION,health:healthReport(queue,health,config,helperLastSeen,windowsService?(adminStopped?'ADMIN_STOPPED':'RUNNING'):undefined,windowsServiceState,lifecycle),...(accountControlReport?{accountControlReport}:{}),...(sentAdminReport?{agentCommandReport:sentAdminReport}:{}),...(usbPolicyReport?{usbPolicyReport}:{})});
         accountControlReport=null;
         if(sentAdminReport&&r.agentCommandAck===sentAdminReport.commandId){
           const acknowledged=await acknowledgeAdminCommand(local.dataDirectory,sentAdminReport.commandId);
           if(acknowledged.accepted){adminStopped=acknowledged.adminStopped;adminCommandReport=null;adminCommandExpiresAt=null;console.log(adminStopped?'Administrator stop is persistent; telemetry collection is disabled while authenticated control heartbeats remain active.':'Administrator resume accepted; endpoint monitoring is active.');}
         }
+        if(usbPolicyReport&&r.usbPolicyCommandAck===usbPolicyReport.commandId){if(await acknowledgeUsbPolicyCommand(local.dataDirectory,usbPolicyReport.commandId)){usbPolicyReport=null;usbPolicyCommandExpiresAt=null;}}
         if(windowsService&&r.agentCommand){
           const received=await receiveAdminCommand(local.dataDirectory,secrets,r.agentCommand);
-          if(received.accepted){adminStopped=received.adminStopped;adminCommandReport=received.report;adminCommandExpiresAt=r.agentCommand.expiresAt;await writeDesktopStatus(true);}
+          if(received.accepted){
+            adminStopped=received.adminStopped;adminCommandReport=received.report;adminCommandExpiresAt=r.agentCommand.expiresAt;
+            if(adminStopped){monitoringReady=false;resumeTransition=false;collectorBaselinePending=true;collectors.reset();files.close();files.signature='';await usage.reset();proofs.clear();desktopSupervisor.suspend?.();suspendCollectorHealth('administrator stop');health.desktop='disabled: administrator stop';}
+            else {monitoringReady=false;resumeTransition=true;}
+            await writeDesktopStatus(true);
+          }
           else console.warn('Endpoint command rejected by local binding, expiry or replay checks.');
+        }
+        if(windowsService&&r.usbPolicyCommand){
+          const received=await receiveUsbPolicyCommand(local.dataDirectory,secrets,r.usbPolicyCommand,async policy=>{
+            return JSON.parse(await nativeInput('windows-usb-policy.ps1',{policy}));
+          });
+          if(received.accepted){usbPolicyReport=received.report;usbPolicyCommandExpiresAt=r.usbPolicyCommand.expiresAt;}
+          else console.warn('USB policy command rejected by local device binding, expiry, policy or replay checks.');
         }
         health.accountControl=await reconcileAccountControl(local,secrets,r.accountControl);
         const reported=/^reported: ([A-Z_]+)$/.exec(health.accountControl)?.[1];

@@ -5,6 +5,8 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {acknowledgeAdminCommand,acknowledgeStopCommand,administrativeStopState,pendingAdminCommandReport,pendingStopReport,receiveAdminCommand,receiveStopCommand} from '../src/remote-stop.js';
+import {monitoringLifecycleState} from '../src/health.js';
+import {DesktopUsage} from '../src/desktop-usage.js';
 
 test('remote Windows stop command is device-bound, short-lived, persistent and replay-safe',async()=>{
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'cyberorbit-stop-'));
@@ -50,5 +52,36 @@ test('administrator resume clears persistent stop only for a fresh device-bound 
     assert.equal(replacement.accepted,true,'a new authenticated administrator command supersedes an older pending transition');
     assert.equal(await administrativeStopState(directory),false);
     assert.equal((await pendingAdminCommandReport(directory,now+5000)).resultCode,'START_ACCEPTED');
+  }finally{await fs.rm(directory,{recursive:true,force:true});}
+});
+
+test('persisted admin pause survives a service restart and fresh app telemetry resumes only after authorized START',async()=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'cyberorbit-monitoring-resume-'));
+  try{
+    const secrets={deviceId:randomUUID(),mappedIdentity:'S-1-5-21-10-20-30-1001'},now=Date.now(),events=[];
+    let adminStopped=false;
+    const usage=new DesktopUsage(async(type,metadata)=>{if(!adminStopped)events.push({type,metadata});});
+    const sample={identity:secrets.mappedIdentity,pid:42,name:'Synthetic Editor',appId:'synthetic.editor',sessionId:'desktop:test',identitySource:'test-fixture',idleMilliseconds:10,sessionState:'unlocked',consoleActive:true,foregroundOwned:true,activityEligible:true,controlFresh:true,controlActiveApplication:true};
+    await usage.sample(sample,{identity:secrets.mappedIdentity,activeApplication:true,sessions:true,browserTitles:false});
+    await usage.reset();
+    const stop={commandId:randomUUID(),deviceId:secrets.deviceId,identity:secrets.mappedIdentity,action:'STOP_AGENT',issuedAt:new Date(now).toISOString(),expiresAt:new Date(now+120000).toISOString()};
+    adminStopped=(await receiveAdminCommand(directory,secrets,stop,now)).adminStopped;
+    assert.equal(await administrativeStopState(directory),true);
+    const restartedState=await administrativeStopState(directory);
+    assert.equal(restartedState,true,'new service process reloads the durable administrator pause');
+    assert.equal(monitoringLifecycleState({adminStopped:restartedState,collectionReady:false}).monitoringState,'PAUSED_BY_ADMIN');
+    const eventsBeforePausedSample=events.length;
+    await usage.sample(sample,{identity:secrets.mappedIdentity,activeApplication:true,sessions:true,browserTitles:false});
+    assert.equal(events.length,eventsBeforePausedSample,'foreground events are suppressed while an administrator pause is active');
+
+    const resume={...stop,commandId:randomUUID(),action:'START_AGENT',issuedAt:new Date(now+2000).toISOString(),expiresAt:new Date(now+122000).toISOString()};
+    const accepted=await receiveAdminCommand(directory,secrets,resume,now+2000);
+    adminStopped=accepted.adminStopped;
+    assert.equal(adminStopped,false);
+    assert.equal(monitoringLifecycleState({resuming:true,collectionReady:false}).monitoringState,'RESUMING');
+    await acknowledgeAdminCommand(directory,resume.commandId);
+    await usage.sample(sample,{identity:secrets.mappedIdentity,activeApplication:true,sessions:true,browserTitles:false});
+    assert.equal(events[0].type,'APPLICATION_FOREGROUND','new activity is collected after authorized resume');
+    assert.equal(monitoringLifecycleState({collectionReady:true}).monitoringState,'ACTIVE');
   }finally{await fs.rm(directory,{recursive:true,force:true});}
 });
