@@ -15,13 +15,17 @@ ONE MAC BUILD
    runs native/privacy tests on the build Mac, and preserves execute bits in ZIP.
    Employees do NOT need these development tools.
 4. Output, relative to the extracted build folder:
-   output/CYBERORBIT-macOS-Install-Kit.zip
-   output/CYBERORBIT-macOS-Install-Kit.zip.sha256
+   output/CYBERORBIT-macOS-Employee.zip
+   output/CYBERORBIT-macOS-Employee.zip.sha256
 5. Validate on an Apple Silicon and an Intel Mac using disposable assignments.
    Browser-title granted/denied/private-window testing remains a manual real-Mac
    acceptance gate. The build does not claim those browser tests passed.
+   The extracted handoff includes MACOS-VERIFICATION.md with the full 27-point
+   physical Mac acceptance checklist.
 6. Distribute ONLY that output employee ZIP, plus its checksum, to employees.
-   They extract it and double-click Install-CYBERORBIT.command.
+   They extract it, run ./Validate-CYBERORBIT-Package.command, then double-click
+   Install-CYBERORBIT.command. Validation checks checksums, CPU/OS/runtime and
+   GUI launchd prerequisites without installing or changing anything.
    Already-enrolled employees double-click Update-CYBERORBIT.command instead.
    The update preserves enrollment/config/queue and keeps the installed
    Keychain helper unchanged. No token is requested for a code update.

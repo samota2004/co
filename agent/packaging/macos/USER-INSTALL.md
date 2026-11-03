@@ -1,15 +1,16 @@
 # CYBERORBIT employee macOS agent
 
-For the single employee ZIP with double-click commands, transfer
-`agent/dist/CYBERORBIT-macOS-Build-Kit.zip` to your Mac build account, extract it,
-and double-click `Build-Mac-Install-Kit.command`. The verified Node runtimes are
-included; Apple Command Line Tools are required on the builder only. This creates
-`output/CYBERORBIT-macOS-Install-Kit.zip` inside the extracted build kit, containing
-both architecture payloads. Employees extract that output ZIP and double-click
-`Install-CYBERORBIT.command`, or run `./install.sh` from Terminal. `./update.sh`
-and `./uninstall.sh` are Terminal aliases for the same protected flows. See the included short `README.txt` for the employee
-flow. The Build Kit itself is for the builder and is not employee-installable.
-The older per-architecture tar workflow below remains supported separately.
+The employee archive is `output/CYBERORBIT-macOS-Employee.zip`, created on a
+supported Mac by running `Build-Mac-Install-Kit.command` from the extracted
+`CYBERORBIT-macOS-Build-Kit` handoff after native tests and archive validation.
+The existing `CYBERORBIT-macOS.zip` is a separate builder kit and is not
+employee-installable. For the complete build and validation sequence, see
+`MACOS-VERIFICATION.md` in the handoff. Employees extract the validated employee
+ZIP and double-click `Install-CYBERORBIT.command`; `Update-CYBERORBIT.command`
+and `Uninstall-CYBERORBIT.command` are the supported upgrade/uninstall entries.
+The employee ZIP contains `README.txt`, `TROUBLESHOOTING.md`, and
+`ADMINISTRATOR-GUIDE.md`. The older per-architecture tar workflow below remains
+supported separately for development and must not be confused with the release ZIP.
 
 This is the user deployment, separate from the root LaunchDaemon in `UNIX.md`.
 The repository implements this deployment; **macOS acceptance is pending**.
@@ -106,12 +107,19 @@ orbit approve-directory "$HOME/Work/ApprovedProject"
 orbit remove-directory "$HOME/Work/ApprovedProject"
 ```
 
-Pause/resume and title/folder changes are saved locally and restart the agent
+Local pause/resume and title/folder changes are saved locally and restart the agent
 without requiring connectivity. Local pause overrides dashboard resume. Local
 approval and dashboard approval must both permit every watched folder. Folder
 approval is confined to specific employee-owned directories in the employee's
 home, excludes agent storage, and rejects links and unsafe permissions. File
 records contain names/change notifications, never file reads or contents.
+
+Main Admins can separately issue remote monitoring pause/resume from the device
+controls with fresh MFA. The LaunchAgent acknowledges `PAUSED_BY_ADMIN` or
+`ACTIVE` over authenticated heartbeat; heartbeat control remains running during
+pause. This does not stop the service or revoke enrollment. Darwin
+`SERVICE_STOP` is unsupported. The employee account owner can still control
+their user-owned LaunchAgent with macOS tools.
 
 ```sh
 launchctl print "gui/$(id -u)/com.cyberorbit.user-agent"
@@ -225,27 +233,52 @@ With a fresh disposable device assignment and an authorized Mac tester:
 9. Revoke the test device in the dashboard. At its next authenticated response the
    agent stops and writes a revocation marker; later logins do not resume it.
    Remote revocation cannot reach an offline device until reconnection. Verify
-   user-mode account control, USB and device-wide network inspection report
-   unsupported and never execute privileged commands.
+   user-mode account control and device-wide network inspection report
+   unsupported. USB inventory and established TCP records are best-effort,
+   employee-scope observations only; neither implies enforcement or file
+   transfer. No privileged command runs in employee mode.
 10. Inspect AI Risk Analysis for the assigned employee. Compatible endpoint
    records feed the existing contextual analysis; the trained CERT model cannot
    infer from this partial dataset and remains explicitly unavailable. File
    changes are not file reads, and titles are not HTTP/email/content features.
 
-## Uninstall
+## Main Admin-authorized employee uninstall
 
 ```sh
 orbit uninstall
-# Or, from the extracted distribution:
-sh packaging/macos/uninstall-user.sh
+# Or double-click Uninstall-CYBERORBIT.command from the employee install kit.
 ```
 
-After `UNINSTALL` confirmation, the agent boots out the current user's launchd
-job, verifies the exclusive service lock, deletes its Keychain entry and matching
-browser native-host manifests, and removes only its checked user installation.
-It preserves server audit records. Revoke the device in the dashboard and remove
-the browser extensions separately. The root deployment is never uninstalled by
-this command. A second user install or a detected root installation is refused.
+The command submits an `AGENT_UNINSTALL` request through the authenticated local
+service channel. It does not stop or remove anything while the request is pending.
+A Main Admin must approve the request with fresh MFA. The employee command waits
+for the signed, short-lived grant to be delivered over the enrolled device's
+authenticated heartbeat, then checks its device, UID, action, expiry and nonce.
+It consumes the nonce once, boots out the current user's LaunchAgent and waits
+for the service lock to be released. Only then does it complete the server request
+and revoke the device credential. If approval, shutdown, backend completion or
+revocation fails, cleanup stops and the local queue/enrollment evidence remains.
+
+After server revocation is confirmed, the Keychain credential, LaunchAgent plist,
+registered native-host manifests and installed application binaries are removed.
+The encrypted queue, enrollment marker, configuration and logs are deliberately
+retained under `~/Library/Application Support/CYBERORBIT`; this workflow has no
+data-purge option. Remove browser extensions separately. This is the per-user
+employee workflow: a same-account employee still owns their LaunchAgent and can
+tamper with their own files or use OS tools directly. It prevents unapproved
+operations through CYBERORBIT's supported uninstall commands; it is not a
+privileged anti-tamper boundary. The separate root LaunchDaemon is never targeted
+by this command and remains under local root/MDM administrator control.
+
+If the backend is unavailable after launchd shutdown, no files, credential or
+queue are removed. The service can be restarted with `orbit start`; after the
+authorization expires, request a new Main Admin approval. If server revocation
+succeeded but later cleanup failed, the revoked marker prevents monitoring from
+restarting. Preserve the remaining files and provide the reported failed step to
+the administrator. Reopen `Uninstall-CYBERORBIT.command` from the extracted
+employee kit to resume local cleanup after confirmed revocation; it does not
+request a second grant or contact the revoked backend credential. It still keeps
+the queue and enrollment marker.
 
 ## Windows-to-macOS parity
 
@@ -262,7 +295,7 @@ this command. A second user install or a detected root installation is refused.
 | DPAPI encrypted queue/retry/dedup | AES-256-GCM queue, key in user Keychain | Restart/replay/bounds automated; Keychain runtime pending |
 | Service startup/watchdog | User Aqua LaunchAgent + helper watchdog + native flock | No sudo; actual login/logout/crash pending |
 | Health + permission diagnostics | Same health contract, explicit unsupported/degraded status | Verified backend health storage and dashboard query |
-| Windows account freezing, USB, device-wide TCP | Excluded in user mode | Unsupported; root deployment remains separate |
+| Windows account freezing, USB enforcement, device-wide TCP | Excluded in employee mode | Unsupported. macOS employee USB inventory and account-scoped established TCP observation are not enforcement or device-wide collection. |
 | Existing risk/audit ingestion | Same versioned event types, company/employee scope | Partial contextual analysis; no fabricated trained-model results |
 
 ## Source deliverables

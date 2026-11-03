@@ -43,7 +43,8 @@ async function runEnrolledService(local) {
   if(local.installMode==='user' && await userRevoked(local.dataDirectory)) {console.log('Device credential revoked; monitoring stopped. Contact the administrator before reinstalling.');return;}
   const secrets=await new CredentialStore(local.dataDirectory).load();
   const windowsService=process.platform==='win32'&&local.installMode!=='user';
-  let adminStopped=windowsService&&await administrativeStopState(local.dataDirectory);
+  const macUserService=process.platform==='darwin'&&local.installMode==='user';
+  let adminStopped=(windowsService||macUserService)&&await administrativeStopState(local.dataDirectory);
   if(local.installMode==='user') assertEnrollment(secrets,local);
   const queue=await new EncryptedQueue(path.join(local.dataDirectory,'queue'),secrets.queueKey,{uid:local.installMode==='user'?process.getuid():null}).init();
   const transport=new Transport(local,secrets.credential), uploader=new Uploader(queue,transport);
@@ -153,7 +154,10 @@ async function runEnrolledService(local) {
         if(!adminStopped&&!config.paused&&!uploader.revoked){collectorBaselinePending=false;monitoringReady=true;resumeTransition=false;}
       }
       else {monitoringReady=false;files.close();files.signature='';await usage.reset();proofs.clear();desktopSupervisor.suspend?.();suspendCollectorHealth(adminStopped?'administrator stop':config.paused?'administrator configuration':'credential revoked');health.desktop=adminStopped?'disabled: administrator stop':'disabled: paused or revoked';}
-      if(local.installMode==='user') {health.usb='unsupported: device-wide source excluded in user mode';health.network='unsupported: device-wide source excluded in user mode';}
+      if(local.installMode==='user') {
+        health.usb=config.usb?'partial: system_profiler connection inventory; no device enforcement':'disabled';
+        health.network=config.network?'partial: established TCP sockets for this account only':'disabled';
+      }
       if(!helperLastSeen || Date.now()-Date.parse(helperLastSeen)>15000) health.desktop=config.activeApplication?'unavailable: desktop helper not connected':'disabled';
       if(local.installMode==='user')health.sessionEvents=config.sessions?'partial: observed sessions; final logout delivery is best effort':'disabled';
       if(adminStopped)health.browserTitles='disabled: administrator stop';
@@ -188,7 +192,7 @@ async function runEnrolledService(local) {
             console.log('Main Admin authorization accepted. Stopping the CYBERORBIT Windows service; it cannot receive remote commands until a local Windows Administrator starts it again.');
             try{await clearLocalOperationGrant(local.dataDirectory);}catch{console.warn('Consumed service-stop grant could not be removed; it will expire and is no longer authorized server-side.');}
             await writeDesktopStatus(true);stop();
-          }else if(operation.action==='AGENT_UNINSTALL'&&operation.resultCode==='GRANT_ACCEPTED'){
+          }else if(operation.action==='AGENT_UNINSTALL'&&operation.resultCode==='GRANT_ACCEPTED'&&windowsService){
             try{await nativeInput('windows-uninstall-schedule.ps1',{requestId:operation.requestId});localOperationReport={...operation,resultCode:'UNINSTALL_SCHEDULED',reportedAt:new Date().toISOString()};}
             catch{try{await clearLocalOperationGrant(local.dataDirectory);}catch{}localOperationReport={...operation,resultCode:'UNINSTALL_SCHEDULE_FAILED',reportedAt:new Date().toISOString()};}
           }
@@ -199,12 +203,12 @@ async function runEnrolledService(local) {
           if(acknowledged.accepted){adminStopped=acknowledged.adminStopped;adminCommandReport=null;adminCommandExpiresAt=null;console.log(adminStopped?'Administrator stop is persistent; telemetry collection is disabled while authenticated control heartbeats remain active.':'Administrator resume accepted; endpoint monitoring is active.');}
         }
         if(usbPolicyReport&&r.usbPolicyCommandAck===usbPolicyReport.commandId){if(await acknowledgeUsbPolicyCommand(local.dataDirectory,usbPolicyReport.commandId)){usbPolicyReport=null;usbPolicyCommandExpiresAt=null;}}
-        if(r.localOperationGrant&&windowsService){
+        if(r.localOperationGrant&&(windowsService||macUserService)&&LOCAL_OPERATION_ACTIONS.includes(r.localOperationGrant.action)&&(windowsService||r.localOperationGrant.action==='AGENT_UNINSTALL')){
           const accepted=await persistVerifiedLocalOperationGrant(local.dataDirectory,localOperationKey(secrets.credential),r.localOperationGrant,secrets);
           if(accepted)localOperationReport={requestId:r.localOperationGrant.requestId,nonce:r.localOperationGrant.nonce,action:r.localOperationGrant.action,resultCode:'GRANT_ACCEPTED',reportedAt:new Date().toISOString()};
           else console.warn('Local operation grant rejected by device, identity, signature, expiry or replay validation.');
         }
-        if(windowsService&&r.agentCommand){
+        if((windowsService||macUserService)&&r.agentCommand){
           const received=await receiveAdminCommand(local.dataDirectory,secrets,r.agentCommand);
           if(received.accepted){
             adminStopped=received.adminStopped;adminCommandReport=received.report;adminCommandExpiresAt=r.agentCommand.expiresAt;

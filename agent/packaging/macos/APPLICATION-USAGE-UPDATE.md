@@ -59,7 +59,7 @@ Backend contracts and employee attribution remain unchanged.
    Do not distribute output if compilation/native tests fail.
 4. Extract the generated employee ZIP:
 
-   `<extracted-build-kit>/output/CYBERORBIT-macOS-Install-Kit.zip`
+   `<extracted-build-kit>/output/CYBERORBIT-macOS-Employee.zip`
 
 5. In the **already enrolled employee's graphical account**, double-click
    **`Update-CYBERORBIT.command`**. Use no sudo. Do not uninstall, delete data,

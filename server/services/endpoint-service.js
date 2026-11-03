@@ -255,9 +255,9 @@ export class EndpointService {
         if(pendingStop){if(pendingStop.status==='PENDING_OFFLINE')await enforcement.update({where:{id:pendingStop.id},data:{status:'PENDING'}});agentCommand={commandId:pendingStop.commandId,deviceId:d.id,identity:d.mappedIdentity,action:pendingStop.action,issuedAt:pendingStop.issuedAt.toISOString(),expiresAt:pendingStop.expiresAt.toISOString()};}
       }
       let localOperationGrant=null;
-      if(enforcement&&d.platform==='win32'&&d.mappedIdentity){
+      if(enforcement&&['win32','darwin'].includes(d.platform)&&d.mappedIdentity){
         await enforcement.updateMany({where:{deviceId:d.id,action:{in:LOCAL_OPERATION_ACTIONS},status:{in:['AUTH_REQUESTED','AUTH_APPROVED','AUTH_GRANT_ISSUED']},expiresAt:{lte:observedAt}},data:{status:'AUTH_EXPIRED',resultCode:'AUTHORIZATION_EXPIRED'}});
-        localOperationGrant=await this.issueLocalOperationGrantForHeartbeat(tx,d,observedAt);
+        localOperationGrant=await this.issueLocalOperationGrantForHeartbeat(tx,d,observedAt,d.platform==='darwin'?['AGENT_UNINSTALL']:LOCAL_OPERATION_ACTIONS);
       }
       let usbPolicyCommand=null;
       if(enforcement&&d.platform==='win32'&&d.mappedIdentity){
@@ -421,14 +421,16 @@ export class EndpointService {
   }
   async requestAgentStop(admin,id,body) {
     if(!admin||!isEndpointAdmin(admin)||admin.status!=='ACTIVE'||!admin.companyId)throw new EndpointError(403,'Active administrator required');
+    if(!admin.isMainAdmin){const platform=await this.prisma.endpointDevice.findFirst({where:{id,companyId:admin.companyId},select:{platform:true}});if(platform?.platform==='darwin')throw new EndpointError(403,'Main Admin access is required for macOS monitoring pause','MAIN_ADMIN_REQUIRED');}
     const reason=String(body?.reason||'').trim();
     if(reason.length<8||reason.length>500||Object.keys(body||{}).some(key=>key!=='reason'))throw new EndpointError(400,'Provide an audit reason of 8 to 500 characters','AGENT_ACTION_REASON_REQUIRED');
     const now=new Date(),expiresAt=new Date(now.getTime()+2*60*1000);
     return this.prisma.$transaction(async tx=>{
       const device=await tx.endpointDevice.findFirst({where:{id,companyId:admin.companyId,user:userScope(admin),revokedAt:null,enrolledAt:{not:null}},select:{id:true,companyId:true,userId:true,platform:true,mappedIdentity:true,lastSeen:true,health:true}});
       if(!device)throw new EndpointError(404,'Enrolled device not found in company');
-      if(device.platform!=='win32')throw new EndpointError(409,'Remote service stop is currently supported only by the Windows service agent','AGENT_STOP_UNSUPPORTED');
-      if(!device.mappedIdentity)throw new EndpointError(409,'A verified employee-to-Windows identity mapping is required before remote stop','AGENT_IDENTITY_UNVERIFIED');
+      if(!['win32','darwin'].includes(device.platform))throw new EndpointError(409,'Remote monitoring pause is unsupported on this agent platform','AGENT_STOP_UNSUPPORTED');
+      if(device.platform==='darwin'&&!admin.isMainAdmin)throw new EndpointError(403,'Main Admin access is required for macOS monitoring pause','MAIN_ADMIN_REQUIRED');
+      if(!device.mappedIdentity)throw new EndpointError(409,'A verified employee-to-device identity mapping is required before remote pause','AGENT_IDENTITY_UNVERIFIED');
       await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:'START_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},data:{status:'SUPERSEDED',resultCode:'OPPOSING_ADMIN_COMMAND'}});
       const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},orderBy:{createdAt:'asc'}});
       if(prior)return{success:true,created:false,userId:device.userId,command:{commandId:prior.commandId,action:prior.action,status:prior.status,reason:prior.reason,issuedAt:prior.issuedAt,expiresAt:prior.expiresAt,requestedBy:admin.name||admin.email}};
@@ -442,14 +444,16 @@ export class EndpointService {
   }
   async requestAgentStart(admin,id,body) {
     if(!admin||!isEndpointAdmin(admin)||admin.status!=='ACTIVE'||!admin.companyId)throw new EndpointError(403,'Active administrator required');
+    if(!admin.isMainAdmin){const platform=await this.prisma.endpointDevice.findFirst({where:{id,companyId:admin.companyId},select:{platform:true}});if(platform?.platform==='darwin')throw new EndpointError(403,'Main Admin access is required for macOS monitoring resume','MAIN_ADMIN_REQUIRED');}
     const reason=String(body?.reason||'').trim();
     if(reason.length<8||reason.length>500||Object.keys(body||{}).some(key=>key!=='reason'))throw new EndpointError(400,'Provide an audit reason of 8 to 500 characters','AGENT_ACTION_REASON_REQUIRED');
     const now=new Date(),expiresAt=new Date(now.getTime()+2*60*1000);
     return this.prisma.$transaction(async tx=>{
       const device=await tx.endpointDevice.findFirst({where:{id,companyId:admin.companyId,user:userScope(admin),revokedAt:null,enrolledAt:{not:null}},select:{id:true,companyId:true,userId:true,platform:true,mappedIdentity:true,lastSeen:true,health:true}});
       if(!device)throw new EndpointError(404,'Enrolled device not found in company');
-      if(device.platform!=='win32')throw new EndpointError(409,'Remote service resume is currently supported only by the Windows service agent','AGENT_START_UNSUPPORTED');
-      if(!device.mappedIdentity)throw new EndpointError(409,'A verified employee-to-Windows identity mapping is required before remote resume','AGENT_IDENTITY_UNVERIFIED');
+      if(!['win32','darwin'].includes(device.platform))throw new EndpointError(409,'Remote monitoring resume is unsupported on this agent platform','AGENT_START_UNSUPPORTED');
+      if(device.platform==='darwin'&&!admin.isMainAdmin)throw new EndpointError(403,'Main Admin access is required for macOS monitoring resume','MAIN_ADMIN_REQUIRED');
+      if(!device.mappedIdentity)throw new EndpointError(409,'A verified employee-to-device identity mapping is required before remote resume','AGENT_IDENTITY_UNVERIFIED');
       await tx.endpointEnforcementCommand.updateMany({where:{deviceId:id,action:'STOP_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},data:{status:'SUPERSEDED',resultCode:'OPPOSING_ADMIN_COMMAND'}});
       const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:id,action:'START_AGENT',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:now}},orderBy:{createdAt:'asc'}});
       if(prior)return{success:true,created:false,userId:device.userId,command:{commandId:prior.commandId,action:prior.action,status:prior.status,reason:prior.reason,issuedAt:prior.issuedAt,expiresAt:prior.expiresAt,requestedBy:admin.name||admin.email}};
@@ -466,7 +470,8 @@ export class EndpointService {
     if(Object.keys(body||{}).some(key=>!['action','requestId','requestedAt','identity','deviceId','reason'].includes(key))||!LOCAL_OPERATION_ACTIONS.includes(action)||typeof requestId!=='string'||!/^[0-9a-f-]{36}$/i.test(requestId)||!Number.isFinite(requestedAt)||Math.abs(Date.now()-requestedAt)>60000||typeof identity!=='string'||reason.length<8||reason.length>500)throw new EndpointError(400,'A valid action, request ID, timestamp, enrolled identity and 8–500 character reason are required.','LOCAL_OPERATION_REQUEST_INVALID');
     return this.prisma.$transaction(async tx=>{
       const device=await this.authenticate(tx,secret);
-      if(device.id!==deviceId||device.mappedIdentity!==identity||device.platform!=='win32'||!device.enrolledAt)throw new EndpointError(403,'Request device or employee identity does not match this enrolled Windows device.','LOCAL_OPERATION_DEVICE_MISMATCH');
+      const platformActionAllowed=device.platform==='win32'||(device.platform==='darwin'&&action==='AGENT_UNINSTALL');
+      if(device.id!==deviceId||device.mappedIdentity!==identity||!platformActionAllowed||!device.enrolledAt)throw new EndpointError(403,'Request device, employee identity or platform does not support this local operation.','LOCAL_OPERATION_DEVICE_MISMATCH');
       if(device.user.status!=='ACTIVE'||!['EMPLOYEE','MANAGER'].includes(device.user.roleCode))throw new EndpointError(403,'Only the active employee assigned to this device may request a local operation.','LOCAL_OPERATION_REQUEST_FORBIDDEN');
       const existing=await tx.endpointEnforcementCommand.findUnique({where:{commandId:requestId}});
       if(existing){if(existing.deviceId!==device.id||existing.action!==action)throw new EndpointError(409,'Request ID was already used for another action or device.','LOCAL_OPERATION_REQUEST_REPLAY');return{requestId,status:existing.status,expiresAt:existing.expiresAt};}
@@ -478,8 +483,8 @@ export class EndpointService {
       return{requestId,status:request.status,expiresAt:request.expiresAt};
     });
   }
-  async issueLocalOperationGrantForHeartbeat(tx,device,now) {
-    const request=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:device.id,companyId:device.companyId,userId:device.userId,action:{in:LOCAL_OPERATION_ACTIONS},status:{in:['AUTH_APPROVED','AUTH_GRANT_ISSUED']},expiresAt:{gt:now}},orderBy:{createdAt:'asc'}});
+  async issueLocalOperationGrantForHeartbeat(tx,device,now,allowedActions=LOCAL_OPERATION_ACTIONS) {
+    const request=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:device.id,companyId:device.companyId,userId:device.userId,action:{in:allowedActions},status:{in:['AUTH_APPROVED','AUTH_GRANT_ISSUED']},expiresAt:{gt:now}},orderBy:{createdAt:'asc'}});
     if(!request)return null;
     let issued=request;
     if(request.status==='AUTH_APPROVED'){

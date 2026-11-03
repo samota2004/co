@@ -1,5 +1,11 @@
 param([switch]$PurgeData,[string]$AuthorizationGrantPath)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-elevation.ps1')
+$elevationArgs=@()
+if($PurgeData){$elevationArgs+='-PurgeData'}
+if($AuthorizationGrantPath){$elevationArgs+=@('-AuthorizationGrantPath',$AuthorizationGrantPath)}
+$elevationExit=Invoke-CyberOrbitElevation -ScriptPath $PSCommandPath -ScriptArguments $elevationArgs
+if($null -ne $elevationExit){exit $elevationExit}
 $installRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'CYBERORBIT'))
 $dataRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'CYBERORBIT'))
 if ($installRoot -ne 'C:\Program Files\CYBERORBIT' -and $installRoot -ne [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'CYBERORBIT'))) { throw 'Unexpected installation path' }
@@ -14,8 +20,7 @@ if(-not $AuthorizationGrantPath) {
   Write-Output 'Request submitted. No files, credentials, queues, tasks, or service settings were changed. The Main Admin must approve it.'
   exit 0
 }
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) { throw 'The authorized uninstall executor must run as Windows Administrator or SYSTEM.' }
+if (-not (Test-CyberOrbitAdministrator)) { throw 'The authorized uninstall executor must run as Windows Administrator or SYSTEM.' }
 $expectedGrant=[IO.Path]::GetFullPath((Join-Path $dataRoot 'local-operation-grant.json'))
 if([IO.Path]::GetFullPath($AuthorizationGrantPath) -ne $expectedGrant -or -not(Test-Path -LiteralPath $expectedGrant -PathType Leaf) -or ((Get-Item -LiteralPath $expectedGrant -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'A protected device-bound Main Admin grant is required; no changes made.'}
 $grantText=& $node $cli consume-local-operation-grant $configFile AGENT_UNINSTALL

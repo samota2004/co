@@ -5,7 +5,7 @@ import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {randomBytes} from 'node:crypto';
 import {userContext,assertUserConfig,launchAgent} from '../src/macos-user.js';
-import {parseProcesses} from '../src/collectors/macos.js';
+import {parseProcesses,parseNetworkConnections,parseUsbInventory,snapshot as macosSnapshot} from '../src/collectors/macos.js';
 import {effectiveConfig} from '../src/config.js';
 import {UserDesktopSupervisor} from '../src/user-desktop-supervisor.js';
 import {reconcileAccountControl} from '../src/account-control.js';
@@ -19,6 +19,7 @@ import vm from 'node:vm';
 import {assertEnrollment,ownedPath} from '../src/macos-user.js';
 import {EncryptedQueue} from '../src/queue.js';
 import {userRevoked,markUserRevoked} from '../src/user-revocation.js';
+import {readFile} from 'node:fs/promises';
 
 test('user installation derives different identities and escaped launchd paths, rejects root and wrong enrollment',()=>{
   for(const [username,uid] of [['employee-a',501],['other.user',724],['Research & Design',1501]]) {
@@ -40,11 +41,32 @@ test('macOS process parser excludes other accounts and preserves accessible proc
   assert.deepEqual(parseProcesses(raw,501).map(p=>[p.pid,p.identity,p.name]),[[42,'uid:501','TextEdit']]);
   assert.equal(parseProcesses(raw).length,2);
 });
+test('macOS user-scope peripheral and network parsers emit only observed inventory and established TCP records',()=>{
+  const usb=parseUsbInventory({SPUSBDataType:[{_name:'USB Bus',_items:[{_name:'Test Storage Device',location_id:'0x001',vendor_id:'0x1234',product_id:'0xabcd'}]}]});
+  assert.deepEqual(usb,[{hardwareId:'0x001:0x1234:0xabcd',name:'Test Storage Device'}]);
+  assert.deepEqual(parseUsbInventory({SPUSBDataType:[{_name:'Unknown',_items:[{_name:'Incomplete',vendor_id:'0x1234'}]}]}),[]);
+  assert.deepEqual(parseNetworkConnections('p42\nn127.0.0.1:53124->192.0.2.8:443\npbad\nninvalid\n'),[
+    {pid:42,protocol:'TCP',state:'ESTABLISHED',localAddress:'127.0.0.1',localPort:53124,remoteAddress:'192.0.2.8',remotePort:443}
+  ]);
+});
+test('macOS employee snapshot uses account-scoped sockets and supported USB inventory without privileged commands',async()=>{
+  const calls=[],run=async(file,args)=>{calls.push([file,args]);if(file.endsWith('system_profiler'))return{stdout:JSON.stringify({SPUSBDataType:[{_name:'USB device',location_id:'1',vendor_id:'2',product_id:'3'}]})};if(file.endsWith('lsof'))return{stdout:'p77\nn10.0.0.2:5000->203.0.113.4:443\n'};throw new Error('unexpected helper');};
+  const result=await macosSnapshot({usb:true,network:true,userOnly:true},{run,uid:501,username:'employee'});
+  assert.equal(result.usb.length,1);assert.equal(result.network[0].pid,77);
+  assert.deepEqual(calls,[['/usr/sbin/system_profiler',['SPUSBDataType','-json']],['/usr/sbin/lsof',['-nP','-iTCP','-sTCP:ESTABLISHED','-Fpn','-u','employee']]]);
+  assert.ok(calls.every(([file])=>file==='/usr/sbin/system_profiler'||file==='/usr/sbin/lsof'));
+});
 test('user mode cannot enable privileged collection or account control, local pause overrides remote resume',async()=>{
   const c=effectiveConfig({usb:true,network:true,paused:false,browserTitles:true},{installMode:'user',paused:true,browserTitles:false,locallyApprovedDirectories:[]});
   assert.equal(c.usb,false);assert.equal(c.network,false);assert.equal(c.paused,true);assert.equal(c.browserTitles,false);
   const result=await reconcileAccountControl({installMode:'user',unixAccountControl:{enabled:true}}, {}, {},()=>{throw new Error('must not call native account control');},'darwin');
   assert.match(result,/unsupported/);
+});
+test('employee LaunchAgent consumes the existing authenticated stop/resume heartbeat commands',async()=>{
+  const source=await fs.readFile(new URL('../src/service.js',import.meta.url),'utf8');
+  assert.match(source,/let adminStopped=\(windowsService\|\|macUserService\)&&await administrativeStopState/);
+  assert.match(source,/\(windowsService\|\|macUserService\)&&r\.agentCommand/);
+  assert.match(source,/receiveAdminCommand\(local\.dataDirectory,secrets,r\.agentCommand\)/);
 });
 test('user helper supervision restarts only after backoff and stops on shutdown',async()=>{
   let now=0;const children=[],health={};
@@ -134,4 +156,16 @@ test('double-click retry never consumes a new token for an existing or incomplet
   assert.equal(continuationAction(true,['enrollment-marker','queue']),'start');
   assert.throws(()=>continuationAction(false,['queue']),/Incomplete/);
   assert.throws(()=>continuationAction(true,['revoked']),/revoked/);
+});
+test('supported macOS uninstall entries require the Main Admin grant before launchd or file cleanup',async()=>{
+  const install=await readFile(new URL('../src/macos-user-install.js',import.meta.url),'utf8');
+  const workflow=await readFile(new URL('../src/macos-uninstall.js',import.meta.url),'utf8');
+  const shell=await readFile(new URL('../packaging/macos/Uninstall-CYBERORBIT.command',import.meta.url),'utf8');
+  const request=install.lastIndexOf("requestLocalOperationFromDesktop(config,'AGENT_UNINSTALL'");
+  const wait=install.lastIndexOf('waitForMacUninstallGrant');
+  const execute=install.lastIndexOf('executeAuthorizedMacUninstall');
+  assert.ok(request>=0&&wait>request&&execute>wait,'employee uninstall requests approval and receives the grant before cleanup');
+  assert.doesNotMatch(install,/command==='uninstall'[\s\S]{0,700}launchctl.*bootout/,'the supported command cannot boot out the job directly');
+  assert.match(workflow,/config\.installMode!=='user'/,'root LaunchDaemon is excluded from the employee workflow');
+  assert.match(shell,/\$payload\/runtime\/node[\s\S]*\$payload\/src\/macos-user-install\.js[\s\S]*uninstall/,'double-click path uses the independent employee-kit runtime for normal execution and recovery');
 });

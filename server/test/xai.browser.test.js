@@ -36,6 +36,11 @@ test('XAI loads employee risk evidence and archived SHAP, handles live updates, 
     app.get('*', (req, res) => res.sendFile(path.join(projectRoot, 'client/dist/index.html')));
     server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
     const origin = `http://127.0.0.1:${server.address().port}`;
+    const storedUsage = await f.prisma.endpointEvent.findUnique({ where: { deviceId_eventId: { deviceId: usage.deviceId, eventId: usage.eventId } }, select: { userId: true, occurredAt: true, type: true } });
+    assert.equal(storedUsage?.userId, f.employee.id, 'ingested usage is attributed only to the employee matching the enrolled Windows identity');
+    const initialAnalysis = await fetch(`${origin}/api/risk/analysis/${f.employee.id}`, { headers: { Authorization: `Bearer ${generateJwtToken(f.admin, true)}` } }).then(response => response.json());
+    assert.equal(initialAnalysis.analysis.coverage.interactiveEvents, 1, 'risk API includes the persisted employee-attributed interaction');
+    assert.equal(initialAnalysis.analysis.coverage.offHoursEvents, 1, 'risk API classifies the recorded UTC observation as outside configured work hours');
     profile = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-xai-browser-')); b = await browser(profile);
     b.listeners.push(message => { if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails.text); });
     await b.command('Runtime.enable'); await b.command('Network.enable'); await b.command('Page.enable');
@@ -52,15 +57,15 @@ test('XAI loads employee risk evidence and archived SHAP, handles live updates, 
     const refresh = () => b.evaluate('document.querySelector(\'[aria-label="Refresh explanations"]\').click()');
     await waitUntil(b, `${has('Select an employee')} && document.querySelector('[aria-label="Explainable AI employee"]').options.length>2`, 'employee selector');
     await choose(f.employee.id);
-    await waitUntil(b, `${settled} && ${has('Off-hours interactive activity', contextual)}`, 'actual contextual explanations');
-    assert.equal(await b.evaluate(has('Risk contribution: +20', contextual)), true);
+    await waitUntil(b, `${settled} && ${has('1 recorded interactive observation reviewed', contextual)} && ${has('Off-hours timing alone is not treated as elevated risk', contextual)}`, 'recorded activity is visible without overstating off-hours-only risk');
+    assert.equal(await b.evaluate(has('Off-hours interactive activity', contextual)), false, 'An off-hours timestamp alone is not elevated contextual risk.');
     assert.equal(await b.evaluate(has('SHAP +', contextual)), false, 'Contextual contributions are not SHAP');
     assert.equal(await b.evaluate(has('CERT model assessment awaiting complete inputs', model)), true);
     assert.equal(await f.prisma.mlPrediction.count(), 0, 'Reading XAI must not manufacture model predictions');
     const newUsage = { ...usage, eventId: randomUUID(), metadata: { ...usage.metadata, durationSeconds: 12 } };
     const accepted = await fetch(`${origin}/api/endpoint/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${enrolled.credential}` }, body: JSON.stringify({ events: [newUsage] }) });
     assert.equal(accepted.status, 200);
-    await waitUntil(b, has('2 interactive observations', contextual), 'live endpoint explanation refresh');
+    await waitUntil(b, has('2 recorded interactive observations reviewed', contextual), 'live endpoint explanation refresh');
     const version = await registerModel(f.prisma);
     const timestamp = new Date(Date.now() - 48 * 3600000);
     await f.prisma.mlPrediction.create({ data: { userId: f.employee.id, modelVersionId: version.id, featureVector: {}, anomalyScore: 0, riskScore: 0, isAnomalous: false, timestamp, attributions: [
@@ -75,13 +80,13 @@ test('XAI loads employee risk evidence and archived SHAP, handles live updates, 
     assert.equal(await b.evaluate(has('SHAP +0.0000', model)), true);
     assert.equal(await b.evaluate(has('no directional change', model)), true);
     assert.equal(await b.evaluate(has('Model feature value: 0', model)), true);
-    assert.equal(await b.evaluate(has('0.0%')), true, 'Genuine probability zero remains a real result');
+    assert.equal(await b.evaluate(has('0.0 / 100')), true, 'Genuine zero remains a recorded uncalibrated model score');
     assert.equal(await b.evaluate(has('1 saved attribution records lack', model)), true);
     assert.equal(await b.evaluate('Boolean(window.xaiInjected)'), false);
     await change('[aria-label="Search explanations"]', 'email_event_count');
     await waitUntil(b, `${model}.querySelectorAll('article').length===1`, 'SHAP search');
     await change('[aria-label="Search explanations"]', 'off-hours');
-    await waitUntil(b, `${contextual}.querySelectorAll('article').length===1 && ${has('No model explanations match your search.', model)}`, 'contextual evidence search');
+    await waitUntil(b, `${contextual}.querySelectorAll('article').length===0 && ${has('No contextual factors match your search.', contextual)} && ${has('No model explanations match your search.', model)}`, 'search reports no matching recorded contextual factors');
     await change('[aria-label="Search explanations"]', 'no-such-feature');
     await waitUntil(b, has('No contextual factors match your search.', contextual), 'unmatched query');
     await change('[aria-label="Search explanations"]', '');

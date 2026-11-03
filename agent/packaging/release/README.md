@@ -21,8 +21,7 @@ development trees only; it does not write a second Windows ZIP.
 
 ## macOS
 
-Run on a logged-in supported Mac with Xcode Command Line Tools, the pinned Node
-runtime from `agent/packaging/macos/node-runtime.json`, and verified official
+Run on a logged-in supported Mac with Xcode Command Line Tools and verified official
 runtime archives for both architectures. Set
 `CYBERORBIT_MACOS_RUNTIME_ARCHIVES` to their directory if it is not
 `agent/dist/macos-runtime-cache`, then run:
@@ -32,10 +31,14 @@ sh agent/packaging/release/build-macos.sh
 ```
 
 Set `CYBERORBIT_MACOS_RUNTIME_ARCHIVES` to a directory containing the pinned
-official runtime archives. The Mac builder compiles and validates both native
+official runtime archives. The Mac release script verifies the host runtime,
+uses that bundled Node version, and compiles and validates both native
 payloads and runs its native/privacy tests before the release wrapper validates the actual ZIP.
-It then writes `agent/dist/CYBERORBIT-macOS.zip`. This Windows host cannot run
-that build and must not create a pretend Mac package.
+It then writes `agent/dist/CYBERORBIT-macOS-Employee.zip`. The build refuses an
+existing employee release rather than replacing it. This Windows host cannot
+run that build and must not create a pretend Mac package. The existing
+`CYBERORBIT-macOS.zip` builder archive is not an employee installer and is not
+overwritten by this release process.
 
 ## Manifests and cleanup
 

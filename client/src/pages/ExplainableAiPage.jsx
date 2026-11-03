@@ -111,7 +111,8 @@ export const ExplainableAiPage = ({ users = [], events = [], fetchJson = request
               <p className={`mt-3 text-sm leading-6 ${muted}`}>{factor.description}</p>
               <p className={`mt-3 text-xs ${muted}`}>Source: {analysis.source} · Category: {factor.category || 'Context'}</p>
             </article>)}
-            {!factors.length && <p className={`mt-5 text-sm ${muted}`}>{analysis.hasTelemetry ? 'No elevated contextual factor was found in the available observations. Unobserved activity remains unassessed.' : 'No activity is recorded for this employee in the last 24 hours.'}</p>}
+            {!factors.length && <p className={`mt-5 text-sm ${muted}`}>{analysis.hasTelemetry ? `${analysis.coverage?.interactiveEvents ?? 0} recorded interactive ${(analysis.coverage?.interactiveEvents ?? 0) === 1 ? 'observation' : 'observations'} reviewed. No elevated contextual factor was found in the available observations. Off-hours timing alone is not treated as elevated risk; unobserved activity remains unassessed.` : 'No activity is recorded for this employee in the last 24 hours.'}</p>}
+            {!filteredFactors.length && query && <p className={`mt-5 text-sm ${muted}`}>No contextual factors match your search.</p>}
             {factors.length > 0 && !filteredFactors.length && <p className={`mt-5 text-sm ${muted}`}>No contextual factors match your search.</p>}
             {analysis.coverage?.truncated && <p className="mt-4 text-sm text-[#D4AF37]">The analysis limit was reached. Contextual factors use the bounded evidence described on Risk Analysis.</p>}
           </section>

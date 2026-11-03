@@ -40,6 +40,9 @@ Normal successful heartbeats arrive about every 30 seconds. Reopen the installer
 to start/verify an existing enrollment without consuming another token.
 Offline monitoring continues after enrollment; encrypted queued records replay
 automatically on reconnect, subject to size and seven-day retention limits.
+When enabled, employee-mode USB inventory and established TCP observations are
+best-effort and limited to what macOS exposes to this account. They do not block
+devices, establish file transfer, or represent device-wide network activity.
 
 OPTIONAL BROWSER TITLES
 Application usage and process monitoring do not require Accessibility.
@@ -59,10 +62,19 @@ Firefox temporary add-ons do not survive browser restarts; production requires
 a signed or company-distributed add-on. Titles stay off by default.
 
 PAUSE OR UNINSTALL
-Double-click Uninstall-CYBERORBIT.command and type UNINSTALL to confirm. It stops
-this user's job and removes only this installation, its queue and its Keychain
-credential. Ask the administrator to revoke the device and remove browser add-ons.
-Server audit records and other deployment modes are preserved.
+Main Admins can pause/resume monitoring from the device controls using fresh
+MFA. This stops collection while the authenticated heartbeat remains active;
+it does not stop the LaunchAgent or revoke enrollment. Darwin SERVICE_STOP is
+not supported by this employee package.
+Double-click Uninstall-CYBERORBIT.command to request AGENT_UNINSTALL. Nothing is
+stopped until the Main Admin approves with fresh MFA. The authorized flow waits
+for the LaunchAgent to stop and server credential revocation to be confirmed
+before removing the app. Encrypted queued telemetry, enrollment marker,
+configuration and logs are retained. Remove browser extensions separately.
+This command only manages this account's LaunchAgent; the separate root
+LaunchDaemon remains administrator-managed. As the owner of your user account,
+you can still change your own files or use direct macOS tools; this is not an
+anti-tamper boundary against the account owner or local administrator.
 Local pause/resume commands are documented in the detailed USER-INSTALL.md guide.
 
 PROBLEMS

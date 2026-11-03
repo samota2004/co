@@ -31,6 +31,9 @@ import { MlAnalyticsPage } from "./pages/MlAnalyticsPage";
 import { AuditLogsPage } from "./pages/AuditLogsPage";
 import { SimulatorPage } from "./pages/SimulatorPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { ResourcesPage } from "./pages/ResourcesPage";
+import { AccessRequestsPage } from "./pages/AccessRequestsPage";
+import { SecurityProfilePage } from "./pages/SecurityProfilePage";
 
 const ADMIN_ROLES = ["SECURITY_ADMIN", "SYSTEM_ADMIN"];
 
@@ -139,6 +142,10 @@ const pathToTab = (pathname) => {
     return "audit-logs";
   }
 
+  if (clean === "resources") return "resources";
+  if (clean === "access-requests") return "access-requests";
+  if (clean === "security-profile") return "security-profile";
+
   if (clean === "simulator") {
     return "simulator";
   }
@@ -193,6 +200,10 @@ const pageTitles = {
   "ml-analytics": "ML Model Evidence",
 
   "audit-logs": "Security Audit Records",
+
+  resources: "Protected Resources",
+  "access-requests": "Access Requests",
+  "security-profile": "Security Profile",
 
   simulator: "Threat Telemetry Simulator",
 
@@ -365,6 +376,9 @@ export default function App() {
           targetTab = "employee-dashboard";
         }
 
+        if (tab === "resources" && !isCurrentUserAdmin) targetTab = "employee-dashboard";
+        if (["access-requests", "security-profile"].includes(tab) && !isCurrentUserAdmin) targetTab = "employee-dashboard";
+
         if (tab === "simulator" && !isCurrentUserAdmin) {
           targetTab = "employee-dashboard";
         }
@@ -442,6 +456,12 @@ export default function App() {
         return;
       }
 
+      if (["resources", "access-requests", "security-profile"].includes(pathTab) && !isAdminRole(role)) {
+        setActiveTab("employee-dashboard");
+        window.history.replaceState({}, "", "/employee-dashboard");
+        return;
+      }
+
       if (pathTab === "dashboard" && isEmployeeRole(role)) {
         setActiveTab("employee-dashboard");
 
@@ -480,6 +500,11 @@ export default function App() {
       const role = getUserRole(getStoredUser());
 
       handleNavigate(isAdminRole(role) ? "dashboard" : "employee-dashboard");
+      return;
+    }
+
+    if (authed && ["resources", "access-requests", "security-profile"].includes(currentTab) && !isAdminRole(getUserRole(getStoredUser()))) {
+      handleNavigate("employee-dashboard");
     }
   }, [handleNavigate]);
 
@@ -1483,6 +1508,14 @@ export default function App() {
                 onRefreshData={fetchAllData}
               />
             )}
+
+            {activeTab === "resources" && isCurrentUserAdmin && (
+              <ResourcesPage resources={resources} users={users} onCreated={fetchAllData} fetchJson={requestApi} />
+            )}
+
+            {activeTab === "access-requests" && isCurrentUserAdmin && <AccessRequestsPage fetchJson={requestApi} />}
+
+            {activeTab === "security-profile" && isCurrentUserAdmin && <SecurityProfilePage currentUser={currentUser} />}
 
             {activeTab === "simulator" && isCurrentUserAdmin && (
               <SimulatorPage

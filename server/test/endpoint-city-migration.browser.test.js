@@ -31,7 +31,7 @@ test('pending migration shows the existing two Windows/one Mac; load errors neve
     await waitUntil(b,`${panel}?.textContent.includes('This does not mean devices were deleted')`,'honest initial load error');
     assert.equal(await b.evaluate(`${panel}.textContent.includes('No application-usage events were returned')`),false);
     assert.equal(await b.evaluate(`Array.from(${panel}.querySelectorAll('button')).find(e=>e.textContent==='Assign').matches(':disabled')`),true);
-    failDashboard=false;await b.evaluate(`Array.from(${panel}.querySelectorAll('button')).find(e=>e.textContent==='Refresh').click()`);
+    failDashboard=false;assert.equal(await b.evaluate(`Boolean(document.querySelector('[aria-label="Refresh device registry"]'))`),true,'Registry refresh remains available when the optional city migration is unavailable');await b.evaluate(`document.querySelector('[aria-label="Refresh device registry"]').click()`);
     await waitUntil(b,`${panel}?.querySelectorAll('article').length===3 && !${panel}.textContent.includes('Fixture database migration error')`,'existing devices restored without reenrollment');
     for(const name of ['Existing Windows A','Existing Windows B','Existing Mac'])assert.equal(await b.evaluate(`${panel}.textContent.includes(${JSON.stringify(name)})`),true);
     assert.equal(await b.evaluate(`${panel}.querySelectorAll('[aria-label="Estimated device city"]').length`),3);

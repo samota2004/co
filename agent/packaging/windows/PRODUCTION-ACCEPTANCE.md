@@ -16,10 +16,10 @@ This procedure is for the exact package `CYBERORBIT-Windows.zip` (agent version 
 |---|---|
 | Package | `CYBERORBIT-Windows.zip` |
 | Agent package version | `1.1.0` |
-| SHA-256 | `ac0784fbf9e0325fa750cf9587aaefd04fffc0c9df11cdbdb7c0b1b2fe3bd03a` |
-| Size | `35,010,748` bytes |
-| Archive inventory | 68 entries: 67 manifest-listed payload files and `package-manifest.json` |
-| Build-host result | SHA-256 and all 67 manifest file hashes verified; package and authorization tests passed |
+| SHA-256 | `a4614ded252ffcdf34a74027bf8c9fbe5d4c84a4d1dd4d7123a54369cd7969c3` |
+| Size | `35,011,951` bytes |
+| Archive inventory | 69 entries: 68 manifest-listed payload files and `package-manifest.json` |
+| Build-host result | SHA-256 and all 68 manifest file hashes verified; Windows package and authorization tests passed |
 
 Set these paths on the test machine before running the commands. Replace the download path and backend URL with the approved test values; never paste a credential or enrollment token into a command.
 
@@ -27,7 +27,7 @@ Set these paths on the test machine before running the commands. Replace the dow
 $Zip = 'C:\CYBERORBIT-Acceptance\CYBERORBIT-Windows.zip'
 $PackageRoot = 'C:\CYBERORBIT-Acceptance\package'
 $ApiBase = 'https://<test-backend-host>'
-$ExpectedSha256 = 'ac0784fbf9e0325fa750cf9587aaefd04fffc0c9df11cdbdb7c0b1b2fe3bd03a'
+$ExpectedSha256 = 'a4614ded252ffcdf34a74027bf8c9fbe5d4c84a4d1dd4d7123a54369cd7969c3'
 ```
 
 ## Procedure
@@ -116,7 +116,7 @@ if ($isAdmin) { throw 'FAIL: current account/token is an Administrator' }
 
 ### 5. Update the existing enrolled test device
 
-Use an already installed and enrolled **test** endpoint. Run in elevated PowerShell from the extracted package root. Do not run `install.ps1` or request a new enrollment token for an enrolled device.
+Use an already installed and enrolled **test** endpoint. Do not run `install.ps1` or request a new enrollment token for an enrolled device. If the service is running, first submit `SERVICE_STOP` with `request-operation.ps1`, complete its native UAC prompt, obtain fresh Main Admin approval, and wait for SCM to report `Stopped`. The updater must refuse a running service before changing installed files.
 
 Before updating, capture protected data file hashes and ACLs in the same elevated PowerShell session. This prints only a pass/fail result, not credential or queue contents:
 
@@ -143,7 +143,7 @@ if (-not $updateResult.success) { throw 'FAIL: updater did not report success; p
 Get-Service CyberOrbitAgent
 ```
 
-**Expected:** Updater result has `success: true`; the service is `Running`; all existing ProgramData file hashes and ACLs match. In the Main Admin Devices view, the same device ID remains enrolled and reports a newer agent version/heartbeat. No token is issued or consumed, and no re-enrollment occurs.
+**Expected:** Updater result has `success: true`; the service remains `Stopped`; all existing ProgramData file hashes and ACLs match. Then, from elevated PowerShell, run `Start-Service CyberOrbitAgent` and verify it reaches `Running`. In the Main Admin Devices view, the same device ID remains enrolled and reports a newer agent version/heartbeat. No token is issued or consumed, and no re-enrollment occurs.
 
 **Actual:** Not run on a Windows test machine.
 
@@ -184,7 +184,7 @@ Still signed in as the Standard User, submit a request:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramFiles\CYBERORBIT\packaging\windows\request-operation.ps1" -Action SERVICE_STOP -Reason 'Dedicated VM service-stop acceptance test'
 ```
 
-**Expected:** JSON reports a request ID and status `AUTH_REQUESTED`; service remains `Running`. Main Admin opens **Admin Management → Local agent operation requests**, checks the test device and requested action, re-authenticates with fresh MFA, then approves with an audit reason. Within the two-minute grant window, the test device service becomes `Stopped`; the request is acknowledged/executing in the dashboard/audit history.
+**Expected:** Native Windows UAC appears and requests an Administrator account/password because this test account is standard. CYBERORBIT does not read or validate the password. If UAC is cancelled, command exits nonzero and no request or state change occurs. If accepted, a request ID/status `AUTH_REQUESTED` is returned and service remains `Running`. Main Admin opens the local agent operation requests, checks the test device and action, re-authenticates with fresh MFA, then approves. After the device validates the grant, its service becomes `Stopped`.
 
 **Actual:** Automated Main Admin fresh-MFA `SERVICE_STOP` integration coverage passed in this environment. The Windows request and actual SCM stop have not run.
 
@@ -248,11 +248,11 @@ $uninstall = "$env:ProgramFiles\CYBERORBIT\packaging\windows\uninstall.ps1"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $uninstall
 ```
 
-At the uninstall reason prompt, enter `Standard user denial acceptance check`. This first invocation is request-only.
+The native UAC prompt should request Windows Administrator credentials. Cancel it first and verify no files, credentials, queue, task, service state or request record changed. Retry and provide test-machine Administrator credentials; then enter `Standard user denial acceptance check` if prompted. This invocation only requests Main Admin review and remains non-destructive.
 
-**Expected:** `sc.exe sdset` is denied and before/after DACLs match. The uninstaller reports a pending Main Admin request and explicitly says no files, credentials, queues, tasks or service settings changed. Service and installed files remain. Do not approve this request; reject it in Main Admin.
+**Expected:** `sc.exe sdset` is denied and before/after DACLs match. UAC cancellation changes nothing; after successful UAC, the uninstaller reports a pending Main Admin request and explicitly says no files, credentials, queues, tasks or service settings changed. Service and installed files remain. Do not approve this request; reject it in Main Admin.
 
-**Actual:** Automated service ACL and request-only uninstaller tests passed. Actual Windows permission checks have not run.
+**Actual:** Automated service ACL and native-UAC launch-path assertions passed. Actual Windows UAC and permission checks have not run.
 
 **Status:** `PENDING` on Windows.
 

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {architectures,sha256,filesIn,createZip} from './kit-lib.js';
+import {architectures,sha256,buildTimestamp,filesIn,createZip} from './kit-lib.js';
 const agent=fileURLToPath(new URL('../../',import.meta.url)),packaging=path.join(agent,'packaging/macos');
 async function download(url) {
   const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(120000)});
@@ -38,15 +38,19 @@ export async function prepare(args=[]) {
   // node_modules, Windows kits or enrolled local state.
   for(const name of ['src','shared','browser-companion'])await fs.cp(path.join(agent,name),path.join(root,'agent',name),{recursive:true});
   await fs.mkdir(path.join(root,'agent/native'));
-  for(const name of ['macos-lock.swift','macos-desktop.swift'])await fs.copyFile(path.join(agent,'native',name),path.join(root,'agent/native',name));
-  await fs.cp(packaging,path.join(root,'agent/packaging/macos'),{recursive:true});
+  for(const name of ['keychain.swift','macos-lock.swift','macos-desktop.swift'])await fs.copyFile(path.join(agent,'native',name),path.join(root,'agent/native',name));
+  // Package only inputs required for the employee build. Root LaunchDaemon
+  // plists/installers and unrelated packaging entry points stay out of handoff.
+  const packagingFiles=['ADMINISTRATOR-GUIDE.md','BUILD-README.txt','Build-Mac-Install-Kit.command','Check-CYBERORBIT.command','Diagnose-Application-Usage.command','EMPLOYEE-README.txt','Enable-Browser-Titles.command','Install-CYBERORBIT.command','Show-Employee-Identity.command','TROUBLESHOOTING.md','Uninstall-CYBERORBIT.command','Update-CYBERORBIT.command','USER-INSTALL.md','Validate-CYBERORBIT-Package.command','build-install-kit.js','com.cyberorbit.user-agent.plist','employee-common.sh','install-user.sh','install.sh','kit-lib.js','node-runtime.json','uninstall-user.sh','uninstall.sh','update-user.js','update.sh','verify-kit.js'];
+  await fs.mkdir(path.join(root,'agent/packaging/macos'),{recursive:true});
+  for(const name of packagingFiles)await fs.copyFile(path.join(packaging,name),path.join(root,'agent/packaging/macos',name));
   await fs.copyFile(path.join(agent,'package.json'),path.join(root,'agent/package.json'));
   await fs.mkdir(path.join(root,'agent/test'));
-  for(const name of ['macos-user.test.js','macos-runtime.test.js','macos-kit.test.js','desktop-usage.test.js'])await fs.copyFile(path.join(agent,'test',name),path.join(root,'agent/test',name));
+  for(const name of ['macos-user.test.js','macos-runtime.test.js','macos-kit.test.js','macos-uninstall.test.js','desktop-usage.test.js','release-package.test.js'])await fs.copyFile(path.join(agent,'test',name),path.join(root,'agent/test',name));
   for(const browser of ['chromium','firefox'])await fs.copyFile(path.join(agent,'browser-companion/background.js'),path.join(root,'agent/browser-companion',browser,'background.js'));
   await fs.copyFile(path.join(packaging,'Build-Mac-Install-Kit.command'),path.join(root,'Build-Mac-Install-Kit.command'));
   await fs.copyFile(path.join(packaging,'BUILD-README.txt'),path.join(root,'README.txt'));
-  await fs.copyFile(path.join(agent,'MACOS-VERIFICATION.md'),path.join(root,'MACOS-VERIFICATION.md'));
+  await fs.copyFile(path.join(agent,'docs/MACOS-VERIFICATION.md'),path.join(root,'MACOS-VERIFICATION.md'));
   await fs.mkdir(path.join(root,'runtime-archives'));
   const checksums=[];
   for(const arch of architectures) {
@@ -54,11 +58,13 @@ export async function prepare(args=[]) {
     checksums.push(`${archive.sha256}  ${archive.file}`);
   }
   await fs.writeFile(path.join(root,'runtime-archives/SHA256SUMS'),checksums.join('\n')+'\n');
-  await fs.writeFile(path.join(root,'build-kit-manifest.json'),JSON.stringify({format:1,kind:'macos-build',platform:'darwin',employeeInstallable:false,agentVersion:JSON.parse(await fs.readFile(path.join(agent,'package.json'),'utf8')).version,nodeVersion:spec.version,architectures,generatedOn:process.platform,generatedAt:new Date().toISOString()},null,2)+'\n');
+  await fs.writeFile(path.join(root,'build-kit-manifest.json'),JSON.stringify({format:1,kind:'macos-build',platform:'darwin',employeeInstallable:false,agentVersion:JSON.parse(await fs.readFile(path.join(agent,'package.json'),'utf8')).version,nodeVersion:spec.version,architectures,generatedOn:process.platform,generatedAt:buildTimestamp()},null,2)+'\n');
   const files=await filesIn(root);
   if(files.some(f=>/(^|\/)(\.env[^/]*|credential\.(dpapi|host)(\.tmp)?|helper-capability\.json|queue|enrollment-marker)(\/|$)/.test(f)))throw new Error('Unexpected local state in build kit');
   if(files.some(f=>f.startsWith('agent/native/windows-')||f.startsWith('agent/packaging/windows/')))throw new Error('Windows-only helper found in macOS build kit');
-  const packageManifest={format:1,platform:'macos-build-kit',packageVersion:JSON.parse(await fs.readFile(path.join(agent,'package.json'),'utf8')).version,builtAtUtc:new Date().toISOString(),files:[]};
+  if(files.some(f=>/agent\/packaging\/macos\/com\.cyberorbit\.(agent|desktop)\.plist$/.test(f)))throw new Error('Root LaunchDaemon plist found in Mac build handoff');
+  for(const required of ['agent/native/keychain.swift','agent/native/macos-desktop.swift','agent/native/macos-lock.swift','agent/packaging/macos/build-install-kit.js','agent/packaging/macos/node-runtime.json','Build-Mac-Install-Kit.command'])if(!files.includes(required))throw new Error(`Mac build handoff is incomplete: ${required}`);
+  const packageManifest={format:1,platform:'macos-build-kit',packageVersion:JSON.parse(await fs.readFile(path.join(agent,'package.json'),'utf8')).version,builtAtUtc:buildTimestamp(),files:[]};
   for(const file of files){packageManifest.files.push({path:file,sha256:sha256(await fs.readFile(path.join(root,file)))});}
   await fs.writeFile(path.join(root,'package-manifest.json'),JSON.stringify(packageManifest,null,2)+'\n');
   await fs.writeFile(path.join(root,'SHA256SUMS'),packageManifest.files.map(f=>`${f.sha256}  ${f.path}`).join('\n')+'\n');

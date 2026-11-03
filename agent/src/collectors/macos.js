@@ -8,43 +8,58 @@ export function parseProcesses(stdout, uid=null) {
     return {pid:Number(m[1]),identity:`uid:${m[2]}`,startedAt:new Date(time).toISOString(),name:m[4].split('/').pop()};
   }).filter(Boolean);
 }
-export async function snapshot(c) {
+export function parseUsbInventory(json) {
+  const output=[];
+  const walk=items=>{for(const item of items||[]){
+    if(item.product_id&&item.vendor_id&&item.location_id){
+      const hardwareId=`${item.location_id}:${item.vendor_id}:${item.product_id}`;
+      const name=typeof item._name==='string'&&item._name.trim()?item._name.trim():'USB device';
+      output.push({hardwareId,name});
+    }
+    walk(item._items);
+  }};
+  walk(json?.SPUSBDataType);
+  return output;
+}
+export function parseNetworkConnections(stdout) {
+  const output=[];let pid=0;
+  for(const line of String(stdout||'').split('\n')){
+    if(line.startsWith('p')){pid=Number(line.slice(1));continue;}
+    const match=line.match(/^n(.+):(\d+)->(.+):(\d+)$/);
+    if(match&&Number.isSafeInteger(pid)&&pid>0)output.push({pid,protocol:'TCP',state:'ESTABLISHED',localAddress:match[1],localPort:Number(match[2]),remoteAddress:match[3],remotePort:Number(match[4])});
+  }
+  return output;
+}
+export async function snapshot(c,{run=exec,uid=process.getuid?.(),username=os.userInfo().username}={}) {
   const out = {};
   if (c.processes) {
-    const args=c.userOnly?['-U',String(process.getuid()),'-o','pid=,uid=,lstart=,comm=']:['-axo','pid=,uid=,lstart=,comm='];
-    const {stdout} = await exec('/bin/ps',args,{timeout:10000,maxBuffer:1048576,env:{...process.env,LC_ALL:'C'}});
-    out.processes=parseProcesses(stdout,c.userOnly?process.getuid():null);
+    const args=c.userOnly?['-U',String(uid),'-o','pid=,uid=,lstart=,comm=']:['-axo','pid=,uid=,lstart=,comm='];
+    const {stdout} = await run('/bin/ps',args,{timeout:10000,maxBuffer:1048576,env:{...process.env,LC_ALL:'C'}});
+    out.processes=parseProcesses(stdout,c.userOnly?uid:null);
   }
   if (c.usb) {
-    if(c.userOnly) throw new Error('Device-wide USB monitoring unavailable in user mode');
-    const {stdout} = await exec('/usr/sbin/system_profiler',['SPUSBDataType','-json'],{timeout:15000,maxBuffer:2097152});
-    out.usb = [];
-    const walk = items => { for (const x of items || []) { if (x.product_id) out.usb.push({hardwareId:`${x.location_id}:${x.vendor_id}:${x.product_id}`,name:x._name}); walk(x._items); } };
-    walk(JSON.parse(stdout).SPUSBDataType);
+    const {stdout} = await run('/usr/sbin/system_profiler',['SPUSBDataType','-json'],{timeout:15000,maxBuffer:2097152});
+    out.usb=parseUsbInventory(JSON.parse(stdout));
   }
   if (c.sessions) {
-    const {stdout}=await exec('/usr/bin/who',[],{timeout:5000,maxBuffer:131072});
+    const {stdout}=await run('/usr/bin/who',[],{timeout:5000,maxBuffer:131072});
     out.sessions=[];
     for(const line of stdout.trim().split('\n').slice(0,100)) {
       const [name,terminal]=line.trim().split(/\s+/);
       if(c.userOnly && name!==os.userInfo().username)continue;
       if(!/^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$/.test(name || '') || !/^(console|ttys\d+)$/.test(terminal || ''))continue;
-      const uid=Number((await exec('/usr/bin/id',['-u',name],{timeout:3000})).stdout.trim());
-      if(!Number.isSafeInteger(uid) || uid<0)continue;
-      if(c.userOnly && uid!==process.getuid())continue;
-      out.sessions.push({identity:`uid:${uid}`,sessionId:terminal==='console'?`desktop:${uid}`:`${terminal}:${uid}`,state:'connected'});
+      const sessionUid=Number((await run('/usr/bin/id',['-u',name],{timeout:3000})).stdout.trim());
+      if(!Number.isSafeInteger(sessionUid) || sessionUid<0)continue;
+      if(c.userOnly && sessionUid!==uid)continue;
+      out.sessions.push({identity:`uid:${sessionUid}`,sessionId:terminal==='console'?`desktop:${sessionUid}`:`${terminal}:${sessionUid}`,state:'connected'});
     }
     // Lock/unlock comes from the authenticated GUI helper, not `who`.
   }
   if (c.network) {
-    if(c.userOnly) throw new Error('Device-wide network inspection unavailable in user mode');
-    const {stdout} = await exec('/usr/sbin/lsof',['-nP','-iTCP','-sTCP:ESTABLISHED','-Fpn'],{timeout:10000,maxBuffer:1048576});
-    out.network = []; let pid = 0;
-    for (const l of stdout.split('\n')) {
-      if (l.startsWith('p')) pid=Number(l.slice(1));
-      const m=l.match(/^n(.+):(\d+)->(.+):(\d+)$/);
-      if (m) out.network.push({pid,protocol:'TCP',state:'ESTABLISHED',localAddress:m[1],localPort:Number(m[2]),remoteAddress:m[3],remotePort:Number(m[4])});
-    }
+    const args=['-nP','-iTCP','-sTCP:ESTABLISHED','-Fpn'];
+    if(c.userOnly)args.push('-u',username);
+    const {stdout} = await run('/usr/sbin/lsof',args,{timeout:10000,maxBuffer:1048576});
+    out.network=parseNetworkConnections(stdout);
   }
   return out;
 }

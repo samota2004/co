@@ -41,7 +41,7 @@ test('Windows installer protects SCM, files and scheduled tasks from standard us
   assert.match(updater,/\$dataHashes\[\$file\.FullName\]/,'update verifies existing enrollment and queue data remain unchanged');
   assert.match(updater,/Remove-Item\s+-LiteralPath\s+\$compiledHost/,'temporary service host is cleaned up');
   assert.match(updater,/Restore-CyberOrbitUpdateFiles\s+-State\s+\$sourceTransaction/,'failed updater restores its source transaction');
-  assert.match(updater,/\$restartService\s*=\s*\$service\.State\s+-eq\s+'Running'/,'updater preserves an intentionally stopped service');
+  assert.match(updater,/if\s*\(\$serviceWasRunning\)\s*\{\s*throw 'The service is running\. Submit SERVICE_STOP/,'running service updates require the authorized service-stop flow');
   assert.match(updater,/param\(\[string\]\$ResultFile,\[switch\]\$AllowSourceReparsePoint\)/,'source reparse allowance is explicit and disabled by default');
   assert.match(updater,/\$sourceRootItem\.Attributes\s+-band\s+\[IO\.FileAttributes\]::ReparsePoint\)\s+-and\s+-not\s+\$AllowSourceReparsePoint/,'only the package root can use the explicit reparse allowance');
   assert.match(updater,/function\s+Resolve-ValidatedSource/,'each source is checked under the resolved source root');
@@ -53,7 +53,6 @@ test('Windows installer protects SCM, files and scheduled tasks from standard us
   assert.match(updater,/Missing or reparse-point installed configuration/,'installed configuration reparse points remain rejected');
   assert.match(updater,/Missing or reparse-point installed runtime/,'installed runtime binary reparse points remain rejected');
   assert.match(updater,/\$serviceWasDisabled\s*=\s*\$service\.StartMode\s+-eq\s+'Disabled'/,'a disabled service state is recorded');
-  assert.match(updater,/if\s*\(\$restartService\)\s*\{\s*Stop-Service CyberOrbitAgent/,'only a service that was already running is stopped');
-  assert.match(updater,/if\s*\(\$restartService\)\s*\{\s*Start-Service CyberOrbitAgent/,'only a service that was running before the update is restarted');
+  assert.doesNotMatch(updater,/\b(?:Stop|Start)-Service\s+CyberOrbitAgent\b/,'updater cannot stop or restart the service outside Main Admin authorization');
   assert.match(updater,/\$desktopTask\s+-and\s+-not\s+\$serviceWasDisabled/,'disabled service state is not overwritten by startup configuration');
 });

@@ -3,14 +3,16 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createInterface} from 'node:readline/promises';
 import {setTimeout as delay} from 'node:timers/promises';
-import {userContext,ownedPath,launchAgent,macosFacts} from './macos-user.js';
+import {userContext,ownedPath,launchAgent,macosFacts,assertEnrollment} from './macos-user.js';
 import {readConfig} from './config.js';
 import {enroll} from './enrollment.js';
 import {exec} from './native.js';
 import {CredentialStore} from './credential-store.js';
 import {browserHosts} from './browser-native-host.js';
-import {acquireUserLock} from './user-lock.js';
-import {userRevoked} from './user-revocation.js';
+import {userRevoked,markUserRevoked} from './user-revocation.js';
+import {Transport} from './uploader.js';
+import {requestLocalOperationFromDesktop} from './local-operation-client.js';
+import {consumeMacUninstallGrant,executeAuthorizedMacUninstall,prepareMacUninstall,prepareMacUninstallFiles,recoverConfirmedMacUninstall,stopMacLaunchAgent,waitForMacUninstallGrant,waitMacAgentStopped} from './macos-uninstall.js';
 
 export function continuationAction(hasCredential,entries) {
   if(entries.includes('revoked'))throw new Error('This device was revoked. Ask the administrator for a new assignment after authorized uninstall.');
@@ -94,6 +96,42 @@ async function registerBrowser(context,config,file,browser,id) {
   config.browserCompanions={...config.browserCompanions,[browser]:id};await writeConfig(file,config);
   console.log('Browser companion registered for this employee. Restart the extension/browser. Enable browser titles locally and in the dashboard.');
 }
+async function uninstall(context,config){
+  if(config.installMode!=='user')throw new Error('This command manages only the employee LaunchAgent. The optional root LaunchDaemon has a separate administrator-managed lifecycle.');
+  const store=new CredentialStore(config.dataDirectory);
+  if(await userRevoked(config.dataDirectory)){
+    const recovered=await recoverConfirmedMacUninstall({config,context,operations:{
+      isRevoked:directory=>userRevoked(directory),prepare:args=>prepareMacUninstallFiles(args),
+      stop:target=>stopMacLaunchAgent(target,exec),waitStopped:data=>waitMacAgentStopped(data,context.uid),
+      removeCredential:()=>store.remove(),
+      removePlist:async plist=>{if(!plist)return;try{await ownedPath(plist,context.uid);await fs.unlink(plist);}catch(error){if(error.code!=='ENOENT')throw error;}},
+      removeBrowserManifest:async manifest=>{try{await ownedPath(manifest,context.uid);await fs.unlink(manifest);}catch(error){if(error.code!=='ENOENT')throw error;}},
+      removeApp:async app=>{if(!app)return;await validateTree(app);await fs.rm(app,{recursive:true});}
+    }});
+    console.log(`Resumed cleanup after server credential revocation was previously confirmed. Encrypted queue, enrollment marker, configuration and logs remain under ${context.root}; remove browser extensions separately. Completed: ${recovered.completedSteps.join(', ')}.`);return;
+  }
+  const secrets=await store.load();assertEnrollment(secrets,config,context);
+  const reason=await question('Reason for the Main Admin AGENT_UNINSTALL request (8–500 characters): ');
+  const reply=await requestLocalOperationFromDesktop(config,'AGENT_UNINSTALL',reason),operation=reply.localOperationRequest;
+  if(!operation?.success||!operation.requestId||operation.action&&operation.action!=='AGENT_UNINSTALL')throw new Error('The enrolled LaunchAgent did not accept the authorization request. No local changes were made.');
+  console.log(`Uninstall request ${operation.requestId} is ${operation.status}. Ask the Main Admin to approve AGENT_UNINSTALL with fresh MFA. Nothing has been stopped or removed.`);
+  const transport=new Transport(config,secrets.credential),grantFile=path.join(config.dataDirectory,'local-operation-grant.json');
+  const grant=await waitForMacUninstallGrant({transport,requestId:operation.requestId,grantFile,secrets,identity:context.identity});
+  const result=await executeAuthorizedMacUninstall({config,context,grant,secrets,operations:{
+    prepare:args=>prepareMacUninstall(args),
+    consume:approved=>consumeMacUninstallGrant({directory:config.dataDirectory,grant:approved,secrets,identity:context.identity}),
+    stop:target=>stopMacLaunchAgent(target,exec),
+    waitStopped:data=>waitMacAgentStopped(data,context.uid),
+    complete:approved=>transport.post(`local-operation-requests/${approved.requestId}/complete`,{nonce:approved.nonce,result:'SUCCEEDED'}),
+    fail:approved=>transport.post(`local-operation-requests/${approved.requestId}/complete`,{nonce:approved.nonce,result:'FAILED'}),
+    markRevoked:directory=>markUserRevoked(directory),
+    removeCredential:()=>store.remove(),
+    removePlist:async plist=>{await ownedPath(plist,context.uid);await fs.unlink(plist);},
+    removeBrowserManifest:async manifest=>{await ownedPath(manifest,context.uid);await fs.unlink(manifest);},
+    removeApp:async app=>{await validateOwnedTree(app,context.uid);await fs.rm(app,{recursive:true});}
+  }});
+  console.log(`Main Admin-authorized LaunchAgent uninstall completed (${result.requestId}). The server credential is revoked. Encrypted queued telemetry, enrollment marker, configuration and logs were retained under ${context.root}; remove browser extensions separately.`);
+}
 export async function main(args) {
   const context=userContext(),[command,...options]=args;
   const file=path.join(context.root,'config.json');
@@ -157,27 +195,7 @@ export async function main(args) {
     await writeConfig(file,config);await start(context,config,{verifyHeartbeat:false});
   } else if(command==='browser')await registerBrowser(context,config,file,...options);
   else if(command==='uninstall') {
-    if(await question('This stops monitoring and deletes this installation’s local queue and Keychain credential. Ask the administrator to revoke the device; server audit records remain. Type UNINSTALL: ')!=='UNINSTALL')throw new Error('Uninstall cancelled');
-    const target=`gui/${context.uid}/${label}`;
-    let loaded=false;try{await exec('/bin/launchctl',['print',target],{timeout:5000});loaded=true;}catch{}
-    if(loaded)await exec('/bin/launchctl',['bootout',target],{timeout:20000});
-    // Never remove another deployment or follow a replaced installation path.
-    await ownedPath(context.root,context.uid,{directory:true});await ownedPath(config.dataDirectory,context.uid,{directory:true});
-    const release=await acquireUserLock(config.dataDirectory);
-    try {
-    await new CredentialStore(config.dataDirectory).remove();
-    for(const browser of Object.keys(config.browserCompanions || {})) {
-      const host=browserHosts[browser];if(!host)continue;
-      const manifest=path.join(context.home,'Library','Application Support',host.directory,'com.cyberorbit.browser.json');
-      await ownedPath(manifest,context.uid);
-      if(JSON.parse(await fs.readFile(manifest,'utf8')).path!==path.join(context.root,`browser-${browser}.sh`))throw new Error('Browser host was replaced; preserve and review it');
-      await fs.unlink(manifest);
-    }
-    const plist=path.join(context.home,'Library','LaunchAgents',label+'.plist');
-    try{await ownedPath(plist,context.uid);await fs.unlink(plist);}catch(e){if(e.code!=='ENOENT')throw e;}
-    if(context.root!==path.join(context.home,'Library','Application Support','CYBERORBIT'))throw new Error('Unsafe uninstall path');
-    await fs.rm(context.root,{recursive:true});console.log('User agent removed. Revoke the assigned device in the dashboard and remove the browser companion extension.');
-    } finally {release();}
+    await uninstall(context,config);
   } else throw new Error('Commands: identity, install, continue, enroll, start, status, permissions, pause, resume, titles-on, titles-off, approve-directory PATH, remove-directory PATH, browser NAME EXTENSION_ID, uninstall');
 }
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main(process.argv.slice(2)).catch(e=>{console.error(e.message);process.exitCode=1;});

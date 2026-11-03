@@ -25,9 +25,9 @@ export class Transport {
     if(process.env.NODE_TLS_REJECT_UNAUTHORIZED==='0') throw new Error('Disabling TLS verification is prohibited');
     this.url = validateServerUrl(config.serverUrl, config.allowLoopbackHttp); this.credential = credential; this.fetch = fetcher;
   }
-  async post(route, body) {
-    const r = await this.fetch(`${this.url}/api/endpoint/${route}`, { method:'POST', redirect:'error', signal:AbortSignal.timeout(15000),
-      headers:{'Content-Type':'application/json', ...(this.credential ? {Authorization:`Bearer ${this.credential}`} : {})}, body:JSON.stringify(body) });
+  async request(method,route,body) {
+    const r = await this.fetch(`${this.url}/api/endpoint/${route}`, { method, redirect:'error', signal:AbortSignal.timeout(15000),
+      headers:{...(body!==undefined?{'Content-Type':'application/json'}:{}), ...(this.credential ? {Authorization:`Bearer ${this.credential}`} : {})}, ...(body!==undefined?{body:JSON.stringify(body)}:{}) });
     if (!r.ok) {
       const data = await errorDetails(r);
       const code = data.code || data.error?.code;
@@ -41,6 +41,8 @@ export class Transport {
     }
     const data = await r.json(); if (!data.success) throw new Error('Invalid acceptance response'); return data;
   }
+  post(route,body) { return this.request('POST',route,body); }
+  get(route) { return this.request('GET',route); }
 }
 export class Uploader {
   constructor(queue, transport) { this.queue = queue; this.transport = transport; this.failures = 0; this.nextAttempt = 0; this.revoked = false; }

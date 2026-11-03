@@ -3,6 +3,10 @@ param(
   [Parameter(Mandatory=$true)][string]$Reason
 )
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'windows-elevation.ps1')
+$elevationArgs=@('-Action',$Action,'-Reason',$Reason)
+$elevationExit=Invoke-CyberOrbitElevation -ScriptPath $PSCommandPath -ScriptArguments $elevationArgs
+if($null -ne $elevationExit){exit $elevationExit}
 if($Reason.Trim().Length -lt 8 -or $Reason.Trim().Length -gt 500){throw 'Reason must contain 8–500 characters.'}
 $installRoot=[IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'CYBERORBIT'))
 $config=Join-Path $installRoot 'agent-config.json';$node=Join-Path $installRoot 'runtime/node.exe';$cli=Join-Path $installRoot 'src/cli.js'

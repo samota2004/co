@@ -37,8 +37,10 @@ helpers are available on this Windows host.
 On your Mac, extract that ZIP and double-click `Build-Mac-Install-Kit.command`
 in a logged-in build account with Apple Command Line Tools. The build compiles
 both helper architectures, checks executable headers, runs build-Mac native and
-privacy tests, and generates `output/CYBERORBIT-macOS-Install-Kit.zip`. Employees
-extract the output ZIP and double-click `Install-CYBERORBIT.command`.
+privacy tests, and generates `output/CYBERORBIT-macOS-Employee.zip`. Employees
+extract the output ZIP, run `Validate-CYBERORBIT-Package.command`, then double-click
+`Install-CYBERORBIT.command`. The validator checks inventory/hash integrity,
+CPU/OS/runtime and GUI launchd prerequisites without installing anything.
 No Node installation or development tools are required on employee computers.
 
 The resumed-work audit verified the existing build ZIP's CRC, SHA-256, executable
@@ -136,9 +138,73 @@ effort; lock indication can be unavailable and is then reported degraded; macOS
 permissions may require normal company provisioning; Safari titles and user-mode
 privileged account/device-wide collectors are unsupported; signed/notarized
 distribution and persistent browser extension publication remain release tasks.
+
+## 3 November 2026: authorized employee uninstall implementation
+
+The employee LaunchAgent uninstall entry now submits `AGENT_UNINSTALL` through
+authenticated local IPC and waits for a signed, short-lived Main Admin grant. It
+validates device, UID, exact action, expiry and nonce, consumes the grant once,
+boots out the per-user LaunchAgent, and waits for its service lock to release
+before asking the backend to revoke the credential. The encrypted queue,
+enrollment marker, configuration and logs remain on disk. The optional root
+LaunchDaemon is a separate local root/MDM-managed deployment and is not handled by
+the employee workflow. A same-account employee can still tamper with their
+user-owned LaunchAgent or use direct macOS tools; this is not a privileged
+anti-tamper boundary.
+
+Automated coverage passed on Windows for grant binding/expiry/replay, authorization
+ordering, failed shutdown, backend failure, queue/enrollment retention and partial
+cleanup recovery. Backend HTTP/PostgreSQL integration passed for synthetic Windows and
+macOS device records. If confirmed revocation is recorded but cleanup is partial,
+the independent employee-kit uninstall command resumes local cleanup without
+requesting another grant; the queue and enrollment marker remain. This is not
+macOS-native acceptance. The Mac LaunchAgent,
+Keychain, launchctl shutdown, lock wait, file ownership and both architecture
+install workflows still require testing on supported physical Macs. No employee
+package was generated in this workspace; the existing ZIPs were preserved pending
+that verification.
 The existing trained model lacks the complete CERT feature set, so compatible
 contextual risk analysis remains available without fabricated model inference.
 
 The runtime can only learn a remote revocation after connectivity returns.
 Keychain/UID checks protect employee isolation but do not constitute hardware or
 same-user anti-tamper attestation. No OS security protection is bypassed.
+
+## Employee release preparation update — 3 November 2026
+
+The Mac employee builder now copies only Mac helper sources and employee-mode
+packaging support into its payload. Its package validator rejects Windows
+packaging/native helpers and the optional root LaunchDaemon plists. Synthetic
+package tests pass 7/7; the focused `npm run test:macos` suite passes 42 tests,
+with 6 skipped and no failures; and the full agent suite passes 121 tests with
+8 skipped and no failures on Windows. The focused skips include five tests requiring native Mac
+process/Keychain/flock/AppKit/launchd behavior, one Unix ownership test, and two
+additional release-archive checks in the full suite because no employee ZIP was built.
+
+An updated builder handoff was prepared outside `agent/dist` at
+`%TEMP%/CYBERORBIT-macOS-Build-Kit-Authorization-Updated-v2.zip`. Its SHA-256 is
+`b7debed4a414344be3d9bc9456f8043cfdccbe0cbbe6d37823452d45445a17c5`; its build
+manifest remains `employeeInstallable:false`. All 88 files listed in its source
+manifest matched their SHA-256 values, and no secret-like paths were present.
+This handoff is for a Mac builder and is not an employee release. The employee
+ZIP, native runtime, install/update/reboot/monitoring/telemetry tests, and Main
+Admin uninstall acceptance remain blocked until run on supported physical Macs.
+The original Windows and macOS release ZIPs were not modified.
+
+## 4 November 2026: final Mac build handoff
+
+The self-contained Windows-generated Mac build handoff is
+`%TEMP%/CYBERORBIT-macOS-Build-Kit-Final-Testing-v7.zip` (100,477,726 bytes;
+SHA-256 `b4e89a558ae26e7377b9d9e6d57019b4b3488fb83a811b756dc3c04e4318bd80`).
+It includes the three required Swift helper sources, pinned Node archives for
+arm64 and x86_64, the complete employee build inputs, and the 27-point Mac
+acceptance guide. Its manifest marks it `employeeInstallable:false`; root
+LaunchDaemon plists are absent. Clean extraction and Windows-host tests passed.
+This is not an employee ZIP and does not evidence native compilation, signing,
+notarization, or Mac installation.
+
+From the extracted `CYBERORBIT-macOS-Build-Kit` folder on a logged-in Mac with
+Xcode Command Line Tools, run `./Build-Mac-Install-Kit.command`. Expected output
+is `output/CYBERORBIT-macOS-Employee.zip` plus its `.sha256` sidecar. After
+extracting that employee ZIP on a clean Mac, run
+`./Validate-CYBERORBIT-Package.command` before `Install-CYBERORBIT.command`.

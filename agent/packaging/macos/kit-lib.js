@@ -3,9 +3,17 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {deflateRawSync} from 'node:zlib';
 export const architectures=['arm64','x64'];
-export const commands=['install.sh','uninstall.sh','update.sh','Install-CYBERORBIT.command','Update-CYBERORBIT.command','Diagnose-Application-Usage.command','Uninstall-CYBERORBIT.command','Check-CYBERORBIT.command','Show-Employee-Identity.command','Enable-Browser-Titles.command'];
+export const commands=['install.sh','uninstall.sh','update.sh','Install-CYBERORBIT.command','Update-CYBERORBIT.command','Diagnose-Application-Usage.command','Uninstall-CYBERORBIT.command','Check-CYBERORBIT.command','Show-Employee-Identity.command','Enable-Browser-Titles.command','Validate-CYBERORBIT-Package.command'];
 export const helpers=['keychain','macos-desktop','macos-lock'];
 export const sha256=data=>createHash('sha256').update(data).digest('hex');
+export function buildTimestamp(){
+  const sourceEpoch=process.env.SOURCE_DATE_EPOCH;
+  if(sourceEpoch===undefined)return new Date().toISOString();
+  if(!/^\d{1,12}$/.test(sourceEpoch))throw new Error('SOURCE_DATE_EPOCH must be Unix seconds');
+  const value=new Date(Number(sourceEpoch)*1000);
+  if(!Number.isFinite(value.getTime()))throw new Error('SOURCE_DATE_EPOCH is outside the supported date range');
+  return value.toISOString();
+}
 export function safeRelative(value) {
   if(typeof value!=='string' || !value || value.startsWith('/') || value.includes('\\') || value.includes(':') || /[\x00-\x1f\x7f]/.test(value) || value.split('/').some(p=>!p || p==='.' || p==='..'))throw new Error('Unsafe package path');
   return value;
@@ -27,12 +35,15 @@ export function assertMachO(bytes,arch) {
 }
 export async function validatePayload(root,arch,version) {
   if(!architectures.includes(arch))throw new Error('Unsupported payload architecture');
+  const packagedFiles=await filesIn(root);
+  if(packagedFiles.some(file=>file.startsWith('packaging/windows/')||file.startsWith('native/windows-')||['packaging/macos/com.cyberorbit.agent.plist','packaging/macos/com.cyberorbit.desktop.plist'].includes(file)))
+    throw new Error('Employee payload contains Windows packaging or the optional root LaunchDaemon');
   const manifest=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
   if(manifest.version!==version)throw new Error('Agent version differs between payloads');
   const contract=await fs.readFile(path.join(root,'shared/contract.js'),'utf8');
   if(!contract.includes(`AGENT_VERSION = '${version}'`))throw new Error('Stale shared contract');
   for(const binary of ['runtime/node',...helpers.map(h=>'native/'+h)])assertMachO(await fs.readFile(path.join(root,binary)),arch);
-  for(const file of ['src/cli.js','src/macos-user-install.js','src/service.js','packaging/macos/install-user.sh','packaging/macos/uninstall-user.sh','browser-companion/chromium/background.js','browser-companion/firefox/background.js'])await fs.access(path.join(root,file));
+  for(const file of ['src/cli.js','src/macos-user-install.js','src/service.js','packaging/macos/USER-INSTALL.md','packaging/macos/install-user.sh','packaging/macos/uninstall-user.sh','packaging/macos/update-user.js','browser-companion/chromium/background.js','browser-companion/firefox/background.js'])await fs.access(path.join(root,file));
 }
 export async function writeInventory(root) {
   const lines=[];
@@ -42,6 +53,7 @@ export async function writeInventory(root) {
 export async function verifyKit(root,arch) {
   const manifest=JSON.parse(await fs.readFile(path.join(root,'kit-manifest.json'),'utf8'));
   if(manifest.format!==1 || manifest.kind!=='employee-install' || manifest.platform!=='darwin' || manifest.buildComplete!==true || JSON.stringify(manifest.architectures)!==JSON.stringify(architectures))throw new Error('This is not a complete built Mac employee kit');
+  if(typeof manifest.agentVersion!=='string'||!/^v?\d+\.\d+\.\d+/.test(manifest.agentVersion)||manifest.minimumMacOS!=='13.0')throw new Error('Package version or minimum macOS requirement is invalid');
   if(!architectures.includes(arch))throw new Error('Unsupported Mac architecture');
   const inventory=await fs.readFile(path.join(root,'SHA256SUMS'),'utf8'),seen=new Set();
   for(const line of inventory.trim().split('\n')) {
@@ -52,7 +64,8 @@ export async function verifyKit(root,arch) {
   }
   const actual=(await filesIn(root)).filter(f=>f!=='SHA256SUMS');
   if(actual.length!==seen.size || actual.some(f=>!seen.has(f)))throw new Error('Package has missing or unexpected files');
-  for(const file of [...commands,'README.txt','lib/employee-common.sh','lib/verify-kit.js','lib/kit-lib.js','kit-manifest.json','package.json'])if(!seen.has(file))throw new Error('Incomplete employee commands');
+  if(actual.some(f=>/^(test|tests|fixtures?)(\/|$)|(^|\/)\.env[^/]*$|(^|\/)credential\.(dpapi|host)(\.tmp)?$|(^|\/)helper-capability\.json$|(^|\/)com\.cyberorbit\.(agent|desktop)\.plist$|(^|\/)packaging\/windows\//i.test(f)))throw new Error('Employee package contains development, secret-like, Windows or root LaunchDaemon files');
+  for(const file of [...commands,'README.txt','TROUBLESHOOTING.md','ADMINISTRATOR-GUIDE.md','lib/employee-common.sh','lib/verify-kit.js','lib/kit-lib.js','kit-manifest.json','package.json'])if(!seen.has(file))throw new Error('Incomplete employee commands');
   const packageConfig=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8'));
   if(packageConfig.type!=='module')throw new Error('Employee kit requires ES module configuration');
   for(const target of architectures)await validatePayload(path.join(root,'payloads',target),target,manifest.agentVersion);
@@ -68,7 +81,7 @@ export function executable(file) {return /\.(command|sh)$/.test(file)||/\/runtim
 // .command files after extraction; PowerShell Compress-Archive loses those bits.
 export async function createZip(root,destination,{folder=path.basename(root)}={}) {
   safeRelative(folder);const local=[],central=[];let offset=0;
-  const now=new Date(),date=((Math.max(1980,now.getFullYear())-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate(),time=(now.getHours()<<11)|(now.getMinutes()<<5)|Math.floor(now.getSeconds()/2);
+  const now=new Date(buildTimestamp()),date=((Math.max(1980,now.getUTCFullYear())-1980)<<9)|((now.getUTCMonth()+1)<<5)|now.getUTCDate(),time=(now.getUTCHours()<<11)|(now.getUTCMinutes()<<5)|Math.floor(now.getUTCSeconds()/2);
   const files=await filesIn(root);if(files.length>65535)throw new Error('ZIP entry limit exceeded');
   for(const file of files) {
     const name=Buffer.from(folder+'/'+file),data=await fs.readFile(path.join(root,file));

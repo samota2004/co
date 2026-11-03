@@ -5,8 +5,13 @@ param(
     [switch]$TokenFromClipboard
 )
 $ErrorActionPreference = 'Stop'
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) { throw 'Run in an elevated PowerShell prompt' }
+. (Join-Path $PSScriptRoot 'windows-elevation.ps1')
+$elevationArgs=@('-ServerUrl',$ServerUrl)
+if($AllowLoopbackHttp){$elevationArgs+='-AllowLoopbackHttp'}
+foreach($directory in $ApprovedDirectory){$elevationArgs+=@('-ApprovedDirectory',$directory)}
+if($TokenFromClipboard){$elevationArgs+='-TokenFromClipboard'}
+$elevationExit=Invoke-CyberOrbitElevation -ScriptPath $PSCommandPath -ScriptArguments $elevationArgs
+if($null -ne $elevationExit){exit $elevationExit}
 if (Get-Service CyberOrbitAgent -ErrorAction SilentlyContinue) { throw 'Agent already installed; revoke and uninstall before reassignment' }
 $packageRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $installRoot = Join-Path $env:ProgramFiles 'CYBERORBIT'

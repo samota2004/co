@@ -100,6 +100,6 @@ test('Windows automatic startup and recovery cannot bypass the protected persist
   assert.match(install,/sc\.exe failure CyberOrbitAgent .*actions= restart/,'SCM recovery may restart only the worker, whose boot path reads the flag');
   assert.match(startup,/Set-Service -Name CyberOrbitAgent -StartupType Automatic/);
   assert.match(watchdog,/Start-ScheduledTask -TaskName 'CYBERORBIT Desktop Monitor'/,'watchdog launches only the helper, which checks authenticated adminStopped before collecting');
-  assert.match(service,/const windowsService=process\.platform==='win32'&&local\.installMode!=='user';\s*let adminStopped=windowsService&&await administrativeStopState\(local\.dataDirectory\)/,'Windows service startup reloads durable administrative state before collection');
+  assert.match(service,/const windowsService=process\.platform==='win32'&&local\.installMode!=='user';\s*const macUserService=process\.platform==='darwin'&&local\.installMode==='user';\s*let adminStopped=\(windowsService\|\|macUserService\)&&await administrativeStopState\(local\.dataDirectory\)/,'Windows service and employee LaunchAgent reload durable pause state before collection');
   assert.match(service,/if\(!adminStopped && !config\.paused && !uploader\.revoked\)/);
 });

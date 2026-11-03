@@ -3,7 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {architectures,commands,helpers,sha256,validatePayload,writeInventory,verifyKit,createZip} from './kit-lib.js';
+import {architectures,commands,helpers,sha256,buildTimestamp,validatePayload,writeInventory,verifyKit,createZip} from './kit-lib.js';
 const exec=promisify(execFile),agent=fileURLToPath(new URL('../../',import.meta.url)),packaging=path.join(agent,'packaging/macos');
 export async function build(args) {
   if(process.platform!=='darwin' || process.getuid()===0)throw new Error('Build on a logged-in Mac with Apple Command Line Tools, without sudo. Windows cannot compile these helpers.');
@@ -14,13 +14,20 @@ export async function build(args) {
   if(process.version!==runtime.version)throw new Error('Use the Node runtime bundled with the build kit.');
   await exec('/usr/bin/xcrun',['--find','swiftc'],{timeout:10000});
   await fs.mkdir(output,{recursive:false,mode:0o700});
-  const kit=path.join(output,'CYBERORBIT-macOS-Install-Kit');await fs.mkdir(kit,{mode:0o755});
+  const kit=path.join(output,'CYBERORBIT-macOS-Employee');await fs.mkdir(kit,{mode:0o755});
   for(const arch of architectures) {
     console.log(`Building ${arch} payload...`);
     const archive=runtime.archives[arch],archiveFile=path.join(archives,archive.file);
     if(sha256(await fs.readFile(archiveFile))!==archive.sha256)throw new Error('Official Node runtime checksum mismatch');
     const root=path.join(kit,'payloads',arch);await fs.mkdir(root,{recursive:true});
-    for(const name of ['src','shared','native','packaging','browser-companion'])await fs.cp(path.join(agent,name),path.join(root,name),{recursive:true});
+    for(const name of ['src','shared','browser-companion'])await fs.cp(path.join(agent,name),path.join(root,name),{recursive:true});
+    // Employee payloads contain only the Mac helper sources and user-mode
+    // installer support. Never ship the root LaunchDaemon or Windows package.
+    await fs.mkdir(path.join(root,'native'));
+    for(const name of helpers)await fs.copyFile(path.join(agent,'native',name+'.swift'),path.join(root,'native',name+'.swift'));
+    const employeePackaging=path.join(root,'packaging/macos');await fs.mkdir(employeePackaging,{recursive:true});
+    for(const name of ['USER-INSTALL.md','com.cyberorbit.user-agent.plist','install-user.sh','uninstall-user.sh','update-user.js'])
+      await fs.copyFile(path.join(packaging,name),path.join(employeePackaging,name));
     await fs.copyFile(path.join(agent,'package.json'),path.join(root,'package.json'));
     await fs.mkdir(path.join(root,'runtime'));
     const extracted=path.join(output,`node-${arch}`);await fs.mkdir(extracted);
@@ -38,16 +45,23 @@ export async function build(args) {
     for(const file of ['src/cli.js','src/macos-user-install.js','src/service.js'])await exec(process.execPath,['--check',path.join(root,file)],{timeout:5000});
   }
   console.log('Running native and privacy tests on this build Mac (the other architecture requires its own runtime acceptance).');
-  const tests=await exec(process.execPath,['--test',...['macos-user.test.js','macos-runtime.test.js','macos-kit.test.js','desktop-usage.test.js'].map(name=>path.join(agent,'test',name))],{timeout:300000,maxBuffer:1024*1024});console.log(tests.stdout);
+  const tests=await exec(process.execPath,['--test',...['macos-user.test.js','macos-runtime.test.js','macos-kit.test.js','macos-uninstall.test.js','desktop-usage.test.js'].map(name=>path.join(agent,'test',name))],{timeout:300000,maxBuffer:1024*1024});console.log(tests.stdout);
   await fs.mkdir(path.join(kit,'lib'));
   for(const name of ['kit-lib.js','verify-kit.js','employee-common.sh'])await fs.copyFile(path.join(packaging,name),path.join(kit,'lib',name));
   for(const name of commands) {await fs.copyFile(path.join(packaging,name),path.join(kit,name));await fs.chmod(path.join(kit,name),0o755);}
   await fs.writeFile(path.join(kit,'package.json'),JSON.stringify({private:true,type:'module'}));
   await fs.copyFile(path.join(packaging,'EMPLOYEE-README.txt'),path.join(kit,'README.txt'));
+  await fs.copyFile(path.join(packaging,'TROUBLESHOOTING.md'),path.join(kit,'TROUBLESHOOTING.md'));
+  await fs.copyFile(path.join(packaging,'ADMINISTRATOR-GUIDE.md'),path.join(kit,'ADMINISTRATOR-GUIDE.md'));
   const pkg=JSON.parse(await fs.readFile(path.join(agent,'package.json'),'utf8'));
-  await fs.writeFile(path.join(kit,'kit-manifest.json'),JSON.stringify({format:1,kind:'employee-install',platform:'darwin',buildComplete:true,agentVersion:pkg.version,desktopPipelineRevision:2,nodeVersion:runtime.version,minimumMacOS:runtime.minimumMacOS,architectures,builtAt:new Date().toISOString(),nativeTestsRunOn:process.arch,browserTitlesVerified:false},null,2)+'\n');
+  await fs.writeFile(path.join(kit,'kit-manifest.json'),JSON.stringify({format:1,kind:'employee-install',platform:'darwin',buildComplete:true,agentVersion:pkg.version,desktopPipelineRevision:2,nodeVersion:runtime.version,minimumMacOS:runtime.minimumMacOS,architectures,builtAt:buildTimestamp(),nativeTestsRunOn:process.arch,browserTitlesVerified:false},null,2)+'\n');
   await writeInventory(kit);await verifyKit(kit,process.arch);
-  const result=await createZip(kit,path.join(output,'CYBERORBIT-macOS-Install-Kit.zip'));
+  const result=await createZip(kit,path.join(output,'CYBERORBIT-macOS-Employee.zip'));
+  const archiveTests=await exec(process.execPath,['--test',path.join(agent,'test/release-package.test.js')],{
+    cwd:agent,timeout:120000,maxBuffer:1024*1024,
+    env:{...process.env,CYBERORBIT_RELEASE_MACOS_ARCHIVE:result.destination}
+  });
+  console.log(archiveTests.stdout);
   console.log(JSON.stringify(result,null,2));return result;
 }
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url))build(process.argv.slice(2)).catch(error=>{console.error(error.message);process.exitCode=1;});

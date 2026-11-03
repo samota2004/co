@@ -1,7 +1,11 @@
 param([string]$ResultFile,[switch]$AllowSourceReparsePoint)
 $ErrorActionPreference = 'Stop'
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) { throw 'Run as Administrator. This updates installed code only; enrollment and data are preserved.' }
+. (Join-Path $PSScriptRoot 'windows-elevation.ps1')
+$elevationArgs=@()
+if($ResultFile){$elevationArgs+=@('-ResultFile',$ResultFile)}
+if($AllowSourceReparsePoint){$elevationArgs+='-AllowSourceReparsePoint'}
+$elevationExit=Invoke-CyberOrbitElevation -ScriptPath $PSCommandPath -ScriptArguments $elevationArgs
+if($null -ne $elevationExit){exit $elevationExit}
 if (-not ('CyberOrbitFinalPath' -as [type])) {
   Add-Type -TypeDefinition @'
 using System;
@@ -93,7 +97,7 @@ $relativeFiles = @(
   # Explicit Windows support files used by the updater, service and desktop helper.
   'src/windows-service-diagnostic.js','shared/contract.js','shared/app-identity.js',
   'native/windows-api.cs','native/vault.ps1','native/windows-snapshot.ps1','native/windows-desktop.ps1','native/windows-account-control.ps1','native/windows-usb-policy.ps1','native/windows-uninstall-schedule.ps1',
-  'packaging/windows/configure-browser-titles.ps1','packaging/windows/configure-startup.ps1','packaging/windows/request-operation.ps1',
+  'packaging/windows/configure-browser-titles.ps1','packaging/windows/configure-startup.ps1','packaging/windows/request-operation.ps1','packaging/windows/windows-elevation.ps1',
   'packaging/windows/desktop-watchdog.ps1','packaging/windows/uninstall.ps1',
   'packaging/windows/update-source-files.ps1','package.json'
 )
@@ -121,9 +125,9 @@ if (-not (Test-Path -LiteralPath $runtimeNode -PathType Leaf) -or ((Get-Item -Li
 $taskName = 'CYBERORBIT Repair Probe '+[Guid]::NewGuid().ToString('N')
 $desktopTaskName = 'CYBERORBIT Desktop Monitor'
 $desktopTask = Get-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue
-$restartService = $service.State -eq 'Running'
+$serviceWasRunning = $service.State -eq 'Running'
+if ($serviceWasRunning) { throw 'The service is running. Submit SERVICE_STOP through request-operation.ps1, obtain fresh Main Admin approval, wait for the service to stop, then rerun this updater. The updater will preserve the stopped state.' }
 $serviceWasDisabled = $service.StartMode -eq 'Disabled'
-if ($serviceWasDisabled -and $restartService) { throw 'Service is disabled but still running; stop/review it explicitly before updating.' }
 $restartDesktopTask = $null -ne $desktopTask -and $desktopTask.State -eq 'Running'
 $compiledHost=$null
 $compiledHost=Join-Path ([IO.Path]::GetTempPath()) ('CyberOrbitService-'+[Guid]::NewGuid().ToString('N')+'.exe')
@@ -139,10 +143,6 @@ $reportFile = Join-Path $dataRoot ('repair-diagnostic-'+[Guid]::NewGuid().ToStri
 $backupRoot = Join-Path $installRoot ('.code-backup-'+[Guid]::NewGuid().ToString('N'))
 $sourceTransaction = @{Saved=@{};AclBefore=@{};CreatedTargets=@()}; $result = @{success=$false;stage='preflight'}
 try {
-  if ($restartService) {
-    Stop-Service CyberOrbitAgent -ErrorAction Stop
-    (Get-Service CyberOrbitAgent).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))
-  }
   if ($restartDesktopTask) {
     Stop-ScheduledTask -TaskName $desktopTaskName -ErrorAction Stop
     $stopDeadline=(Get-Date).AddSeconds(20)
@@ -185,27 +185,17 @@ try {
     & (Join-Path $installRoot 'packaging/windows/configure-startup.ps1') | Out-Null
     $result.automaticStartupConfigured=$true
   }
-  if ($restartService) {
-    $result.stage='service_start'
-    Start-Service CyberOrbitAgent
-    (Get-Service CyberOrbitAgent).WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
-  }
   if ($restartDesktopTask) {
     Start-ScheduledTask -TaskName $desktopTaskName
     $startDeadline=(Get-Date).AddSeconds(30)
     while ((Get-ScheduledTask -TaskName $desktopTaskName).State -ne 'Running' -and (Get-Date) -lt $startDeadline) { Start-Sleep -Milliseconds 250 }
     if ((Get-ScheduledTask -TaskName $desktopTaskName).State -ne 'Running') { throw 'Desktop session helper did not restart after update' }
   }
-  if ($restartService) {
-    for($i=0;$i -lt 20;$i++) { Start-Sleep -Seconds 2; if((Get-Service CyberOrbitAgent).Status -ne 'Running'){throw 'Service exited during startup verification'} }
-  }
   $result.success=$true; $result.stage='updated'; $result.serviceStatus=[string](Get-Service CyberOrbitAgent).Status
 } catch {
   # Never emit the exception object: it may contain native stdout/secret input.
   $result.error='Installed update failed during '+$result.stage+'. See diagnostic categories; original code restored when possible.'
-  if ($restartService) { Stop-Service CyberOrbitAgent -ErrorAction SilentlyContinue }
   Restore-CyberOrbitUpdateFiles -State $sourceTransaction -InstallRoot $installRoot
-  if ($restartService) { Start-Service CyberOrbitAgent -ErrorAction SilentlyContinue }
   if ($restartDesktopTask) { Start-ScheduledTask -TaskName $desktopTaskName -ErrorAction SilentlyContinue }
 } finally {
   if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }

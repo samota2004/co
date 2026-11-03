@@ -23,7 +23,12 @@ else
 fi
 payload="$kit/payloads/$architecture"
 [ -x "$payload/runtime/node" ] || { echo 'Mac runtime missing. Ask your administrator for the complete built install ZIP.' >&2; exit 1; }
+for tool in /bin/launchctl /usr/bin/plutil /usr/bin/sw_vers /usr/sbin/sysctl; do
+  [ -x "$tool" ] || { echo "Required macOS installation tool is missing: $tool" >&2; exit 1; }
+done
+"$payload/runtime/node" -e 'const fs=require("node:fs");const p=process.argv[1];if(JSON.parse(fs.readFileSync(p,"utf8")).nodeVersion!==process.version)process.exit(1)' "$kit/kit-manifest.json" || { echo 'Bundled Node runtime does not match the package manifest.' >&2; exit 1; }
 "$payload/runtime/node" "$kit/lib/verify-kit.js" "$kit" "$architecture"
+/bin/launchctl print "gui/$(/usr/bin/id -u)" >/dev/null 2>&1 || { echo 'No logged-in macOS GUI launchd domain. Log into the employee desktop and retry.' >&2; exit 1; }
 employee_home=$("$payload/runtime/node" -p 'require("node:os").userInfo().homedir')
 installed="$employee_home/Library/Application Support/CYBERORBIT/app"
 run_installed() {

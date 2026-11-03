@@ -184,6 +184,14 @@ before revoking/uninstalling an agent on which remote recovery depends.
 
 ## Administrator controls and acceptance
 
+The Main Admin `AGENT_UNINSTALL` authorization flow in the macOS employee install
+kit applies only to the per-user `gui/<uid>` LaunchAgent. It does not stop or
+remove the optional root `/Library/LaunchDaemons/com.cyberorbit.agent.plist`
+deployment. That system service remains controlled by the local root/MDM
+administrator using the commands below; Main Admin approval is not implemented
+for this separate deployment mode. Standard employees must not be given root or
+administrator access. Local root can ultimately alter or stop either deployment.
+
 Linux: `sudo systemctl stop cyberorbit`; `sudo systemctl start cyberorbit`;
 `sudo systemctl disable --now cyberorbit` to disable boot startup.
 macOS: `sudo launchctl bootout system /Library/LaunchDaemons/com.cyberorbit.agent.plist`
