@@ -22,6 +22,11 @@ class InferenceTests(unittest.TestCase):
         self.assertLessEqual(result['threat_probability'], 1)
         self.assertEqual(result['operating_threshold'], 0.85)
         self.assertEqual(result['predicted_class'], int(result['threat_probability'] >= 0.85))
+        self.assertEqual(result['model_name'], 'Multi-Source UEBA Random Forest')
+        self.assertEqual(result['model_version'], result['model_fingerprint'])
+        self.assertEqual(result['feature_count'], 21)
+        self.assertEqual(result['aggregation_level'], 'user-day')
+        self.assertEqual(result['provenance'], 'complete externally supplied user-day aggregate; not derived from live endpoint events')
         reasons = explain(self.features)
         self.assertEqual(len(reasons), 5)
         self.assertTrue(all(r['feature'] in FEATURE_NAMES for r in reasons))
@@ -47,6 +52,18 @@ class InferenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             predict({**self.features, 'unknown': 1})
 
+    def test_rejects_internally_inconsistent_user_day_features(self):
+        invalid = [
+            {**self.features, 'day_of_week': 5, 'is_weekend': 0},
+            {**self.features, 'logon_count': 1, 'total_activity': 0},
+            {**self.features, 'logon_count': 1, 'cross_source_activity': 0},
+            {**self.features, 'file_event_count': 1, 'unique_files': 2},
+            {**self.features, 'device_event_count': 0.5},
+        ]
+        for features in invalid:
+            with self.subTest(features=features), self.assertRaises(ValueError):
+                predict(features)
+
     def test_http_contract(self):
         client = TestClient(app)
         response = client.post('/predict', json={'user': 'synthetic-test', 'features': self.features})
@@ -56,6 +73,8 @@ class InferenceTests(unittest.TestCase):
         self.assertEqual(client.post('/predict', json={'user': 'test', 'features': {}}).status_code, 400)
         self.assertEqual(client.post('/predict', json={'user': 'test', 'features': self.features, 'trust_score': 100}).status_code, 422)
         self.assertRegex(response.json()['model_fingerprint'], r'^[a-f0-9]{64}$')
+        self.assertRegex(response.json()['feature_schema_fingerprint'], r'^[a-f0-9]{64}$')
+        self.assertEqual(client.get('/health').json()['aggregation_level'], 'user-day')
 
 
 if __name__ == '__main__':

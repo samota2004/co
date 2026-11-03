@@ -197,7 +197,7 @@ async function runEnrolledService(local) {
             catch{try{await clearLocalOperationGrant(local.dataDirectory);}catch{}localOperationReport={...operation,resultCode:'UNINSTALL_SCHEDULE_FAILED',reportedAt:new Date().toISOString()};}
           }
         }
-        accountControlReport=null;
+        if(accountControlReport&&r.accountControlAck===accountControlReport.commandId)accountControlReport=null;
         if(sentAdminReport&&r.agentCommandAck===sentAdminReport.commandId){
           const acknowledged=await acknowledgeAdminCommand(local.dataDirectory,sentAdminReport.commandId);
           if(acknowledged.accepted){adminStopped=acknowledged.adminStopped;adminCommandReport=null;adminCommandExpiresAt=null;console.log(adminStopped?'Administrator stop is persistent; telemetry collection is disabled while authenticated control heartbeats remain active.':'Administrator resume accepted; endpoint monitoring is active.');}

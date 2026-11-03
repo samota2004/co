@@ -1,8 +1,5 @@
-import {
-  updateFeatureState,
-  getUserDayFeatures,
-  featureState
-} from "./ml-feature-aggregator.js";
+import assert from 'node:assert/strict';
+import { updateFeatureState, getUserDayFeatures, getLatestUserDayFeatures, featureState } from './ml-feature-aggregator.js';
 
 const events = [
   {
@@ -39,62 +36,8 @@ const events = [
   }
 ];
 
-for (const event of events) {
-  updateFeatureState(featureState, event);
-}
-
-const result = getUserDayFeatures(
-  featureState,
-  "user-001",
-  "2026-09-15"
-);
-
-console.log(
-  JSON.stringify(result, null, 2)
-);
-
-const expectedFeatures = [
-  "logon_count",
-  "device_event_count",
-  "file_event_count",
-  "http_event_count",
-  "email_event_count",
-  "day_of_week",
-  "is_weekend",
-  "logon_unique_pc_count",
-  "device_unique_pc_count",
-  "file_unique_pc_count",
-  "http_unique_pc_count",
-  "email_unique_pc_count",
-  "unique_files",
-  "file_content_events",
-  "unique_urls",
-  "unique_http_content",
-  "unique_recipients",
-  "email_size_total",
-  "attachments_total",
-  "total_activity",
-  "cross_source_activity"
-];
-
-const actualFeatures = Object.keys(
-  result.features
-);
-
-const missing = expectedFeatures.filter(
-  feature => !actualFeatures.includes(feature)
-);
-
-if (missing.length > 0) {
-  throw new Error(
-    `Missing features: ${missing.join(", ")}`
-  );
-}
-
-if (actualFeatures.length !== 21) {
-  throw new Error(
-    `Expected 21 features, got ${actualFeatures.length}`
-  );
-}
-
-console.log("21-feature schema test: PASSED");
+for (const event of events) assert.throws(() => updateFeatureState(featureState, event), error => error.code === 'ML_DATA_INCOMPLETE');
+assert.equal(featureState.size, 0);
+assert.equal(getUserDayFeatures(featureState, 'user-001', '2026-09-15'), null);
+assert.equal(getLatestUserDayFeatures(featureState, 'user-001'), null);
+console.log('Endpoint-to-CERT pseudo-aggregation rejection: PASSED');

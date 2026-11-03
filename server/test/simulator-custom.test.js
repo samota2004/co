@@ -20,6 +20,7 @@ test('custom simulator uses a bounded synthetic assessment route and preserves g
   const custom={userId:f.employee.id,downloadVolumeMB:20,failedAuthCount:0,isOffHours:false,isPrivilegeEscalation:false};
   const before=await f.prisma.activityEvent.count({where:{userId:f.employee.id}});
   const beforeRisk=await f.prisma.riskScore.count({where:{userId:f.employee.id}}),beforeTrust=await f.prisma.trustHistory.count({where:{userId:f.employee.id}}),beforeIncidents=await f.prisma.incident.count({where:{userId:f.employee.id}});
+  const beforeCommands=await f.prisma.endpointEnforcementCommand.count({where:{userId:f.employee.id}});
   const legacy=await call('/api/telemetry/ingest',{...custom,eventType:'FILE_DOWNLOAD',source:'synthetic-custom-scenario',metadata:{synthetic:true}});
   assert.equal(legacy.status,400);
   assert.equal(legacy.data.error.code,'ML_DATA_INCOMPLETE');
@@ -49,12 +50,14 @@ test('custom simulator uses a bounded synthetic assessment route and preserves g
   assert.equal(await f.prisma.riskScore.count({where:{userId:f.employee.id}}),beforeRisk,'synthetic simulation does not change production risk history');
   assert.equal(await f.prisma.trustHistory.count({where:{userId:f.employee.id}}),beforeTrust,'synthetic simulation does not change production trust history');
   assert.equal(await f.prisma.incident.count({where:{userId:f.employee.id}}),beforeIncidents,'synthetic simulation never creates production incidents');
+  assert.equal(await f.prisma.endpointEnforcementCommand.count({where:{userId:f.employee.id}}),beforeCommands,'simulation never issues an OS containment command');
   assert.equal(await f.prisma.auditLog.count({where:{userId:f.admin.id,action:'SIMULATION_RUN'}}),1,'synthetic run is retained in the administrator audit history');
   assert.equal(await f.prisma.mlPrediction.count(),0);
 
   const predefined=await call('/api/simulation/scenario/scenario-1-normal',{userId:f.employee2.id});
   assert.equal(predefined.status,200);
   assert.equal(predefined.data.simulationOnly,true,'predefined scenarios are read-only too');
+  assert.equal(await f.prisma.endpointEnforcementCommand.count({where:{userId:f.employee2.id}}),0,'predefined simulation never issues an OS containment command');
   assert.equal(await f.prisma.auditLog.count({where:{userId:f.admin.id,action:'SIMULATION_RUN'}}),2);
   const history=await fetch(origin+'/api/simulation/history',{headers:{Authorization:`Bearer ${adminToken}`}}).then(r=>r.json());
   assert.equal(history.runs.length,2);

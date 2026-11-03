@@ -7,7 +7,9 @@ import {reportCityAddress} from './proxy-policy.js';
 import {createLiveModelDataReadiness,parseReadinessDate} from './ml-data-readiness.js';
 import {featureSchema} from './ml-service.js';
 import {validateUsbPolicy,signUsbPolicyCommand} from '../../agent/src/usb-policy.js';
+import {signAccountControlCommand} from '../../agent/src/account-control.js';
 import {LOCAL_OPERATION_ACTIONS,signLocalOperationGrant} from '../../agent/src/local-operation-auth.js';
+import {broadcastSecurityNotifications,createContainmentNotifications} from './security-notification-service.js';
 export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
@@ -178,15 +180,34 @@ export class EndpointService {
       if (changed.count !== 1) throw new EndpointError(401, 'Revoked credential');
       const generation=d.ipCityEnabled?(await tx.endpointDevice.findUnique({where:{id:d.id},select:{ipCityGeneration:true}})).ipCityGeneration:null;
       const enforcement=tx.endpointEnforcementCommand;
+      let accountControlAck=null;
+      let accountStatus=d.user.status;
+      const notifications=[];
+      if(enforcement)await enforcement.updateMany({where:{deviceId:d.id,action:{in:['BLOCK','ALLOW']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:observedAt}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
       // Only the authenticated enrollment's employee determines the OS target.
       // Keep device credentials valid while frozen so an administrator can restore access.
       if(report&&enforcement){
         const command=await enforcement.findUnique({where:{commandId:report.commandId}});
-        if(command&&command.deviceId===d.id&&command.userId===d.userId&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&Date.parse(report.reportedAt)>=command.issuedAt.getTime()){
+        if(command&&command.deviceId===d.id&&command.userId===d.userId&&command.companyId===d.companyId&&command.status==='SUCCEEDED'&&((command.action==='BLOCK'&&report.resultCode==='BLOCKED')||(command.action==='ALLOW'&&report.resultCode==='ALLOWED'))){accountControlAck=command.commandId;}
+        else if(command&&command.deviceId===d.id&&command.userId===d.userId&&command.companyId===d.companyId&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&command.expiresAt&&command.expiresAt>observedAt&&Date.parse(report.reportedAt)>=command.issuedAt.getTime()){
           const success=(command.action==='BLOCK'&&report.resultCode==='BLOCKED')||(command.action==='ALLOW'&&report.resultCode==='ALLOWED');
           const pending=report.resultCode==='LOGOFF_PENDING';
           const unsupported=['UNSUPPORTED_MACHINE','UNSAFE_STORAGE','CONTROL_DISABLED'].includes(report.resultCode);
           await enforcement.update({where:{id:command.id},data:{resultCode:report.resultCode,status:success?'SUCCEEDED':pending?'PENDING':unsupported?'UNSUPPORTED':'FAILED',acknowledgedAt:new Date(report.reportedAt)}});
+          accountControlAck=command.commandId;
+          if(success&&command.action==='BLOCK'){
+            const targets=await tx.endpointDevice.findMany({where:{companyId:d.companyId,userId:d.userId,revokedAt:null,platform:'win32',mappedIdentity:{not:null},enforcementCommands:{some:{action:'BLOCK'}}},select:{id:true}});
+            const states=await Promise.all(targets.map(target=>enforcement.findFirst({where:{deviceId:target.id,userId:d.userId,action:'BLOCK'},orderBy:{createdAt:'desc'}})));
+            if(targets.length&&states.every(item=>item?.status==='SUCCEEDED')){const changed=await tx.user.updateMany({where:{id:d.userId,companyId:d.companyId,status:{in:['RESTRICTED','FROZEN']}},data:{status:'FROZEN',authVersion:{increment:1}}});if(changed.count){accountStatus='FROZEN';await tx.incident.updateMany({where:{userId:d.userId,severity:'CRITICAL',status:{in:['OPEN','NEW','INVESTIGATING']}},data:{status:'CONTAINED'}});await audit(tx,d.user,'ACCOUNT_OS_CONTAINMENT_CONFIRMED',{deviceId:d.id,commandId:command.commandId,resultCode:report.resultCode},d.userId);notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:'CONTAINMENT_CONFIRMED',severity:'CRITICAL',title:'Endpoint containment confirmed',message:`${d.user.name}: all targeted Windows endpoints confirmed OS containment.`,dedupeKey:`containment:blocked:${command.commandId}`,metadata:{deviceId:d.id,commandId:command.commandId,resultCode:report.resultCode}}));}}
+          }
+          if(success&&command.action==='ALLOW'){
+            const blocked=await enforcement.findMany({where:{userId:d.userId,action:'BLOCK',status:'SUCCEEDED'},select:{deviceId:true},distinct:['deviceId']});
+            const states=await Promise.all(blocked.map(item=>enforcement.findFirst({where:{deviceId:item.deviceId,userId:d.userId,action:'ALLOW'},orderBy:{createdAt:'desc'}})));
+            if(blocked.length&&states.every(item=>item?.status==='SUCCEEDED')){const restored=await tx.user.updateMany({where:{id:d.userId,companyId:d.companyId,status:{in:['FROZEN','RESTRICTED']}},data:{status:'ACTIVE',authVersion:{increment:1}}});if(restored.count){accountStatus='ACTIVE';await tx.session.updateMany({where:{userId:d.userId,revokedAt:null},data:{revokedAt:new Date()}});await audit(tx,d.user,'ACCOUNT_RESTORATION_CONFIRMED',{deviceId:d.id,commandId:command.commandId,resultCode:report.resultCode},d.userId);notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:'RESTORATION_CONFIRMED',severity:'HIGH',title:'Endpoint restoration confirmed',message:`${d.user.name}: all targeted Windows endpoints confirmed OS restoration.`,dedupeKey:`containment:allowed:${command.commandId}`,metadata:{deviceId:d.id,commandId:command.commandId,resultCode:report.resultCode}}));}}
+          }
+          if(!success&&!pending){
+            notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:unsupported?'CONTAINMENT_UNSUPPORTED':'CONTAINMENT_FAILED',severity:'CRITICAL',title:unsupported?'Endpoint containment unsupported':'Endpoint containment failed',message:`${d.user.name}: endpoint ${d.name} reported ${report.resultCode} while processing ${command.action}. OS containment remains unconfirmed.`,dedupeKey:`containment:result:${command.commandId}:${report.resultCode}`,metadata:{deviceId:d.id,commandId:command.commandId,action:command.action,resultCode:report.resultCode,status:unsupported?'UNSUPPORTED':'FAILED'}}));
+          }
         }
       }
       let agentCommandAck=null;
@@ -233,7 +254,8 @@ export class EndpointService {
         }
       }
       const eligible=['win32','linux','darwin'].includes(d.platform) && d.mappedIdentity && ['EMPLOYEE','MANAGER'].includes(d.user.roleCode);
-      const desired=eligible?(d.user.status==='FROZEN'?'BLOCK':d.user.status==='ACTIVE'?'ALLOW':'HOLD'):'HOLD';
+      const pendingAccountCommand=eligible&&enforcement?await enforcement.findFirst({where:{deviceId:d.id,action:{in:['BLOCK','ALLOW']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:observedAt}},orderBy:{createdAt:'asc'}}):null;
+      const desired=eligible?(pendingAccountCommand?.action||(accountStatus==='FROZEN'?'BLOCK':accountStatus==='ACTIVE'?'ALLOW':'HOLD')):'HOLD';
       if(enforcement)await enforcement.updateMany({where:{deviceId:d.id,status:{in:['PENDING','PENDING_OFFLINE']},action:desired==='HOLD'?{notIn:['STOP_AGENT','START_AGENT','SET_USB_POLICY']}:{notIn:[desired,'STOP_AGENT','START_AGENT','SET_USB_POLICY']}},data:{status:'SUPERSEDED'}});
       let command=eligible&&enforcement?await enforcement.findFirst({where:{deviceId:d.id,status:{in:['PENDING','PENDING_OFFLINE']},action:desired},orderBy:{createdAt:'asc'}}):null;
       if(command){
@@ -265,9 +287,12 @@ export class EndpointService {
         const pending=await enforcement.findFirst({where:{deviceId:d.id,action:'SET_USB_POLICY',status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:observedAt}},orderBy:{createdAt:'asc'}});
         if(pending){if(pending.status==='PENDING_OFFLINE')await enforcement.update({where:{id:pending.id},data:{status:'PENDING',issuedAt:observedAt}});usbPolicyCommand={action:'SET_USB_POLICY',commandId:pending.commandId,deviceId:d.id,identity:d.mappedIdentity,issuedAt:(pending.status==='PENDING_OFFLINE'?observedAt:pending.issuedAt).toISOString(),expiresAt:pending.expiresAt.toISOString(),policy:validateUsbPolicy(d.config.usbPolicy||DEFAULT_CONFIG.usbPolicy)};usbPolicyCommand.signature=signUsbPolicyCommand(Buffer.from(d.credentialHash,'hex'),usbPolicyCommand);}
       }
-      return { config: {...DEFAULT_CONFIG,...d.config,usbPolicy:validateUsbPolicy(d.config.usbPolicy||DEFAULT_CONFIG.usbPolicy)}, accountControl:{deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:observedAt.toISOString(),...(command?{commandId:command.commandId}: {})},agentCommand,agentCommandAck,localOperationGrant,localOperationAck,usbPolicyCommand,usbPolicyCommandAck, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
+      let accountControl={deviceId:d.id,identity:d.mappedIdentity,action,issuedAt:observedAt.toISOString()};
+      if(command){accountControl={action:command.action,commandId:command.commandId,deviceId:d.id,identity:d.mappedIdentity,issuedAt:observedAt.toISOString(),expiresAt:(command.expiresAt||new Date(observedAt.getTime()+120000)).toISOString()};accountControl.signature=signAccountControlCommand(Buffer.from(d.credentialHash,'hex'),accountControl);}
+      return { config: {...DEFAULT_CONFIG,...d.config,usbPolicy:validateUsbPolicy(d.config.usbPolicy||DEFAULT_CONFIG.usbPolicy)}, accountControl,accountControlAck,agentCommand,agentCommandAck,localOperationGrant,localOperationAck,usbPolicyCommand,usbPolicyCommandAck,notifications, companyId: d.companyId, userId: d.userId, deviceId: d.id,cityDevice:d,generation,observedAt };
     }));
-    const {cityDevice:d,generation,observedAt,...response}=result;
+    const {cityDevice:d,generation,observedAt,notifications,...response}=result;
+    broadcastSecurityNotifications(notifications);
     // Optional lookup cannot roll back or fail an authenticated heartbeat.
     // Ingest may update lastSeen independently; a separate generation prevents
     // delayed lookups overwriting a newer heartbeat, pause, disable or revoke.
@@ -314,7 +339,7 @@ export class EndpointService {
       id: true, userId: true, name: true, platform: true, mappedIdentity: true, enrolledAt: true,
       revokedAt: true, lastSeen: true, agentVersion: true, health: true, config: true,...(cityAvailable?{ipCityEnabled:true,ipCity:true}:{}),
       enforcementCommands:{where:{action:{in:['BLOCK','ALLOW','STOP_AGENT','START_AGENT','SET_USB_POLICY','SERVICE_STOP','AGENT_UNINSTALL']}},orderBy:{createdAt:'desc'},take:10,select:{id:true,commandId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}},
-      user: { select: { id: true, name: true, employeeId: true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true } } } }
+      user: { select: { id: true, name: true, employeeId: true, status:true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true } } } }
     }, orderBy: { createdAt: 'desc' } })}));
     const applicationActivity=devices.length?await this.prisma.endpointEvent.groupBy({
       by:['deviceId','userId'],

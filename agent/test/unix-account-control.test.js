@@ -2,6 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {applyUnixAccountControl,UnixAccounts} from '../src/unix-account-control.js';
 import {reconcileAccountControl} from '../src/account-control.js';
+import {signAccountControlCommand} from '../src/account-control.js';
+import {createHash,randomUUID} from 'node:crypto';
 
 const deviceId='00000000-0000-4000-8000-000000000001';
 function fixture(platform='linux') {
@@ -50,10 +52,11 @@ for(const platform of ['linux','darwin']) {
 }
 test('Unix control requires a fresh command for the enrolled UID before any native operation',async()=>{
   const f=fixture(),local={dataDirectory:process.cwd(),unixAccountControl:{enabled:true,employeeIdentity:'uid:1001',recoveryAdminIdentity:'uid:1002',recoveryLoginVerified:true}};
-  const secrets={deviceId,mappedIdentity:'uid:1001'};
+  const secrets={deviceId,mappedIdentity:'uid:1001',credential:'test-unix-credential'};
   for(const command of [undefined,{deviceId,identity:'uid:1002',action:'BLOCK',issuedAt:new Date().toISOString()},{deviceId,identity:'uid:1001',action:'BLOCK',issuedAt:new Date(0).toISOString()}])
     assert.match(await reconcileAccountControl(local,secrets,command,undefined,'linux'),/^refused:/);
-  assert.match(await reconcileAccountControl(local,secrets,{deviceId,identity:'uid:1001',action:'HOLD',issuedAt:new Date().toISOString()},undefined,'darwin'),/^unchanged:/);
+  const hold={action:'HOLD',commandId:randomUUID(),deviceId,identity:'uid:1001',issuedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString()};hold.signature=signAccountControlCommand(createHash('sha256').update(secrets.credential).digest(),hold);
+  assert.match(await reconcileAccountControl(local,secrets,hold,undefined,'darwin'),/^unchanged:/);
 });
 test('Linux native adapter locks password AND expires account; restore uses only saved expiry',async()=>{
   const calls=[],adapter=new UnixAccounts('linux',async(...args)=>{calls.push(args);return '';});

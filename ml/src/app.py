@@ -1,6 +1,6 @@
 import logging
 from fastapi import FastAPI, HTTPException
-from .inference import predict, metadata, FEATURE_NAMES, MODEL_FINGERPRINT
+from .inference import predict, metadata, FEATURE_NAMES, MODEL_FINGERPRINT, FEATURE_SCHEMA_FINGERPRINT
 from .xai import explain
 from .schemas import PredictionRequest, PredictionResponse
 
@@ -9,7 +9,7 @@ app = FastAPI(title="CYBERORBIT user-day ML inference", version="3.0.0")
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": metadata["model_name"], "feature_count": len(FEATURE_NAMES), "operating_threshold": metadata["operating_threshold"], "model_fingerprint": MODEL_FINGERPRINT}
+    return {"status": "ok", "model": metadata["model_name"], "feature_count": len(FEATURE_NAMES), "operating_threshold": metadata["operating_threshold"], "model_fingerprint": MODEL_FINGERPRINT, "feature_schema_fingerprint": FEATURE_SCHEMA_FINGERPRINT, "aggregation_level": metadata["aggregation_level"]}
 
 
 @app.post("/predict", response_model=PredictionResponse)

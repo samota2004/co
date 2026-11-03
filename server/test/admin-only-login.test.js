@@ -78,6 +78,7 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
   assert.equal((await post('/users/'+stored.id+'/freeze',{reason:'Verified account containment'},headers)).status,200);
   const frozen=await heartbeat();assert.equal(frozen.status,200);assert.equal(frozen.data.accountControl.action,'BLOCK');
   assert.equal(frozen.data.accountControl.identity,'S-1-5-21-111-222-333-1001');assert.equal(frozen.data.accountControl.deviceId,enrolled.data.deviceId);
+  await f.prisma.incident.create({data:{incidentId:randomUUID(),userId:stored.id,userEmail:stored.email,title:'Reviewed containment fixture',severity:'CRITICAL',status:'RESOLVED',resolvedAt:new Date(),resolvedBy:f.admin.id,riskScore:95,contributingFactors:['Test fixture review']}});
   const configPath='/endpoint/'+enrolled.data.deviceId+'/config';
   const pause=async auth=>fetch(origin+'/api'+configPath,{method:'PUT',headers:{'Content-Type':'application/json',...auth},body:JSON.stringify({config:{paused:true}})});
   // Neither a legacy employee/manager JWT nor an endpoint credential grants control.
@@ -88,7 +89,7 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
     assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{},deniedHeaders)).status,401);
   }
   const foreignHeaders={Authorization:'Bearer '+generateJwtToken(f.otherAdmin,true)};
-  assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Test unauthorized company boundary'},foreignHeaders)).status,404);
+  assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Test unauthorized company boundary'},foreignHeaders)).status,403,'non-Main Admin restoration is denied before target lookup');
   assert.equal((await pause(foreignHeaders)).status,404);
   assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{reason:'Cross-company revoke check'},foreignHeaders)).status,404);
   assert.equal((await heartbeat()).data.accountControl.action,'BLOCK');
@@ -101,9 +102,15 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
     assert.equal(assign.status,200);
     assert.equal((await pause(controlHeaders)).status,200);
     assert.equal((await heartbeat()).data.config.paused,true);
-    assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Incident reviewed and cleared'},controlHeaders)).status,200);
-    assert.equal((await heartbeat()).data.accountControl.action,'ALLOW');
-    assert.equal((await post('/users/'+stored.id+'/freeze',{reason:'Critical evidence remains active'},controlHeaders)).status,200);
+    const restore=await post('/users/'+stored.id+'/unfreeze',{reason:'Incident reviewed and cleared'},controlHeaders);
+    if(isMainAdmin){
+      assert.equal(restore.status,409,'Main Admin cannot restore before authenticated OS containment confirmation');
+      assert.equal(restore.data.error.code,'NO_CONFIRMED_CONTAINMENT');
+      assert.equal((await heartbeat()).data.accountControl.action,'BLOCK','unacknowledged containment remains active');
+    }else{
+      assert.equal(restore.status,403,'restoration requires Main Admin even for an authenticated Security/System Admin');
+      assert.equal((await heartbeat()).data.accountControl.action,'BLOCK','denied restoration leaves the containment instruction intact');
+    }
     const audit=await f.prisma.auditLog.findFirst({where:{action:'AGENT_PAUSED',userId:actor.id}});
     assert.equal(audit.metadata.actorId,actor.id);assert.equal(audit.metadata.deviceId,enrolled.data.deviceId);
     await f.prisma.user.update({where:{id:actor.id},data:{status:'DISABLED'}});
@@ -111,9 +118,10 @@ test('employee login, pending OTP, existing JWT and refresh are denied; administ
     assert.equal((await post('/users/'+stored.id+'/unfreeze',{},controlHeaders)).status,401);
   }
   const {setAccount}=await import('../routes/security.js');
-  await assert.rejects(setAccount({user:storedManager,params:{id:stored.id}},'ACTIVE'),e=>e.code==='ADMIN_REQUIRED');
-  assert.equal((await post('/users/'+stored.id+'/unfreeze',{reason:'Administrative review completed'},headers)).status,200);
-  assert.equal((await heartbeat()).data.accountControl.action,'ALLOW');
+  await assert.rejects(setAccount({user:storedManager,params:{id:stored.id}},'ACTIVE'),e=>e.code==='LEGACY_ACCOUNT_CONTROL_DISABLED');
+  const prematureRestore=await post('/users/'+stored.id+'/unfreeze',{reason:'Administrative review completed'},headers);
+  assert.equal(prematureRestore.status,409);assert.equal(prematureRestore.data.error.code,'NO_CONFIRMED_CONTAINMENT');
+  assert.equal((await heartbeat()).data.accountControl.action,'BLOCK','server does not restore the account without verified OS containment acknowledgement');
   assert.equal((await post('/endpoint/'+enrolled.data.deviceId+'/revoke',{reason:'Approved test credential revocation'},headers)).status,200);
   assert.equal(await f.prisma.auditLog.count({where:{action:'AGENT_REVOKED',userId:f.admin.id}}),1);
   assert.equal((await heartbeat()).status,401);

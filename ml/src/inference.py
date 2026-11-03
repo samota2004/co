@@ -67,6 +67,7 @@ if (not isinstance(FEATURE_NAMES, list) or not FEATURE_NAMES or
 if not math.isfinite(THRESHOLD) or not 0 < THRESHOLD < 1:
     raise RuntimeError("Configured operating threshold must be between zero and one")
 MODEL_FINGERPRINT = hashlib.sha256(MODEL_PATH.read_bytes() + (MODEL_DIR / "multi_source_feature_schema.json").read_bytes() + (MODEL_DIR / "multi_source_model_metadata.json").read_bytes()).hexdigest()
+FEATURE_SCHEMA_FINGERPRINT = hashlib.sha256((MODEL_DIR / "multi_source_feature_schema.json").read_bytes()).hexdigest()
 
 
 def feature_frame(features):
@@ -78,9 +79,35 @@ def feature_frame(features):
             raise ValueError(f"{name} must be finite and nonnegative")
     if features["day_of_week"] not in range(7) or features["is_weekend"] not in (0, 1):
         raise ValueError("Invalid calendar features")
+    if features["is_weekend"] != int(features["day_of_week"] >= 5):
+        raise ValueError("is_weekend must match the Monday-zero day_of_week value")
+    integer_features = {
+        "logon_count", "device_event_count", "file_event_count", "http_event_count", "email_event_count",
+        "logon_unique_pc_count", "device_unique_pc_count", "file_unique_pc_count", "http_unique_pc_count",
+        "email_unique_pc_count", "unique_files", "file_content_events", "unique_urls", "unique_http_content",
+        "unique_recipients", "total_activity", "cross_source_activity",
+    }
+    for name in integer_features:
+        if not float(features[name]).is_integer():
+            raise ValueError(f"{name} must be an integer count")
+    source_counts = [features[name] for name in ("logon_count", "device_event_count", "file_event_count", "http_event_count", "email_event_count")]
+    if features["total_activity"] != sum(source_counts):
+        raise ValueError("total_activity must equal the five source event counts")
+    if features["cross_source_activity"] != sum(value > 0 for value in source_counts):
+        raise ValueError("cross_source_activity must equal the number of nonempty source families")
+    bounds = {
+        "logon_unique_pc_count": features["logon_count"], "device_unique_pc_count": features["device_event_count"],
+        "file_unique_pc_count": features["file_event_count"], "http_unique_pc_count": features["http_event_count"],
+        "email_unique_pc_count": features["email_event_count"], "unique_files": features["file_event_count"],
+        "file_content_events": features["file_event_count"], "unique_urls": features["http_event_count"],
+        "unique_http_content": features["http_event_count"], "unique_recipients": features["email_event_count"],
+    }
+    for name, maximum in bounds.items():
+        if features[name] > maximum:
+            raise ValueError(f"{name} cannot exceed its source event count")
     return pd.DataFrame([[features[name] for name in FEATURE_NAMES]], columns=FEATURE_NAMES)
 
 
 def predict(features):
     probability = float(model.predict_proba(feature_frame(features))[0, list(model.classes_).index(1)])
-    return {"threat_probability": round(probability, 6), "predicted_class": int(probability >= THRESHOLD), "operating_threshold": THRESHOLD, "model_fingerprint": MODEL_FINGERPRINT}
+    return {"threat_probability": round(probability, 6), "predicted_class": int(probability >= THRESHOLD), "operating_threshold": THRESHOLD, "model_fingerprint": MODEL_FINGERPRINT, "model_name": metadata["model_name"], "model_version": MODEL_FINGERPRINT, "feature_schema_fingerprint": FEATURE_SCHEMA_FINGERPRINT, "feature_count": len(FEATURE_NAMES), "aggregation_level": metadata["aggregation_level"], "provenance": "complete externally supplied user-day aggregate; not derived from live endpoint events"}

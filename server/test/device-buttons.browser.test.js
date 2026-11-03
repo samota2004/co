@@ -63,6 +63,7 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
     await waitUntil(b,contains('Assigned Browser-tested laptop to Assigned employee.'),'saved assignment confirmation');
     let stored=await f.prisma.endpointDevice.findFirst({where:{name:'Browser-tested laptop'}});assert.equal(stored.userId,f.employee.id);assert.equal(stored.enrollmentHash,null);
     assert.equal(await b.evaluate(`Boolean(${panel}.querySelector('[aria-label="Enrollment token"]'))`),false);
+    await waitUntil(b,`${panel}.getAttribute('aria-busy')==='false'`,'assignment refresh completes before token request');
     await click(b,'Issue Enrollment Token');await waitUntil(b,`${panel}.querySelector('[aria-label="Enrollment token"]')`,'issued token');
     const issued=await b.evaluate(`${panel}.querySelector('[aria-label="Enrollment token"]').textContent`);stored=await f.prisma.endpointDevice.findUnique({where:{id:stored.id}});assert.equal(stored.enrollmentHash,hashSecret(issued));
     await b.command('Page.bringToFront');await click(b,'Copy token');await waitUntil(b,contains('Copied'),'clipboard success');assert.equal(await b.evaluate('navigator.clipboard.readText()'),issued);
@@ -76,7 +77,7 @@ test('actual Devices page clicks, browser console/network and PostgreSQL assignm
     assert.equal(await f.prisma.endpointDevice.count(),1);assert.equal((await f.prisma.endpointDevice.findUnique({where:{id:stored.id}})).userId,f.employee2.id);
     // Synthetic browser regression: explicit MFA rejection is visible, then the authorized request persists and displays its expiring status.
     await f.prisma.endpointDevice.update({where:{id:stored.id},data:{mappedIdentity:'S-1-5-21-11-22-33-1002',enrolledAt:new Date(),credentialHash:hashSecret(randomUUID()),lastSeen:new Date(),health:{queueEvents:0,queueBytes:0,droppedEvents:0,collectors:{},lastHeartbeatAt:new Date().toISOString()},agentVersion:'browser-test-fixture'}});
-    await click(b,'Refresh devices');await waitUntil(b,`${panel}.querySelector('button') && ${panel}.getAttribute('aria-busy')==='false'`,'enrolled synthetic device refresh');
+    await waitUntil(b,`${panel}.getAttribute('aria-busy')==='false'`,'device polling completes before manual refresh');await click(b,'Refresh devices');await waitUntil(b,`${panel}.querySelector('button') && ${panel}.getAttribute('aria-busy')==='false'`,'enrolled synthetic device refresh');
     await b.evaluate("window.confirm=()=>true;window.prompt=()=> 'Approved browser regression maintenance'");
     await b.evaluate(`window.__endpointStopOriginalFetch=window.fetch.bind(window);window.fetch=async(input,options)=>String(input).includes('/stop-agent')?new Response(JSON.stringify({success:false,error:{code:'FRESH_MFA_REQUIRED',message:'Verify administrator MFA again, then retry this device-control action.'}}),{status:403,headers:{'Content-Type':'application/json'}}):window.__endpointStopOriginalFetch(input,options)`);
     await click(b,'Request persistent monitoring stop');await waitUntil(b,`${panel}.querySelector('[data-stop-feedback="${stored.id}"]')?.textContent.includes('Recent administrator MFA is required')`,'visible device-specific recent-MFA error');

@@ -13,12 +13,17 @@ test('policy preview is read-only and saved policy history is tenant-scoped and 
   const url=`http://127.0.0.1:${server.address().port}/api`,headers={Authorization:`Bearer ${generateJwtToken(f.admin,true)}`,'Content-Type':'application/json'};
   const call=async(path,method='GET',body)=>{const response=await fetch(url+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})});return{status:response.status,data:await response.json()};};
   const before=await f.prisma.auditLog.count({where:{companyId:'A',action:'POLICY_UPDATED'}});
+  const defaults=await call('/policies');assert.equal(defaults.data.config.autoFreezeOnCritical,false,'containment is opt-in');
+  assert.equal(Object.hasOwn(defaults.data.config,'automaticContainmentMinConfidence'),false,'uncalibrated confidence is not a policy control');
+  const nonMainHeaders={Authorization:`Bearer ${generateJwtToken(f.otherAdmin,true)}`,'Content-Type':'application/json'};
+  const forbidden=await fetch(url+'/policies',{method:'PATCH',headers:nonMainHeaders,body:JSON.stringify({autoFreezeOnCritical:true})});assert.equal(forbidden.status,403,'employee and non-Main-Admin actors cannot enable automatic containment');
   const preview=await call('/policies/preview','POST',{riskScore:95,config:{autoFreezeOnCritical:false}});
-  assert.equal(preview.status,200);assert.equal(preview.data.preview,true);assert.equal(preview.data.readOnly,true);assert.equal(preview.data.action,'RESTRICT');
+  assert.equal(preview.status,200);assert.equal(preview.data.preview,true);assert.equal(preview.data.readOnly,true);assert.equal(preview.data.action,'RESTRICT');assert.equal(preview.data.containmentEligibility,'NOT_EVALUATED');
   assert.equal(await f.prisma.auditLog.count({where:{companyId:'A',action:'POLICY_UPDATED'}}),before,'preview creates no policy audit version');
   assert.equal((await call('/policies/preview','POST',{riskScore:101})).status,400);
   const saved=await call('/policies','PATCH',{offHoursPenalty:13});assert.equal(saved.status,200);
   const history=await call('/policies/history');assert.equal(history.status,200);assert.equal(history.data.versions.length,1);assert.equal(history.data.versions[0].config.offHoursPenalty,13);
+  const enabled=await call('/policies','PATCH',{autoFreezeOnCritical:true});assert.equal(enabled.status,200);assert.equal(enabled.data.config.autoFreezeOnCritical,true,'Main Admin opt-in is persisted and audited');
   const foreign=await fetch(url+'/policies/history',{headers:{Authorization:`Bearer ${generateJwtToken(f.otherAdmin,true)}`}}).then(response=>response.json());
   assert.equal(foreign.versions.length,0);
  }finally{if(sse)clearInterval(sse.heartbeatInterval);if(server)await new Promise(resolve=>server.close(resolve));await f.close();}

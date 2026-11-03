@@ -1,4 +1,4 @@
-import {featureSchema} from './ml-service.js';
+import {featureSchema,featureSchemaFingerprint,modelFingerprint,modelMetadata} from './ml-service.js';
 
 // These describe the notebook's training sources. Endpoint events deliberately
 // do not get promoted to CERT log rows: their semantics and collection scope
@@ -57,12 +57,15 @@ export function createLiveModelDataReadiness({ window = null, scopes = [] } = {}
   }));
   return {
     version: LIVE_READINESS_VERSION,
+    model: { name: modelMetadata.model_name, version: modelFingerprint, featureSchemaFingerprint, aggregationLevel: modelMetadata.aggregation_level },
     status: 'INSUFFICIENT_FOR_MODEL',
     complete: false,
     featureCount: featureSchema.feature_names.length,
     compatibleFeatureCount: 0,
+    featureCoveragePercent: 0,
     derivableFeatureCount: features.filter(feature => feature.status === 'DERIVABLE_FROM_DECLARED_DATE').length,
     missingCompatibleFeatureCount: features.filter(feature => feature.status === 'MISSING_COMPATIBLE_SOURCE').length,
+    lastSuccessfulEndpointInference: null,
     features,
     ...(window ? { window } : {}),
     scopes,

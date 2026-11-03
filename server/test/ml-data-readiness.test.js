@@ -13,6 +13,11 @@ test('live employee telemetry reports incomplete notebook-compatible model cover
   assert.deepEqual(readiness.features.map(feature=>feature.name),featureSchema.feature_names);
   assert.equal(readiness.derivableFeatureCount,2);
   assert.equal(readiness.missingCompatibleFeatureCount,19);
+  assert.equal(readiness.featureCoveragePercent,0);
+  assert.equal(readiness.lastSuccessfulEndpointInference,null);
+  assert.equal(readiness.model.aggregationLevel,'user-day');
+  assert.match(readiness.model.version,/^[a-f0-9]{64}$/);
+  assert.match(readiness.model.featureSchemaFingerprint,/^[a-f0-9]{64}$/);
   for(const name of ['file_content_events','unique_http_content','unique_recipients','email_size_total','attachments_total']) {
     const feature=readiness.features.find(item=>item.name===name);
     assert.equal(feature.status,'MISSING_COMPATIBLE_SOURCE',name);

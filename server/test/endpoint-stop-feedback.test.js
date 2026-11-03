@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { endpointLifecycleStatus, stopCommandError, stopCommandStatus, stopCommandSuccess } from '../../client/src/services/endpoint-stop-feedback.js';
 import { requestApi } from '../../client/src/services/api.js';
 
-const expiry = new Date(Date.now() + 60_000).toISOString();
+const expiry = new Date(Date.now() + 60 * 60_000).toISOString();
 const command = status => ({ commandId: 'synthetic-command-id', status, expiresAt: expiry });
 
 test('stop action success feedback distinguishes online, offline, acknowledged, and expired commands', () => {

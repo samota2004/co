@@ -36,7 +36,7 @@ class EnterpriseDatabase {
     untrustedDevicePenalty: 25,
     offHoursPenalty: 20,
     largeDownloadThresholdMB: 150,
-    autoFreezeOnCritical: true,
+    autoFreezeOnCritical: false,
     adaptiveTrustRecoveryRate: 3
   };
 

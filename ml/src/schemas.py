@@ -16,5 +16,11 @@ class PredictionResponse(BaseModel):
     predicted_class: Literal[0, 1]
     operating_threshold: float = Field(ge=0.0, le=1.0)
     model_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    model_name: str
+    model_version: str = Field(pattern=r"^[a-f0-9]{64}$")
+    feature_schema_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    feature_count: int = Field(ge=1)
+    aggregation_level: str
+    provenance: str
     xai_reasons: list
     authority: str

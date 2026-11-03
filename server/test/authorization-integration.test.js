@@ -87,7 +87,7 @@ test('persisted trust, incident holds and request tampering affect protected res
     await f.prisma.incident.create({data:{incidentId:randomUUID(),userId:f.admin.id,userEmail:f.admin.email,title:'Unresolved critical fixture',severity:'CRITICAL',status:'OPEN',riskScore:95,contributingFactors:[]}});
     const held=await call({...body,eventId:randomUUID(),trustScore:100,approvalExists:true});
     assert.equal(held.data.decision.decision,'FREEZE');assert.equal(held.data.resourceView,undefined);
-    assert.equal((await f.prisma.user.findUnique({where:{id:f.admin.id}})).status,'FROZEN');
+    assert.equal((await f.prisma.user.findUnique({where:{id:f.admin.id}})).status,'RESTRICTED','critical hold restricts protected application access; OS freeze is not claimed for an administrator without endpoint confirmation');
     assert.ok((await f.prisma.auditLog.count({where:{userId:f.admin.id,action:'POLICY_DECISION'}}))>=3);
   }finally{if(sse)clearInterval(sse.heartbeatInterval);if(server)await new Promise(resolve=>server.close(resolve));await f.close();}
 });
@@ -122,11 +122,11 @@ test('validated model score reaches MFA and malformed service output records not
   const prior=process.env.ML_SERVICE_URL;
   try{
     const {securityService}=await import('../services/security-service.js');
-    const {featureSchema,modelFingerprint,modelMetadata}=await import('../services/ml-service.js');
+    const {featureSchema,modelFingerprint,featureSchemaFingerprint,modelMetadata}=await import('../services/ml-service.js');
     sse=(await import('../services/sse.js')).sseManager;
     let invalid=false;
     const app=express();app.use(express.json());
-    app.post('/predict',(_,res)=>res.json(invalid?{threat_probability:2,operating_threshold:.85,model_fingerprint:modelFingerprint,predicted_class:1}:{threat_probability:.9,operating_threshold:modelMetadata.operating_threshold,model_fingerprint:modelFingerprint,predicted_class:1,xai_reasons:[]}));
+    app.post('/predict',(_,res)=>res.json(invalid?{threat_probability:2,operating_threshold:.85,model_fingerprint:modelFingerprint,predicted_class:1}:{threat_probability:.9,operating_threshold:modelMetadata.operating_threshold,model_fingerprint:modelFingerprint,model_version:modelFingerprint,model_name:modelMetadata.model_name,feature_schema_fingerprint:featureSchemaFingerprint,feature_count:featureSchema.feature_count,aggregation_level:modelMetadata.aggregation_level,provenance:'complete externally supplied user-day aggregate; not derived from live endpoint events',predicted_class:1,xai_reasons:[]}));
     mock=await new Promise(resolve=>{const handle=app.listen(0,'127.0.0.1',()=>resolve(handle));});
     process.env.ML_SERVICE_URL='http://127.0.0.1:'+mock.address().port;
     const features=Object.fromEntries(featureSchema.feature_names.map(key=>[key,0]));
@@ -136,6 +136,10 @@ test('validated model score reaches MFA and malformed service output records not
     assert.equal(result.decision.decision,'MFA');
     assert.equal(result.decision.evaluation.mlAvailable,true);
     assert.equal(await f.prisma.mlPrediction.count(),1);
+    const persistedAssessment=await f.prisma.activityEvent.findFirst({where:{userId:f.employee.id,type:'MODEL_ASSESSMENT'},orderBy:{timestamp:'desc'}});
+    assert.equal(persistedAssessment.metadata.ml.model_version,modelFingerprint);
+    assert.equal(persistedAssessment.metadata.ml.feature_schema_fingerprint,featureSchemaFingerprint);
+    assert.equal(persistedAssessment.metadata.ml.provenance,'complete externally supplied user-day aggregate; not derived from live endpoint events');
     invalid=true;
     await assert.rejects(()=>securityService.evaluate(f.admin,{userId:f.employee.id,eventType:'MODEL_ASSESSMENT',features,isOffHours:false},{aggregateImport:true}),error=>error.code==='INVALID_MODEL_RESPONSE');
     assert.equal(await f.prisma.mlPrediction.count(),1);

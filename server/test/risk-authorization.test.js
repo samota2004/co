@@ -6,7 +6,7 @@ import {authorizeAssessment,recoveryEvidence} from '../services/authorization-po
 
 const user={id:'u',departmentCode:'ENGINEERING',trustScore:100,previousIncidents:0};
 const normal={timestamp:'2026-10-22T10:00:00Z',isOffHours:false,aggregateOnly:true};
-const evaluate=(event=normal,ml=null,resource=null,person=user)=>riskEngine.evaluateRisk(person,event,null,resource,ml,DEFAULT_POLICY);
+const evaluate=(event=normal,ml=null,resource=null,person=user,policy=DEFAULT_POLICY)=>riskEngine.evaluateRisk(person,event,null,resource,ml,policy);
 const model=score=>({threat_probability:score,operating_threshold:.85});
 
 test('risk evidence remains bounded and model threshold reaches the first alert band',()=>{
@@ -43,7 +43,8 @@ test('context and model evidence are explained without summing overlapping risk'
   const event={...normal,failedAuthCount:5,isUsbTransfer:true,downloadVolumeMB:240};
   const context=evaluate(event,null,resource);
   const lowModelWithContext=evaluate(event,model(.1),resource);
-  const combined=evaluate(event,model(.9),resource);
+  const freezeEnabled={...DEFAULT_POLICY,autoFreezeOnCritical:true};
+  const combined=evaluate(event,model(.9),resource,user,freezeEnabled);
   assert.equal(context.riskScore,90); // resource 28 + auth 25 + transfer 12 + rounded volume 25
   assert.equal(lowModelWithContext.riskScore,90);
   assert.equal(combined.riskScore,90);
@@ -53,9 +54,10 @@ test('context and model evidence are explained without summing overlapping risk'
 });
 
 test('every policy boundary is explicit and endpoints cannot supply an authoritative score',()=>{
-  for(const [score,level,action] of [[0,'LOW','ALLOW'],[39,'LOW','ALLOW'],[40,'MEDIUM','MONITOR'],[59,'MEDIUM','MONITOR'],[60,'HIGH','MFA'],[74,'HIGH','MFA'],[75,'VERY_HIGH','REQUIRE_APPROVAL'],[89,'VERY_HIGH','REQUIRE_APPROVAL'],[90,'CRITICAL','FREEZE'],[100,'CRITICAL','FREEZE']]){
+  for(const [score,level,action] of [[0,'LOW','ALLOW'],[39,'LOW','ALLOW'],[40,'MEDIUM','MONITOR'],[59,'MEDIUM','MONITOR'],[60,'HIGH','MFA'],[74,'HIGH','MFA'],[75,'VERY_HIGH','REQUIRE_APPROVAL'],[89,'VERY_HIGH','REQUIRE_APPROVAL'],[90,'CRITICAL','RESTRICT'],[100,'CRITICAL','RESTRICT']]){
     assert.equal(riskLevel(score),level);assert.equal(policyAction(score),action);
   }
+  assert.equal(policyAction(90,{...DEFAULT_POLICY,autoFreezeOnCritical:true}),'FREEZE','FREEZE requires explicit policy enablement');
   assert.equal(evaluate({...normal,riskScore:0,trustScore:100,roleCode:'SYSTEM_ADMIN',approvalExists:true},model(1)).riskScore,100);
 });
 

@@ -27,7 +27,7 @@ test('unchanged Windows/Linux/macOS heartbeats drive isolated city estimates, tr
       const e=await service.enroll({token:a.enrollmentToken,platform,agentVersion:heartbeat.agentVersion});
       const original=await f.prisma.endpointDevice.findUnique({where:{id:a.deviceId}});enrolled.push({a,e,original});
       const before=calls;let reply=await service.heartbeat(e.credential,heartbeat,'8.8.8.8');assert.equal(calls,before);
-      assert.deepEqual(Object.keys(reply).sort(),['config','accountControl','agentCommand','agentCommandAck','usbPolicyCommand','usbPolicyCommandAck','localOperationAck','localOperationGrant','companyId','userId','deviceId'].sort());assert.deepEqual(reply.config,DEFAULT_CONFIG);
+      assert.deepEqual(Object.keys(reply).sort(),['config','accountControl','accountControlAck','agentCommand','agentCommandAck','usbPolicyCommand','usbPolicyCommandAck','localOperationAck','localOperationGrant','companyId','userId','deviceId'].sort());assert.deepEqual(reply.config,DEFAULT_CONFIG);
       await service.changeCity(f.admin,a.deviceId,{enabled:true});reply=await service.heartbeat(e.credential,heartbeat,'8.8.8.8');assert.equal(calls,before+1);
       assert.deepEqual(reply.config,DEFAULT_CONFIG);
       const d=(await service.dashboard(f.admin)).devices.find(d=>d.id===a.deviceId);assert.equal(d.ipCity.city,'Fixture City');assert.equal(d.userId,f.employee.id);
