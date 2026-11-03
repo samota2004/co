@@ -25,6 +25,39 @@ Verified paths: qualifying critical assessment, containment request, confirmed `
 
 The containment notifications have backend workflow coverage, including persistence and duplicate acknowledgment protection. They still require a physical Windows endpoint demonstration of authenticated SSE delivery and native enforcement. In-app alerts are not email/SMS. See `docs/ADMIN_NOTIFICATION_VERIFICATION.md`.
 
+## USB alert attribution and deduplication
+
+### Investigation result
+
+The configured local PostgreSQL database was queried read-only for an endpoint named `testing` and for persisted `USB device connection observed` notifications. It contained neither. No cleanup was performed because no record in this database was conclusively synthetic or misattributed. The reported records therefore came from a different backend database, tenant, or earlier database state; their original OS provenance cannot be established from this checkout.
+
+The source review found two credibility problems that could produce misleading repeated alerts:
+
+- USB notification generation considered every submitted event, including retry batches, rather than only newly accepted event rows.
+- The notification text used the device's assigned employee name even though USB inventory is a device-level observation and is not employee-attributed telemetry.
+
+### Implemented correction
+
+- Endpoint ingestion now requires a valid enrolled credential and a non-deleted mapped employee/manager in the same tenant. A missing, revoked, unassigned, or invalid assignment fails with `ENDPOINT_ASSIGNMENT_INVALID`; endpoint display names are never used to resolve an employee.
+- USB `EndpointEvent` rows remain `userId: null`. Bell records have `targetUserId: null`, and the text identifies an enrolled endpoint only. It does not assert a named employee, storage access, file access, or transfer.
+- An event ID is acknowledged idempotently. The server creates USB notifications only for event IDs absent before the authenticated device transaction. A repeat observation of the same hardware remains quiet until an authenticated `USB_REMOVED` observation occurs; a later `USB_CONNECTED` then produces a distinct alert. The device-row transaction lock and per-recipient dedupe key protect concurrent delivery.
+- USB connection remains distinct from Windows storage categorization. Windows classifies PnP/CIM inventory into storage, portable, optical, HID, keyboard, mouse, or other where available. macOS employee mode obtains `system_profiler` inventory and may not reliably determine storage class, so it remains a generic connection observation. Neither platform claims file access or transfer from connection alone.
+
+Focused regression results: `server/test/endpoint-usb-alert.test.js`, `server/test/notification-lifecycle.test.js`, and `server/test/simulator-custom.test.js` passed **7/7**. Relevant agent collector/parser/policy tests passed **32/32**, with **1 expected Unix-only skip**. Native physical USB insertion/removal was not performed in this run.
+
+The browser test now uses a persisted `ENDPOINT_USB_CONNECTED` record with the same device-level shape as ingestion and checks the notification bell/panel. Its execution was blocked in this environment by Chromium `spawn EPERM`; this is the same sandbox child-process restriction previously observed for worker/browser processes. The server/browser full suite must be rerun where browser spawning is permitted.
+
+### Dedicated Windows USB acceptance procedure
+
+1. Use a dedicated enrolled Windows test endpoint and a separate Main Admin account. Record the endpoint UUID and its mapped SID from the Devices page; verify the device name alone is never treated as an employee identity.
+2. With no removable device inserted, start the agent and wait for its initial collector baseline. Confirm no `USB_CONNECTED` event or bell alert is generated from the baseline inventory.
+3. Insert one harmless removable USB storage device once. Inspect the authenticated endpoint event list/database for a single `USB_CONNECTED` row with the enrolled endpoint UUID, `userId: null`, and a Windows category such as `USB_STORAGE` when CIM can classify it. Confirm one per-recipient bell record and that its text names only the endpoint.
+4. Force a network retry while leaving that device inserted. Confirm the original event ID is acknowledged without a second event or notification. Restart or transiently interrupt the collector snapshot without removing media; confirm a second same-hardware observation is retained as device evidence but does not produce another bell alert.
+5. Remove the device and confirm one `USB_REMOVED` observation. Insert it again; confirm a new `USB_CONNECTED` event and a new bell notification appear.
+6. Insert a keyboard, mouse, or HID peripheral. Confirm Windows classifies it as a peripheral when the OS reports its class, and that the UI never claims removable storage, file access, or transfer merely from connection.
+7. Try a mismatched device credential/device ID through the test harness only. Confirm the endpoint rejects it and creates no event or notification. Repeat with an unassigned/revoked device and confirm `ENDPOINT_ASSIGNMENT_INVALID`.
+8. Repeat the observation tests on macOS only if using a supported Mac. Treat `system_profiler` inventory as generic connection evidence; do not claim storage classification or physical success without the recorded native output.
+
 ## Endpoint-native ML and CERT preservation
 
 - The active CERT artifact and exact 21-feature user-day contract remain the only preserved production model. Artifact SHA-256 verified in the repository: `E41189B9093457BDF9561A2A7570A358787BD5C93C1C630FAFE9028459D1D9E4`.

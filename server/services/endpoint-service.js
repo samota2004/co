@@ -26,6 +26,12 @@ const hasFreshAgentContact = (device,now) => {
   const time=Date.parse(contact||'');
   return Number.isFinite(time)&&now.getTime()-time<=5*60*1000;
 };
+const endpointAssignmentActive=device=>Boolean(
+  device?.enrolledAt && device.user && device.user.companyId===device.companyId &&
+  device.user.deletedAt===null && ['EMPLOYEE','MANAGER'].includes(device.user.roleCode) &&
+  ['ACTIVE','RESTRICTED','FROZEN'].includes(device.user.status)
+);
+const usbHardwareId=event=>typeof event?.metadata?.hardwareId==='string'?event.metadata.hardwareId:'';
 export class EndpointError extends Error {
   constructor(status, message, code = 'ENDPOINT_REJECTED', diagnostics = {}) {
     super(message); this.name = 'EndpointError'; this.status = status; this.code = code;
@@ -125,7 +131,7 @@ export class EndpointService {
   async authenticate(tx, secret, cityAvailable=false) {
     if (typeof secret !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(secret)) throw new EndpointError(401, 'Device authentication required');
     const d = await tx.endpointDevice.findFirst({ where: { credentialHash: hashSecret(secret), revokedAt: null },select:{...coreDeviceSelect,...(cityAvailable?cityDeviceSelect:{}),user:true} });
-    if (!d || d.user.companyId !== d.companyId) throw new EndpointError(401, 'Invalid or revoked device credential');
+    if (!d || !endpointAssignmentActive(d)) throw new EndpointError(401, 'Endpoint credential is invalid, revoked, unassigned, or no longer mapped to an active employee.', 'ENDPOINT_ASSIGNMENT_INVALID');
     return d;
   }
   async ingest(secret, body) {
@@ -137,26 +143,46 @@ export class EndpointService {
       // Locks device row; revocation cannot race past durable acceptance.
       const touched = await tx.endpointDevice.updateMany({ where: { id: d.id, credentialHash: hashSecret(secret), revokedAt: null }, data: { lastSeen: new Date() } });
       if (touched.count !== 1) throw new EndpointError(401, 'Revoked credential');
-      const records = body.events.map(e => ({ ...e, occurredAt: new Date(e.occurredAt), companyId: d.companyId,
+      // The queue retries the original event IDs. Collapse duplicate IDs in a
+      // single request and only create alerts for rows absent before this
+      // authenticated device transaction acquired its device-row lock.
+      const uniqueEvents=[...new Map(body.events.map(event=>[event.eventId,event])).values()];
+      const existing=uniqueEvents.length?await tx.endpointEvent.findMany({where:{deviceId:d.id,eventId:{in:uniqueEvents.map(event=>event.eventId)}},select:{eventId:true}}):[];
+      const existingIds=new Set(existing.map(event=>event.eventId));
+      const acceptedEvents=uniqueEvents.filter(event=>!existingIds.has(event.eventId));
+      const records = acceptedEvents.map(e => ({ ...e, occurredAt: new Date(e.occurredAt), companyId: d.companyId,
         // Device-wide observations intentionally have no employee attribution.
         userId: (/^(PROCESS_|APPLICATION_|SESSION_)/.test(e.type) || e.type==='FILE_CHANGE') && d.mappedIdentity && e.metadata.identity === d.mappedIdentity ? d.userId : null }));
-      await tx.endpointEvent.createMany({ data: records, skipDuplicates: true });
+      if(records.length)await tx.endpointEvent.createMany({ data: records, skipDuplicates: true });
       const notifications=[];
-      const usbConnections=body.events.filter(event=>event.type==='USB_CONNECTED');
+      const usbConnections=acceptedEvents.filter(event=>event.type==='USB_CONNECTED');
       if(usbConnections.length&&tx.securityNotification){
         const recipients=await tx.user.findMany({where:{companyId:d.companyId,deletedAt:null,status:'ACTIVE',roleCode:{in:['SECURITY_ADMIN','SYSTEM_ADMIN']},OR:[{isMainAdmin:true},...(d.user.assignedAdminId?[{id:d.user.assignedAdminId}]:[])]},select:{id:true}});
-        for(const event of usbConnections){
-          const dedupeKey=`endpoint-usb:${event.eventId}`;
+        // A transient snapshot failure can make the same attached device look
+        // new again and create a new UUID. Treat a subsequent CONNECTED for
+        // the same hardware as a retry until a validated REMOVED event occurs.
+        // Read the most recent state window, then restore chronological order
+        // before reducing it.  Reading the oldest 1,000 rows would let an old
+        // connection hide a later removal on long-lived endpoints.
+        const priorUsb=(await tx.endpointEvent.findMany({where:{deviceId:d.id,type:{in:['USB_CONNECTED','USB_REMOVED']},eventId:{notIn:acceptedEvents.map(event=>event.eventId)}},select:{type:true,occurredAt:true,metadata:true},orderBy:{occurredAt:'desc'},take:1000})).reverse();
+        const state=new Map(priorUsb.filter(event=>usbHardwareId(event)).map(event=>[usbHardwareId(event),event.type]));
+        const ordered=[...acceptedEvents].filter(event=>event.type==='USB_CONNECTED'||event.type==='USB_REMOVED').sort((a,b)=>Date.parse(a.occurredAt)-Date.parse(b.occurredAt)||a.eventId.localeCompare(b.eventId));
+        for(const event of ordered){
+          const hardwareId=usbHardwareId(event);if(!hardwareId)continue;
+          if(event.type==='USB_REMOVED'){state.set(hardwareId,'USB_REMOVED');continue;}
+          const alreadyConnected=state.get(hardwareId)==='USB_CONNECTED';state.set(hardwareId,'USB_CONNECTED');
+          if(alreadyConnected)continue;
+          const dedupeKey=`endpoint-usb:${d.id}:${event.eventId}`;
           const created=recipients.length?await tx.securityNotification.createMany({data:recipients.map(recipient=>({
-            companyId:d.companyId,recipientId:recipient.id,targetUserId:d.userId,dedupeKey,
+            companyId:d.companyId,recipientId:recipient.id,targetUserId:null,dedupeKey,
             type:'ENDPOINT_USB_CONNECTED',severity:'MEDIUM',title:'USB device connection observed',
-            message:`A USB device was detected on endpoint "${d.name}" assigned to ${d.user.name}. Connection was observed; file access or data transfer is not confirmed.`,
-            metadata:{deviceId:d.id,deviceName:d.name,eventId:event.eventId,eventType:event.type,observedAt:event.occurredAt}
+            message:`A USB device connection was observed on enrolled endpoint "${d.name}". Connection does not confirm storage access, file access, or data transfer.`,
+            metadata:{deviceId:d.id,deviceName:d.name,eventId:event.eventId,eventType:event.type,observedAt:event.occurredAt,category:event.metadata.category||'OTHER'}
           })),skipDuplicates:true}):{count:0};
           if(created.count)notifications.push(...await tx.securityNotification.findMany({where:{companyId:d.companyId,dedupeKey,recipientId:{in:recipients.map(recipient=>recipient.id)}}}));
         }
       }
-      return { acceptedEventIds: body.events.map(e => e.eventId), companyId: d.companyId, userId: d.userId, deviceId: d.id, notifications };
+      return { acceptedEventIds: uniqueEvents.map(e => e.eventId), companyId: d.companyId, userId: d.userId, deviceId: d.id, notifications };
     });
   }
   async heartbeat(secret, body, address, addressDiagnostics) {

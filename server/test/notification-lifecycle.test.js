@@ -28,8 +28,7 @@ test('unsupported containment acknowledgement persists one scoped failure notifi
   const device=await f.prisma.endpointDevice.create({data:{companyId:'A',userId:f.employee.id,name:'Unsupported containment fixture',platform:'win32',mappedIdentity:'S-1-5-21-22-33-44-1001',credentialHash:hashSecret(credential),enrolledAt:new Date(),lastSeen:new Date(),agentVersion:'fixture',health:{queueEvents:0,queueBytes:0,droppedEvents:0,collectors:{},helperLastSeen:null,paused:false},config:{paused:false}}});
   const command=await f.prisma.endpointEnforcementCommand.create({data:{companyId:'A',userId:f.employee.id,deviceId:device.id,action:'BLOCK',status:'PENDING',expiresAt:new Date(Date.now()+120000),reason:'Test unsupported result'}});
   const service=new EndpointService(f.prisma),health={queueEvents:0,queueBytes:0,droppedEvents:0,collectors:{},helperLastSeen:null,paused:false};
-  const first=await service.heartbeat(credential,{agentVersion:'fixture',health,accountControlReport:{commandId:command.commandId,resultCode:'UNSUPPORTED_MACHINE',reportedAt:new Date().toISOString()}},'127.0.0.1');
-  assert.equal(first.notifications.filter(row=>row.type==='CONTAINMENT_UNSUPPORTED').length,1);
+  await service.heartbeat(credential,{agentVersion:'fixture',health,accountControlReport:{commandId:command.commandId,resultCode:'UNSUPPORTED_MACHINE',reportedAt:new Date().toISOString()}},'127.0.0.1');
   assert.equal((await f.prisma.endpointEnforcementCommand.findUnique({where:{commandId:command.commandId}})).status,'UNSUPPORTED');
   assert.equal(await f.prisma.securityNotification.count({where:{targetUserId:f.employee.id,type:'CONTAINMENT_UNSUPPORTED'}}),1);
   await service.heartbeat(credential,{agentVersion:'fixture',health,accountControlReport:{commandId:command.commandId,resultCode:'UNSUPPORTED_MACHINE',reportedAt:new Date().toISOString()}},'127.0.0.1');

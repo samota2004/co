@@ -11,7 +11,7 @@ This proves those covered flows in the configured test database/browser. It does
 ## Implemented flow
 
 1. The security pipeline creates a deduplicated `SecurityNotification` for qualifying HIGH/CRITICAL incidents and targets active security administrators in the company according to the incident recipient rule.
-2. Endpoint USB connection observations can create a deduplicated admin alert scoped to the assigned admin/company. The message explicitly says a connection does not prove file access or data transfer; raw hardware identifiers are not included.
+2. Endpoint USB connection observations can create a deduplicated admin alert scoped to the assigned admin/company. The alert is device-level and has no employee target. Its message explicitly says a connection does not prove storage access, file access, or data transfer; raw hardware identifiers are not included.
 3. Authenticated admin APIs return a bounded page and unread count; marking one or all read is constrained to the authenticated recipient and company. Ordinary employees cannot use the admin routes.
 4. SSE sends security notifications only to the matching recipient scope. The client de-duplicates by notification ID, updates the bell and panel, and supports read, read-all, incident navigation, and browser notifications when the administrator has separately granted browser permission.
 5. A persisted fetch runs at login, when the tab becomes visible, and every 60 seconds while visible, so the admin can retrieve persisted alerts if SSE delivery is interrupted.
@@ -23,7 +23,7 @@ The notification panel has an empty state. A refresh error does not fabricate an
 | Event | Current status |
 | --- | --- |
 | High/critical security incident | Implemented with database persistence, recipient scoping, de-duplication and SSE. |
-| USB connection | Implemented as a device-level observation; no transfer claim. |
+| USB connection | Implemented as a device-level observation with retry/concurrent-delivery idempotency and connect/remove state deduplication; no employee attribution or transfer claim. |
 | FREEZE/containment requested | Implemented for reviewed manual and eligible automatic requests; notification says OS confirmation is pending. |
 | BLOCKED acknowledgement | Implemented only when all targeted Windows endpoints report `BLOCKED` and the backend marks the account `FROZEN`. |
 | Failed or unsupported containment | Implemented from the authenticated endpoint acknowledgment; the notification identifies the safe result code and retains an unconfirmed state. |
