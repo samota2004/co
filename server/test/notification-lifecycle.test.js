@@ -53,7 +53,8 @@ test('restoration failures and expirations are persisted without activating the 
   const expired=await f.prisma.endpointEnforcementCommand.create({data:{companyId:'A',userId:f.employee.id,deviceId:device.id,action:'ALLOW',status:'PENDING',expiresAt:new Date(Date.now()-1000),reason:'Test restoration expiry',createdById:f.admin.id}});
   await service.heartbeat(credential,{agentVersion:'fixture',health},'127.0.0.1');
   assert.equal((await f.prisma.endpointEnforcementCommand.findUnique({where:{id:expired.id}})).status,'EXPIRED');
-  assert.equal(await f.prisma.securityNotification.count({where:{targetUserId:f.employee.id,type:'RESTORATION_FAILED'}}),2);
+  assert.equal(await f.prisma.securityNotification.count({where:{targetUserId:f.employee.id,type:'RESTORATION_FAILED'}}),1);
+  assert.equal(await f.prisma.securityNotification.count({where:{targetUserId:f.employee.id,type:'RESTORATION_EXPIRED'}}),1);
   assert.equal(await f.prisma.auditLog.count({where:{userId:f.employee.id,action:'ACCOUNT_RESTORATION_EXPIRED'}}),1);
  }finally{await f.close();}
 });

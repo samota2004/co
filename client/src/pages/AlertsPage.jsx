@@ -69,6 +69,8 @@ export const AlertsPage = ({
   const [refreshing, setRefreshing] = useState(false);
   const [notificationPermission,setNotificationPermission]=useState(()=>typeof window!=='undefined'&&'Notification' in window?Notification.permission:'unsupported');
   const [investigatingId,setInvestigatingId]=useState(null);
+  const [restorationEligibility,setRestorationEligibility]=useState(null);
+  const [restorationEligibilityLoading,setRestorationEligibilityLoading]=useState(false);
   useEffect(() => {
     if (!selectedAlert) return;
     const previous = document.activeElement;
@@ -80,6 +82,19 @@ export const AlertsPage = ({
 
   const isAuthorized =
     ["SECURITY_ADMIN", "SYSTEM_ADMIN"].includes(currentUser?.role || currentUser?.roleCode);
+  const isMainAdmin=currentUser?.isMainAdmin===true;
+
+  useEffect(() => {
+    let cancelled=false;
+    setRestorationEligibility(null);
+    if(!selectedAlert?.userId||!isMainAdmin||selectedAlert.accountStatus!=='FROZEN')return undefined;
+    setRestorationEligibilityLoading(true);
+    requestApi(`/api/users/${encodeURIComponent(selectedAlert.userId)}/restoration-status`)
+      .then(data=>{if(!cancelled)setRestorationEligibility(data);})
+      .catch(error=>{if(!cancelled&&error.status!==403)setActionError(error.message||'Unable to load authoritative restoration status.');})
+      .finally(()=>{if(!cancelled)setRestorationEligibilityLoading(false);});
+    return()=>{cancelled=true;};
+  },[selectedAlert?.userId,selectedAlert?.accountStatus,isMainAdmin]);
 
   const userMap = useMemo(() => {
     const map = new Map();
@@ -180,12 +195,18 @@ export const AlertsPage = ({
     severity: event.severity || "UNKNOWN",
     type: event.eventType || event.eventCode || "Security event",
     eventCode: event.eventCode || "",
+    source: event.source || "SECURITY_NOTIFICATION",
+    associationStatus: event.associationStatus || "UNAVAILABLE",
     employeeName: event.user?.name || "Verified employee unavailable",
     employeeEmail: event.user?.email || "",
     employeeId: event.user?.employeeId || "",
     userId: event.user?.id || "",
     department: getUserDepartment(event.user),
     device: event.device?.name || "No verified device attribution",
+    devices: Array.isArray(event.devices) ? event.devices : event.device ? [event.device] : [],
+    commands: Array.isArray(event.commands) ? event.commands : [],
+    commandIds: Array.isArray(event.commandIds) ? event.commandIds : [],
+    relatedIncidentId: event.relatedIncidentId || null,
     riskScore: event.riskScore ?? null,
     detectedAt: event.timestamp || null,
     status: event.status || "UNKNOWN",
@@ -406,7 +427,11 @@ export const AlertsPage = ({
   };
 
   const handleUnfreeze = async (userId) => {
-    if (!userId || !isAuthorized) {
+    if (!userId || !isMainAdmin) {
+      return;
+    }
+    if(!restorationEligibility?.canRestore){
+      setActionError(restorationEligibility?.blockingReasons?.map(reason=>reason.message).join(' ')||'Restoration prerequisites are incomplete. No ALLOW command was created.');
       return;
     }
     const reason=confirmAccountAction('unfreeze',selectedAlert?.userName||'this employee');if(!reason)return;
@@ -886,6 +911,8 @@ export const AlertsPage = ({
                       className={`text-sm font-semibold ${
                         selectedAlert.accountStatus === "FROZEN"
                           ? "text-red-400"
+                          : selectedAlert.accountStatus === "RESTRICTED"
+                            ? "text-amber-300"
                           : "text-emerald-400"
                       }`}
                     >
@@ -893,9 +920,25 @@ export const AlertsPage = ({
                     </span>
                   </div>
 
-                  {selectedAlert.userId &&
-                    isAuthorized &&
-                    (selectedAlert.accountStatus === "FROZEN" ? (
+                  {selectedAlert.userId && selectedAlert.accountStatus === "ACTIVE" && isAuthorized ? (
+                    <button
+                      onClick={() => handleFreeze(selectedAlert.userId)}
+                      disabled={updatingUserId === selectedAlert.userId}
+                      className="px-4 py-2.5 rounded-xl border border-red-500/40 text-red-400 hover:bg-red-500/10 hover:-translate-y-0.5 text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition-all duration-300"
+                    >
+                      <Lock className="w-4 h-4" />
+                      {updatingUserId === selectedAlert.userId ? "FREEZING..." : "FREEZE ACCOUNT"}
+                    </button>
+                  ) : selectedAlert.accountStatus === "RESTRICTED" ? (
+                    <span className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-200">
+                      CONTAINMENT PENDING — review the existing BLOCK operation
+                    </span>
+                  ) : selectedAlert.accountStatus === "FROZEN" && isMainAdmin ? (
+                    restorationEligibilityLoading ? (
+                      <span className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 px-4 py-2.5 text-sm text-cyan-200">Loading restoration eligibility...</span>
+                    ) : restorationEligibility?.requirements?.hasPendingRestoration ? (
+                      <span className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-200">RESTORATION PENDING — awaiting ALLOW acknowledgment</span>
+                    ) : restorationEligibility?.canRestore ? (
                       <button
                         onClick={() => handleUnfreeze(selectedAlert.userId)}
                         disabled={updatingUserId === selectedAlert.userId}
@@ -905,23 +948,28 @@ export const AlertsPage = ({
 
                         {updatingUserId === selectedAlert.userId
                           ? "UNFREEZING..."
-                          : "UNFREEZE ACCOUNT"}
+                          : "RESTORE ACCESS"}
                       </button>
                     ) : (
-                      <button
-                        onClick={() => handleFreeze(selectedAlert.userId)}
-                        disabled={updatingUserId === selectedAlert.userId}
-                        className="px-4 py-2.5 rounded-xl border border-red-500/40 text-red-400 hover:bg-red-500/10 hover:-translate-y-0.5 text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition-all duration-300"
-                      >
-                        <Lock className="w-4 h-4" />
-
-                        {updatingUserId === selectedAlert.userId
-                          ? "FREEZING..."
-                          : "FREEZE ACCOUNT"}
-                      </button>
-                    ))}
+                      <span className="max-w-xs rounded-xl border border-slate-600 bg-white/[0.02] px-4 py-2.5 text-sm text-slate-300">RESTORATION BLOCKED — {restorationEligibility?.blockingReasons?.[0]?.message || "required prerequisites are incomplete"}</span>
+                    )
+                  ) : null}
                 </div>
+
+                {selectedAlert.accountStatus === "RESTRICTED" && <p className="mt-3 text-xs leading-5 text-slate-400">This account remains RESTRICTED until the authenticated endpoint acknowledges the existing BLOCK command. Opening this review does not create another request.</p>}
               </div>
+
+              {selectedAlert.kind === "SECURITY_EVENT" && <div className="p-4 rounded-xl border border-white/10 bg-white/[0.015] space-y-3">
+                <span className="text-[12px] text-[#67E8F9] font-mono block">PERSISTED WORKFLOW DETAILS</span>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div><span className="text-gray-500 block">Source</span><span>{selectedAlert.source}</span></div>
+                  <div><span className="text-gray-500 block">Association</span><span>{selectedAlert.associationStatus}</span></div>
+                  <div><span className="text-gray-500 block">Event ID</span><span className="break-all">{selectedAlert.id || "—"}</span></div>
+                  <div><span className="text-gray-500 block">Related incident</span><span>{selectedAlert.relatedIncidentId || "N/A"}</span></div>
+                </div>
+                {selectedAlert.devices?.length ? <div><span className="text-gray-500 block text-xs mb-1">Verified endpoints</span>{selectedAlert.devices.map(device=><div key={device.id} className="text-xs text-slate-200"><div>{device.name} · {device.platform} · {device.id}</div><div className="mt-1 text-slate-400">{device.revokedAt?'REVOKED':'ENROLLED'} · Last authenticated heartbeat: {formatDate(device.lastSeen)}</div></div>)}</div> : <p className="text-xs text-amber-200">No verified device attribution is persisted for this event.</p>}
+                {selectedAlert.commands?.length ? <div className="space-y-2"><span className="text-gray-500 block text-xs">Endpoint commands</span>{selectedAlert.commands.map(command=><div key={command.commandId} className="rounded-lg border border-white/10 p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-semibold text-white">{command.action} · {command.status}</span><span className="text-slate-400">{command.commandId}</span></div><div className="mt-1 text-slate-400">Created {formatDate(command.createdAt)} · Expires {formatDate(command.expiresAt)} · Acknowledged {formatDate(command.acknowledgedAt)}</div>{command.resultCode&&<div className="mt-1 text-slate-300">Result: {command.resultCode}</div>}</div>)}</div> : <p className="text-xs text-slate-400">No persisted BLOCK or ALLOW command is safely associated with this event.</p>}
+              </div>}
 
               {actionError && (
                 <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/5 text-red-400 text-sm flex gap-2">

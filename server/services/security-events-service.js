@@ -4,10 +4,12 @@ const SECURITY_EVENT_TYPES=[
   'CONTAINMENT_REQUESTED',
   'CONTAINMENT_CONFIRMED',
   'CONTAINMENT_FAILED',
+  'CONTAINMENT_EXPIRED',
   'CONTAINMENT_UNSUPPORTED',
   'RESTORATION_REQUESTED',
   'RESTORATION_CONFIRMED',
   'RESTORATION_FAILED',
+  'RESTORATION_EXPIRED',
   'RESTORATION_UNSUPPORTED',
 ];
 
@@ -15,10 +17,12 @@ const EVENT_DEFINITIONS={
   CONTAINMENT_REQUESTED:{label:'Containment requested',category:'CONTAINMENT',action:'BLOCK',defaultStatus:'PENDING'},
   CONTAINMENT_CONFIRMED:{label:'Containment confirmed',category:'CONTAINMENT',action:'BLOCK',defaultStatus:'CONFIRMED'},
   CONTAINMENT_FAILED:{label:'Containment failed',category:'CONTAINMENT',action:'BLOCK',defaultStatus:'FAILED'},
+  CONTAINMENT_EXPIRED:{label:'Containment expired',category:'CONTAINMENT',action:'BLOCK',defaultStatus:'EXPIRED'},
   CONTAINMENT_UNSUPPORTED:{label:'Containment unsupported',category:'CONTAINMENT',action:'BLOCK',defaultStatus:'UNSUPPORTED'},
   RESTORATION_REQUESTED:{label:'Restoration requested',category:'RESTORATION',action:'ALLOW',defaultStatus:'PENDING'},
   RESTORATION_CONFIRMED:{label:'Restoration confirmed',category:'RESTORATION',action:'ALLOW',defaultStatus:'CONFIRMED'},
   RESTORATION_FAILED:{label:'Restoration failed',category:'RESTORATION',action:'ALLOW',defaultStatus:'FAILED'},
+  RESTORATION_EXPIRED:{label:'Restoration expired',category:'RESTORATION',action:'ALLOW',defaultStatus:'EXPIRED'},
   RESTORATION_UNSUPPORTED:{label:'Restoration unsupported',category:'RESTORATION',action:'ALLOW',defaultStatus:'UNSUPPORTED'},
 };
 
@@ -62,6 +66,8 @@ function toEvent(notification,user,commands){
   const status=commandStatus(commands,definition);
   const devices=[...new Map(commands.map(command=>[command.deviceId,command.device]).filter(([,device])=>device)).values()];
   const metadata=notification.metadata&&typeof notification.metadata==='object'&&!Array.isArray(notification.metadata)?notification.metadata:{};
+  const legacyRequest=typeof notification.dedupeKey==='string'&&notification.dedupeKey.startsWith('legacy:');
+  const source=commands.length?(definition.category==='RESTORATION'?'RESTORATION_WORKFLOW':'CONTAINMENT_WORKFLOW'):(legacyRequest?'LEGACY_MANUAL_REQUEST':'SECURITY_NOTIFICATION');
   return {
     id:`${notification.companyId}:${notification.dedupeKey}`,
     sourceId:notification.id,
@@ -73,11 +79,15 @@ function toEvent(notification,user,commands){
     title:notification.title,
     details:notification.message,
     timestamp:notification.createdAt,
+    source,
+    associationStatus:commands.length?'VERIFIED':legacyRequest?'AMBIGUOUS_LEGACY':'UNAVAILABLE',
     user:user?{id:user.id,name:user.name,email:user.email,employeeId:user.employeeId,department:user.departmentCode,status:user.status}:null,
-    device:devices.length===1?{id:devices[0].id,name:devices[0].name,platform:devices[0].platform}:devices.length>1?{count:devices.length,name:`${devices.length} enrolled endpoints`}:null,
+    device:devices.length===1?{id:devices[0].id,name:devices[0].name,platform:devices[0].platform,enrolledAt:devices[0].enrolledAt||null,lastSeen:devices[0].lastSeen||null,revokedAt:devices[0].revokedAt||null}:devices.length>1?{count:devices.length,name:`${devices.length} enrolled endpoints`}:null,
+    devices:devices.map(device=>({id:device.id,name:device.name,platform:device.platform,enrolledAt:device.enrolledAt||null,lastSeen:device.lastSeen||null,revokedAt:device.revokedAt||null})),
     relatedIncidentId:notification.incidentId||metadata.incidentId||null,
     riskScore:typeof metadata.riskScore==='number'?metadata.riskScore:null,
     commandIds:commands.map(command=>command.commandId),
+    commands:commands.map(command=>({commandId:command.commandId,action:command.action,status:command.status,resultCode:command.resultCode||null,createdAt:command.createdAt,issuedAt:command.issuedAt,expiresAt:command.expiresAt,acknowledgedAt:command.acknowledgedAt,deviceId:command.deviceId,device:command.device?{id:command.device.id,name:command.device.name,platform:command.device.platform}:null})),
   };
 }
 
@@ -111,22 +121,29 @@ export async function getSecurityEventFeed(db,actor,query={}){
 
   const allCommandIds=[...new Set(uniqueNotifications.flatMap(notification=>commandIds(notification.metadata)))];
   const commands=allCommandIds.length&&db.endpointEnforcementCommand
-    ?await db.endpointEnforcementCommand.findMany({where:{companyId:actor.companyId,commandId:{in:allCommandIds},action:{in:['BLOCK','ALLOW']}},include:{device:{select:{id:true,name:true,platform:true}}}})
+    ?await db.endpointEnforcementCommand.findMany({where:{companyId:actor.companyId,commandId:{in:allCommandIds},action:{in:['BLOCK','ALLOW']}},include:{device:{select:{id:true,name:true,platform:true,enrolledAt:true,lastSeen:true,revokedAt:true}}}})
     :[];
   const fallbackCommands=db.endpointEnforcementCommand
-    ?await db.endpointEnforcementCommand.findMany({where:{companyId:actor.companyId,userId:{in:scopedUsers.map(user=>user.id)},action:{in:['BLOCK','ALLOW']}},include:{device:{select:{id:true,name:true,platform:true}}},orderBy:{createdAt:'desc'}})
+    ?await db.endpointEnforcementCommand.findMany({where:{companyId:actor.companyId,userId:{in:scopedUsers.map(user=>user.id)},action:{in:['BLOCK','ALLOW']}},include:{device:{select:{id:true,name:true,platform:true,enrolledAt:true,lastSeen:true,revokedAt:true}}},orderBy:{createdAt:'desc'}})
     :[];
   const commandsById=new Map(commands.map(command=>[command.commandId,command]));
   const events=uniqueNotifications.map(notification=>{
     const definition=EVENT_DEFINITIONS[notification.type];
     const metadata=notification.metadata&&typeof notification.metadata==='object'&&!Array.isArray(notification.metadata)?notification.metadata:{};
     let linked=commandIds(metadata).map(id=>commandsById.get(id)).filter(Boolean);
+    let associationStatus=linked.length&&linked.length===commandIds(metadata).length?'VERIFIED':linked.length?'AMBIGUOUS':'UNAVAILABLE';
     if(!linked.length&&metadata.requestedById){
       const createdAt=new Date(notification.createdAt).getTime();
       const expectedCount=Number.isInteger(metadata.deviceCount)&&metadata.deviceCount>0?metadata.deviceCount:1;
-      linked=fallbackCommands.filter(command=>command.userId===notification.targetUserId&&command.action===definition.action&&command.createdById===metadata.requestedById&&Math.abs(command.createdAt.getTime()-createdAt)<=10000).slice(0,expectedCount);
+      const candidates=fallbackCommands.filter(command=>command.userId===notification.targetUserId&&command.action===definition.action&&command.createdById===metadata.requestedById&&Math.abs(command.createdAt.getTime()-createdAt)<=10000).slice(0,expectedCount);
+      if(candidates.length===expectedCount){linked=candidates;associationStatus='VERIFIED';}
     }
-    return toEvent(notification,userById.get(notification.targetUserId),linked);
+    const event=toEvent(notification,userById.get(notification.targetUserId),linked);
+    if(associationStatus!=='VERIFIED'){
+      event.associationStatus=typeof notification.dedupeKey==='string'&&notification.dedupeKey.startsWith('legacy:')?'AMBIGUOUS_LEGACY':associationStatus;
+      event.source=event.associationStatus==='AMBIGUOUS_LEGACY'?'LEGACY_MANUAL_REQUEST':'SECURITY_NOTIFICATION';
+    }
+    return event;
   });
 
   const search=typeof query.search==='string'?query.search.trim().toLowerCase():'';

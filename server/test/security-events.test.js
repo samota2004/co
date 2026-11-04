@@ -29,7 +29,10 @@ test('security event feed separates persisted containment events from incidents 
     assert.equal(response.body.events.length,1,'recipient copies become one security event');
     assert.equal(response.body.events[0].status,'PENDING');
     assert.equal(response.body.events[0].eventCode,'CONTAINMENT_REQUESTED');
+    assert.equal(response.body.events[0].source,'CONTAINMENT_WORKFLOW');
+    assert.equal(response.body.events[0].associationStatus,'VERIFIED');
     assert.equal(response.body.events[0].device.name,device.name);
+    assert.equal(response.body.events[0].commands[0].commandId,command.commandId);
     assert.equal(response.body.metrics.totalIncidents,1);
     assert.equal(response.body.metrics.activeUnresolvedIncidents,1);
     assert.equal(response.body.metrics.totalSecurityEvents,1);
@@ -44,10 +47,13 @@ test('security event feed separates persisted containment events from incidents 
 
     const failedCommand=await f.prisma.endpointEnforcementCommand.create({data:{companyId:'A',userId:f.employee.id,deviceId:device.id,action:'BLOCK',status:'FAILED',resultCode:'ACCESS_DENIED',reason:'Synthetic failed fixture'}});
     await f.prisma.securityNotification.create({data:{companyId:'A',recipientId:f.admin.id,targetUserId:f.employee.id,dedupeKey:`containment:failed:${randomUUID()}`,type:'CONTAINMENT_FAILED',severity:'CRITICAL',title:'Endpoint containment failed',message:'Synthetic fixture notification.',metadata:{commandIds:[failedCommand.commandId]}}});
+    await f.prisma.securityNotification.create({data:{companyId:'A',recipientId:f.admin.id,targetUserId:f.employee.id,dedupeKey:`legacy:containment:manual-request:${randomUUID()}::${Date.now()}`,type:'CONTAINMENT_REQUESTED',severity:'CRITICAL',title:'Legacy containment request',message:'Legacy request has no verified endpoint association.',metadata:{requestedById:f.admin.id,deviceCount:1}}});
     response=await call(f.admin,'/security-events');
-    assert.deepEqual(new Set(response.body.events.map(event=>event.status)),new Set(['EXPIRED','FAILED']));
+    assert.deepEqual(new Set(response.body.events.map(event=>event.status)),new Set(['EXPIRED','FAILED','PENDING']));
+    const legacyEvent=response.body.events.find(event=>event.source==='LEGACY_MANUAL_REQUEST');
+    assert.ok(legacyEvent);assert.equal(legacyEvent.associationStatus,'AMBIGUOUS_LEGACY');assert.equal(legacyEvent.device,null);assert.deepEqual(legacyEvent.commands,[]);
     assert.equal(response.body.metrics.totalIncidents,1,'incident count stays independent from security-event count');
-    assert.equal(response.body.metrics.totalSecurityEvents,2);
+    assert.equal(response.body.metrics.totalSecurityEvents,3);
 
     const foreign=await call(f.otherAdmin,'/security-events');
     assert.equal(foreign.body.events.length,0,'tenant isolation excludes company A events');

@@ -58,6 +58,16 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
   const unresolvedCritical=incidents.some(incident=>!['RESOLVED','FALSE_POSITIVE','REJECTED'].includes(incident.status));
   const reviewedCritical=incidents.some(incident=>['RESOLVED','FALSE_POSITIVE','REJECTED'].includes(incident.status));
   const hasConfirmedContainment=confirmedContainmentDeviceIds.size>0;
+  const hasEligibleEndpoint=devices.length>0;
+  const pendingRestorationCommands=commands.filter(command=>command.action==='ALLOW'&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&command.expiresAt>new Date());
+  const hasPendingRestoration=pendingRestorationCommands.length>0;
+  const blockingReasons=[];
+  if(!['RESTRICTED','FROZEN'].includes(u.status))blockingReasons.push({code:'ACCOUNT_NOT_CONTAINED',message:'The account is not currently restricted or OS-confirmed frozen.'});
+  if(!hasEligibleEndpoint)blockingReasons.push({code:'NO_ELIGIBLE_ENDPOINT',message:'No enrolled, active Windows endpoint is available for this employee.'});
+  if(!hasConfirmedContainment)blockingReasons.push({code:'NO_CONFIRMED_CONTAINMENT',message:'No enrolled Windows endpoint has authenticated the original BLOCK command.'});
+  if(unresolvedCritical)blockingReasons.push({code:'CRITICAL_HOLD_ACTIVE',message:'An unresolved critical incident still blocks restoration.'});
+  if(!reviewedCritical)blockingReasons.push({code:'INCIDENT_REVIEW_REQUIRED',message:'A reviewed critical incident record is required before restoration.'});
+  if(hasPendingRestoration)blockingReasons.push({code:'RESTORATION_ALREADY_PENDING',message:'An ALLOW command is already awaiting endpoint acknowledgment.'});
   return{
     user:publicUser(u),
     endpoints:devices.map(device=>({
@@ -66,9 +76,11 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
       lastSeen:device.lastSeen||null,
     })),
     commands,
+    pendingRestorationCommands,
     incidents,
-    canRestore:['RESTRICTED','FROZEN'].includes(u.status)&&hasConfirmedContainment&&!unresolvedCritical&&reviewedCritical,
-    requirements:{mainAdmin:true,freshMfa:true,administrativeReason:true,hasConfirmedContainment,hasUnresolvedCriticalIncident:unresolvedCritical,hasReviewedCriticalIncident:reviewedCritical},
+    canRestore:blockingReasons.length===0,
+    blockingReasons,
+    requirements:{mainAdmin:true,freshMfa:true,administrativeReason:true,hasEligibleEndpoint,hasConfirmedContainment,hasUnresolvedCriticalIncident:unresolvedCritical,hasReviewedCriticalIncident:reviewedCritical,hasPendingRestoration},
   };
 }));
 async function userChanges(req,create=false,current=null){
@@ -116,8 +128,12 @@ router.post('/users/:id/freeze',requireSecurityAdmin,api(async req=>{
   if(reason.trim().length<8)throw new SecurityError(400,'REASON_REQUIRED','Provide a reason of at least 8 characters.');
   if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','Employee containment cannot target an administrator.');
   if(u.status==='FROZEN')throw new SecurityError(409,'ALREADY_CONTAINED','This account is already OS-confirmed as frozen. Use Main Admin restoration after incident review.');
+  if(u.status==='RESTRICTED')throw new SecurityError(409,'CONTAINMENT_ALREADY_PENDING','This account is already restricted and its existing containment operation must be verified before another request can be created.');
+  if(u.status!=='ACTIVE')throw new SecurityError(409,'ACCOUNT_NOT_ELIGIBLE_FOR_CONTAINMENT','Only an ACTIVE employee account can start a new containment request.');
   const result=await prisma.$transaction(async tx=>{
-    const updated=await tx.user.update({where:{id:u.id},data:{status:'RESTRICTED',authVersion:{increment:1}}});
+    const changed=await tx.user.updateMany({where:{id:u.id,companyId:req.user.companyId,status:'ACTIVE'},data:{status:'RESTRICTED',authVersion:{increment:1}}});
+    if(changed.count!==1)throw new SecurityError(409,'CONTAINMENT_ALREADY_PENDING','This account changed state while the containment request was being created. Refresh the persisted operation before retrying.');
+    const updated=await tx.user.findUnique({where:{id:u.id}});
     await tx.session.updateMany({where:{userId:u.id,revokedAt:null},data:{revokedAt:new Date()}});
     const devices=await tx.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,lastSeen:true}});
     const commands=devices.map(d=>({companyId:req.user.companyId,userId:u.id,deviceId:d.id,action:'BLOCK',status:d.lastSeen&&Date.now()-d.lastSeen.getTime()<=300000?'PENDING':'PENDING_OFFLINE',expiresAt:new Date(Date.now()+120000),reason,createdById:req.user.id}));
@@ -139,6 +155,7 @@ router.post('/users/:id/unfreeze',requireMainAdmin,requireFreshMfa,api(async req
   if(await prisma.incident.findFirst({where:{userId:u.id,severity:'CRITICAL',status:{notIn:['RESOLVED','FALSE_POSITIVE','REJECTED']}}}))throw new SecurityError(409,'CRITICAL_HOLD_ACTIVE','Resolve the critical incident before restoration.');
   if(!await prisma.incident.findFirst({where:{userId:u.id,severity:'CRITICAL',status:{in:['RESOLVED','FALSE_POSITIVE','REJECTED']}}}))throw new SecurityError(409,'INCIDENT_REVIEW_REQUIRED','A Main Admin must complete and record a critical-incident review before restoration.');
   const result=await prisma.$transaction(async tx=>{
+    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "users" WHERE "id"=${u.id} AND "companyId"=${req.user.companyId} FOR UPDATE`);
     const devices=await tx.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,lastSeen:true}});
     const blocked=[];for(const d of devices){const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:d.id,userId:u.id,action:'BLOCK',status:'SUCCEEDED'},orderBy:{acknowledgedAt:'desc'}});if(prior)blocked.push({device:d,prior});}
     if(!blocked.length)throw new SecurityError(409,'NO_CONFIRMED_CONTAINMENT','No enrolled Windows device has confirmed OS containment.');
