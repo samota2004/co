@@ -725,7 +725,7 @@ export const DashboardPage = ({
             icon={Activity}
             accent="gold"
             isDark={isDark}
-          />``
+          />
 
           <MetricCard
             label="Critical Incidents"
