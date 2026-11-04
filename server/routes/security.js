@@ -54,17 +54,20 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
     prisma.endpointEnforcementCommand.findMany({where:{companyId:req.user.companyId,userId:u.id,action:{in:['BLOCK','ALLOW']}},include:{device:{select:{id:true,name:true,platform:true}}},orderBy:{createdAt:'desc'},take:100}),
     prisma.incident.findMany({where:{userId:u.id,user:{companyId:req.user.companyId,deletedAt:null},severity:'CRITICAL'},select:{id:true,incidentId:true,title:true,severity:true,status:true,createdAt:true,resolvedAt:true,resolutionNotes:true},orderBy:{createdAt:'desc'},take:20}),
   ]);
-  const confirmedContainmentDeviceIds=new Set(commands.filter(command=>command.action==='BLOCK'&&command.status==='SUCCEEDED').map(command=>command.deviceId));
+  const latestContainmentByDevice=new Map();
+  for(const command of commands.filter(command=>command.action==='BLOCK'))if(!latestContainmentByDevice.has(command.deviceId))latestContainmentByDevice.set(command.deviceId,command);
+  const confirmedContainmentDeviceIds=new Set([...latestContainmentByDevice.values()].filter(command=>command.status==='SUCCEEDED').map(command=>command.deviceId));
   const unresolvedCritical=incidents.some(incident=>!['RESOLVED','FALSE_POSITIVE','REJECTED'].includes(incident.status));
   const reviewedCritical=incidents.some(incident=>['RESOLVED','FALSE_POSITIVE','REJECTED'].includes(incident.status));
   const hasConfirmedContainment=confirmedContainmentDeviceIds.size>0;
   const hasEligibleEndpoint=devices.length>0;
+  const hasAllRequiredContainment=hasEligibleEndpoint&&devices.every(device=>confirmedContainmentDeviceIds.has(device.id));
   const pendingRestorationCommands=commands.filter(command=>command.action==='ALLOW'&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&command.expiresAt>new Date());
   const hasPendingRestoration=pendingRestorationCommands.length>0;
   const blockingReasons=[];
   if(!['RESTRICTED','FROZEN'].includes(u.status))blockingReasons.push({code:'ACCOUNT_NOT_CONTAINED',message:'The account is not currently restricted or OS-confirmed frozen.'});
   if(!hasEligibleEndpoint)blockingReasons.push({code:'NO_ELIGIBLE_ENDPOINT',message:'No enrolled, active Windows endpoint is available for this employee.'});
-  if(!hasConfirmedContainment)blockingReasons.push({code:'NO_CONFIRMED_CONTAINMENT',message:'No enrolled Windows endpoint has authenticated the original BLOCK command.'});
+  if(!hasAllRequiredContainment)blockingReasons.push({code:'CONTAINMENT_CONFIRMATION_INCOMPLETE',message:'Every eligible Windows endpoint must authenticate the original BLOCK command before restoration.'});
   if(unresolvedCritical)blockingReasons.push({code:'CRITICAL_HOLD_ACTIVE',message:'An unresolved critical incident still blocks restoration.'});
   if(!reviewedCritical)blockingReasons.push({code:'INCIDENT_REVIEW_REQUIRED',message:'A reviewed critical incident record is required before restoration.'});
   if(hasPendingRestoration)blockingReasons.push({code:'RESTORATION_ALREADY_PENDING',message:'An ALLOW command is already awaiting endpoint acknowledgment.'});
@@ -80,7 +83,7 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
     incidents,
     canRestore:blockingReasons.length===0,
     blockingReasons,
-    requirements:{mainAdmin:true,freshMfa:true,administrativeReason:true,hasEligibleEndpoint,hasConfirmedContainment,hasUnresolvedCriticalIncident:unresolvedCritical,hasReviewedCriticalIncident:reviewedCritical,hasPendingRestoration},
+    requirements:{mainAdmin:true,freshMfa:true,administrativeReason:true,hasEligibleEndpoint,hasConfirmedContainment,hasAllRequiredContainment,hasUnresolvedCriticalIncident:unresolvedCritical,hasReviewedCriticalIncident:reviewedCritical,hasPendingRestoration},
   };
 }));
 async function userChanges(req,create=false,current=null){
@@ -157,8 +160,8 @@ router.post('/users/:id/unfreeze',requireMainAdmin,requireFreshMfa,api(async req
   const result=await prisma.$transaction(async tx=>{
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "users" WHERE "id"=${u.id} AND "companyId"=${req.user.companyId} FOR UPDATE`);
     const devices=await tx.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,lastSeen:true}});
-    const blocked=[];for(const d of devices){const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:d.id,userId:u.id,action:'BLOCK',status:'SUCCEEDED'},orderBy:{acknowledgedAt:'desc'}});if(prior)blocked.push({device:d,prior});}
-    if(!blocked.length)throw new SecurityError(409,'NO_CONFIRMED_CONTAINMENT','No enrolled Windows device has confirmed OS containment.');
+    const blocked=[];for(const d of devices){const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:d.id,userId:u.id,action:'BLOCK'},orderBy:{createdAt:'desc'}});if(prior?.status==='SUCCEEDED')blocked.push({device:d,prior});}
+    if(blocked.length!==devices.length)throw new SecurityError(409,'NO_CONFIRMED_CONTAINMENT','Every eligible enrolled Windows device must have confirmed OS containment before restoration.');
     const pendingRestoration=await tx.endpointEnforcementCommand.count({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',deviceId:{in:blocked.map(({device})=>device.id)},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:new Date()}}});
     if(pendingRestoration===blocked.length)throw new SecurityError(409,'RESTORATION_ALREADY_PENDING','Endpoint restoration is already awaiting acknowledgment.');
     await tx.endpointEnforcementCommand.updateMany({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'NEW_RESTORATION_REVIEW'}});
