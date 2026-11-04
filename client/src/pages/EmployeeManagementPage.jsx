@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   Activity,
   UserX,
+  Lock,
+  Unlock,
   Building2,
   Mail,
   Fingerprint,
@@ -63,6 +65,7 @@ const getInitials = (name = "") =>
 // ======================================================
 
 export const EmployeeManagementPage = ({
+  currentUser,
   users = [],
   onSelectUser,
   onAddUser,
@@ -108,6 +111,14 @@ export const EmployeeManagementPage = ({
     return()=>{active=false;};
   },[isAddModalOpen,editingUser?.id,assignmentRetry]);
   const [accountPending,setAccountPending]=useState('');
+  const [restorationUser,setRestorationUser]=useState(null);
+  const [restorationInfo,setRestorationInfo]=useState(null);
+  const [restorationReason,setRestorationReason]=useState('');
+  const [restorationLoading,setRestorationLoading]=useState(false);
+  const [restorationSubmitting,setRestorationSubmitting]=useState(false);
+  const [restorationError,setRestorationError]=useState('');
+  const [restorationRequested,setRestorationRequested]=useState(false);
+  const isMainAdmin=currentUser?.isMainAdmin===true;
 
   const [formData, setFormData] = useState({
     name: "",
@@ -123,10 +134,36 @@ export const EmployeeManagementPage = ({
   void isDark;
   const confirmWindowsFreeze=()=>window.confirm('Freeze this employee? On locally configured Windows laptops this disables their Windows sign-in and signs out their sessions. Unsaved work may be lost. The separate administrator remains available. Offline devices apply the change after reconnecting.');
   const changeAccount=async user=>{
-    const frozen=user.status==='FROZEN';
-    if(!frozen&&!confirmWindowsFreeze())return;
+    if(user.status!=='ACTIVE'){
+      if(!isMainAdmin)return;
+      setRestorationUser(user);setRestorationInfo(null);setRestorationReason('');setRestorationError('');setRestorationRequested(false);setRestorationLoading(true);
+      try{
+        const token=localStorage.getItem('zero_trust_token');
+        const response=await fetch(`/api/users/${encodeURIComponent(user.id)}/restoration-status`,{headers:{Authorization:`Bearer ${token||''}`}});
+        const data=await response.json();
+        if(!response.ok||data.success!==true)throw new Error(data?.error?.message||'Unable to load restoration requirements.');
+        setRestorationInfo(data);
+      }catch(error){setRestorationError(error.message||'Unable to load restoration requirements.');}
+      finally{setRestorationLoading(false);}
+      return;
+    }
+    if(!confirmWindowsFreeze())return;
     setAccountPending(user.id);
-    try{await (frozen?onUnfreezeUser:onFreezeUser)?.(user.id);}finally{setAccountPending('');}
+    try{await onFreezeUser?.(user.id);}finally{setAccountPending('');}
+  };
+
+  const submitRestoration=async()=>{
+    if(!restorationUser||!onUnfreezeUser||restorationSubmitting)return;
+    const reason=restorationReason.trim();
+    if(reason.length<8){setRestorationError('Enter administrative restoration notes of at least 8 characters.');return;}
+    if(!window.confirm(`Confirm RESTORE ACCESS for ${restorationUser.name}? The account remains restricted until every required endpoint acknowledges ALLOW.`))return;
+    try{
+      setRestorationSubmitting(true);setRestorationError('');
+      const result=await onUnfreezeUser(restorationUser.id,reason);
+      setRestorationRequested(true);
+      setRestorationInfo(previous=>previous?{...previous,commands:result?.endpointEnforcement||previous.commands,requestMessage:result?.message||'Restoration is awaiting endpoint confirmation.'}:previous);
+    }catch(error){setRestorationError(error.message||'Restoration request failed.');}
+    finally{setRestorationSubmitting(false);}
   };
 
   // ======================================================
@@ -255,8 +292,6 @@ export const EmployeeManagementPage = ({
     e.preventDefault();
 
     if (isSubmitting || !editingUser || assignmentLoading || assignmentError) return;
-    if(formData.status==='FROZEN'&&editingUser.status!=='FROZEN'&&!confirmWindowsFreeze())return;
-
     if (!onUpdateUser) {
       console.error("onUpdateUser callback is not available.");
       return;
@@ -268,7 +303,6 @@ export const EmployeeManagementPage = ({
       employeeId: formData.employeeId.trim(),
       department: formData.department,
       role: formData.role,
-      status: formData.status,
       managerId:formData.role==='EMPLOYEE'?managerId:null,
       assignedAdminId:formData.role==='MANAGER'?assignedAdminId:undefined,
     };
@@ -435,23 +469,14 @@ export const EmployeeManagementPage = ({
 
           <div>
             <label className="mb-2 block text-[12px] uppercase tracking-[0.14em] text-[#7F8A96]">
-              Status
+              Account Status
             </label>
-
-            <select
-              value={formData.status}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  status: e.target.value,
-                })
-              }
-              className={SELECT_CLASS}
-            >
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="RESTRICTED">RESTRICTED</option>
-              <option value="FROZEN">FROZEN</option>
-            </select>
+            <div className={`${SELECT_CLASS} cursor-not-allowed opacity-80`} aria-readonly="true">
+              {isEdit ? formData.status : "ACTIVE"}
+            </div>
+            <p className="mt-2 text-[12px] leading-5 text-slate-400">
+              Account status is controlled only by the audited containment and Main Admin restoration workflow.
+            </p>
           </div>
         </div>
 
@@ -848,7 +873,8 @@ export const EmployeeManagementPage = ({
 
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-2">
-                          {(user.status==='FROZEN'?onUnfreezeUser:onFreezeUser)&&<button type="button" disabled={Boolean(accountPending)} onClick={()=>changeAccount(user)} className="rounded-lg border border-amber-300/30 px-2.5 py-2 text-xs font-semibold text-amber-200 disabled:opacity-50">{accountPending===user.id?'SAVING...':user.status==='FROZEN'?'UNFREEZE':'FREEZE'}</button>}
+                          {user.status==='ACTIVE'&&onFreezeUser&&<button type="button" disabled={Boolean(accountPending)} onClick={()=>changeAccount(user)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/30 px-2.5 py-2 text-xs font-semibold text-amber-200 disabled:opacity-50"><Lock className="h-3 w-3" />{accountPending===user.id?'SAVING...':'FREEZE'}</button>}
+                          {isMainAdmin&&['FROZEN','RESTRICTED'].includes(user.status)&&onUnfreezeUser&&<button type="button" disabled={Boolean(accountPending)||restorationLoading} onClick={()=>changeAccount(user)} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300/30 px-2.5 py-2 text-xs font-semibold text-emerald-200 disabled:opacity-50"><Unlock className="h-3 w-3" />RESTORE ACCESS</button>}
                           <button
                             onClick={() => handleOpenEdit(user)}
                             className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-2 text-[12px] font-mono font-semibold tracking-wide text-[#A7B0BA] transition-all hover:border-[#67E8F9]/30 hover:bg-[#67E8F9]/5 hover:text-[#67E8F9]"
@@ -967,6 +993,58 @@ export const EmployeeManagementPage = ({
             </div>
 
             {renderEmployeeForm({ mode: "edit" })}
+          </div>
+        </div>
+      )}
+
+      {restorationUser && (
+        <div role="dialog" aria-label="Restore employee access" className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm">
+          <div className="my-auto w-full max-w-2xl rounded-2xl border border-emerald-300/20 bg-[#050A10] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.55)] sm:p-7">
+            <div className="flex items-start justify-between gap-5 border-b border-white/10 pb-5">
+              <div>
+                <div className="mb-2 flex items-center gap-2 text-emerald-200">
+                  <Unlock className="h-4 w-4" />
+                  <span className="text-[12px] font-mono font-semibold uppercase tracking-[0.2em]">AUDITED RESTORATION</span>
+                </div>
+                <h2 className="text-2xl font-light tracking-[-0.03em] text-[#F4F7FA] sm:text-3xl">Restore Access</h2>
+                <p className="mt-2 text-[13px] leading-5 text-[#A7B0BA]">This request authorizes endpoint ALLOW commands. It does not activate the account until every required endpoint acknowledges the command.</p>
+              </div>
+              <button type="button" onClick={()=>setRestorationUser(null)} disabled={restorationSubmitting} className="rounded-xl border border-white/10 p-2 text-[#697581] transition-all hover:border-white/20 hover:bg-white/[0.03] hover:text-white disabled:opacity-50"><X className="h-4 w-4" /></button>
+            </div>
+
+            <div className="mt-6 space-y-5">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4"><span className="block text-[11px] uppercase tracking-[0.14em] text-[#7F8A96]">Employee</span><span className="mt-1 block text-sm text-white">{restorationUser.name}</span><span className="text-xs text-slate-400">{restorationUser.employeeId}</span></div>
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4"><span className="block text-[11px] uppercase tracking-[0.14em] text-[#7F8A96]">Current status</span><span className="mt-1 block text-sm text-amber-200">{restorationInfo?.user?.status||restorationUser.status}</span></div>
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4"><span className="block text-[11px] uppercase tracking-[0.14em] text-[#7F8A96]">Authorization</span><span className="mt-1 block text-sm text-emerald-200">Main Admin + fresh MFA</span></div>
+              </div>
+
+              {restorationLoading&&<p role="status" className="text-sm text-slate-400">Loading containment, incident and endpoint requirements...</p>}
+              {restorationError&&<p role="alert" className="text-sm text-red-300">{restorationError}</p>}
+              {restorationInfo&&!restorationLoading&&<>
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="mb-3 text-[11px] uppercase tracking-[0.14em] text-[#67E8F9]">Critical incident review</div>
+                  {restorationInfo.incidents?.length?restorationInfo.incidents.map(incident=><div key={incident.id} className="flex items-center justify-between gap-3 border-b border-white/5 py-2 last:border-0"><span className="text-sm text-slate-200">{incident.title}</span><span className={`text-xs ${['RESOLVED','FALSE_POSITIVE','REJECTED'].includes(incident.status)?'text-emerald-300':'text-red-300'}`}>{incident.status}</span></div>):<p className="text-sm text-amber-200">No persisted critical incident review was found. The existing restoration policy requires a reviewed critical incident before access can be restored.</p>}
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                  <div className="mb-3 text-[11px] uppercase tracking-[0.14em] text-[#67E8F9]">Endpoint containment status</div>
+                  {restorationInfo.endpoints?.length?restorationInfo.endpoints.map(endpoint=><div key={endpoint.id} className="flex items-center justify-between gap-3 border-b border-white/5 py-2 last:border-0"><span className="text-sm text-slate-200">{endpoint.name}</span><span className="text-xs text-slate-400">{endpoint.confirmationStatus.replaceAll('_',' ')} · {endpoint.lastSeen?'last seen '+new Date(endpoint.lastSeen).toLocaleString():'never connected'}</span></div>):<p className="text-sm text-amber-200">No eligible enrolled Windows endpoint is available for verified restoration.</p>}
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                  {[[restorationInfo.requirements?.hasConfirmedContainment,'Verified containment acknowledgment'],[restorationInfo.requirements?.hasReviewedCriticalIncident,'Reviewed critical incident'],[!restorationInfo.requirements?.hasUnresolvedCriticalIncident,'No unresolved critical incident'],[!restorationRequested,'No restoration request submitted in this modal']].map(([ok,label])=><div key={label} className={`rounded-lg border px-3 py-2 ${ok?'border-emerald-300/20 bg-emerald-300/5 text-emerald-200':'border-amber-300/20 bg-amber-300/5 text-amber-200'}`}>{ok?'✓':'!'} {label}</div>)}
+                </div>
+
+                {restorationInfo.requestMessage&&<p role="status" className="rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-4 text-sm leading-6 text-cyan-100">{restorationInfo.requestMessage} The account will remain {restorationInfo.user?.status||restorationUser.status} until endpoint acknowledgment completes the workflow.</p>}
+
+                <label className="block"><span className="mb-2 block text-[11px] uppercase tracking-[0.14em] text-[#7F8A96]">Mandatory administrative reason / notes</span><textarea value={restorationReason} onChange={event=>setRestorationReason(event.target.value)} disabled={restorationSubmitting||restorationRequested} rows={4} placeholder="Document the reviewed incident and authorization basis..." className={`${INPUT_CLASS} resize-y`} /></label>
+                <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={()=>setRestorationUser(null)} disabled={restorationSubmitting} className="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-mono font-semibold text-[#8E99A5] disabled:opacity-50">CLOSE</button>
+                  <button type="button" onClick={submitRestoration} disabled={restorationSubmitting||restorationRequested||!restorationInfo.canRestore||restorationReason.trim().length<8} className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300/50 bg-emerald-300 px-5 py-2.5 text-xs font-mono font-bold text-[#031015] disabled:cursor-not-allowed disabled:opacity-50"><Unlock className="h-3.5 w-3.5" />{restorationSubmitting?'REQUESTING...':restorationRequested?'AWAITING ENDPOINT CONFIRMATION':'REQUEST RESTORATION'}</button>
+                </div>
+              </>}
+            </div>
           </div>
         </div>
       )}

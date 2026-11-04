@@ -51,6 +51,8 @@ const getUserTrustScore = (user) =>
 export const AlertsPage = ({
   users = [],
   incidents = [],
+  securityEvents = [],
+  securityMetrics = null,
   currentUser,
   onRefreshData,
   onSelectUser,
@@ -60,6 +62,7 @@ export const AlertsPage = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [eventTypeFilter, setEventTypeFilter] = useState("ALL");
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [updatingUserId, setUpdatingUserId] = useState(null);
   const [actionError, setActionError] = useState("");
@@ -128,11 +131,11 @@ export const AlertsPage = ({
     return null;
   };
 
-  const alerts = useMemo(() => {
-    return incidents.filter(Boolean).map((incident) => {
+  const incidentAlerts = useMemo(() => incidents.filter(Boolean).map((incident) => {
       const user = getIncidentUser(incident);
 
       return {
+        kind: "INCIDENT",
         incident,
         user,
         id: getIncidentId(incident),
@@ -168,8 +171,43 @@ export const AlertsPage = ({
         userRiskScore: getUserRiskScore(user),
         trustScore: getUserTrustScore(user),
       };
-    });
-  }, [incidents, userMap]);
+    }), [incidents, userMap]);
+
+  const eventAlerts = useMemo(() => securityEvents.filter(Boolean).map((event) => ({
+    kind: "SECURITY_EVENT",
+    event,
+    id: event.id || event.sourceId,
+    severity: event.severity || "UNKNOWN",
+    type: event.eventType || event.eventCode || "Security event",
+    eventCode: event.eventCode || "",
+    employeeName: event.user?.name || "Verified employee unavailable",
+    employeeEmail: event.user?.email || "",
+    employeeId: event.user?.employeeId || "",
+    userId: event.user?.id || "",
+    department: getUserDepartment(event.user),
+    device: event.device?.name || "No verified device attribution",
+    riskScore: event.riskScore ?? null,
+    detectedAt: event.timestamp || null,
+    status: event.status || "UNKNOWN",
+    details: event.details || event.title || "No security event details available.",
+    recommendedAction: "",
+    contributingFactors: [],
+    accountStatus: getUserStatus(event.user),
+    riskLevel: "",
+    userRiskScore: null,
+    trustScore: null,
+  })), [securityEvents]);
+
+  const alerts = useMemo(() => [...incidentAlerts, ...eventAlerts], [incidentAlerts, eventAlerts]);
+
+  const recordMetrics = securityMetrics || {
+    totalIncidents: incidents.length,
+    activeUnresolvedIncidents: incidents.filter(incident => !["RESOLVED", "FALSE_POSITIVE", "REJECTED"].includes(String(incident?.status || "").toUpperCase())).length,
+    criticalIncidents: incidents.filter(incident => String(incident?.severity || "").toUpperCase() === "CRITICAL").length,
+    openIncidents: incidents.filter(incident => String(incident?.status || "").toUpperCase() === "OPEN").length,
+    totalSecurityEvents: securityEvents.length,
+    pendingContainmentRequests: securityEvents.filter(event => event?.eventCode === "CONTAINMENT_REQUESTED" && event?.status === "PENDING").length,
+  };
 
   const severityOptions = useMemo(() => {
     const values = new Set();
@@ -179,13 +217,16 @@ export const AlertsPage = ({
         values.add(String(incident.severity).toUpperCase());
       }
     });
+    securityEvents.forEach((event) => {
+      if (event?.severity) values.add(String(event.severity).toUpperCase());
+    });
 
     ["CRITICAL", "HIGH", "MEDIUM", "LOW"].forEach((value) => {
       values.add(value);
     });
 
     return Array.from(values);
-  }, [incidents]);
+  }, [incidents, securityEvents]);
 
   const statusOptions = useMemo(() => {
     const values = new Set();
@@ -195,13 +236,16 @@ export const AlertsPage = ({
         values.add(String(incident.status).toUpperCase());
       }
     });
+    securityEvents.forEach((event) => {
+      if (event?.status) values.add(String(event.status).toUpperCase());
+    });
 
-    ["OPEN", "UNDER_REVIEW", "RESOLVED"].forEach((value) => {
+    ["OPEN", "UNDER_REVIEW", "RESOLVED", "PENDING", "CONFIRMED", "FAILED", "UNSUPPORTED", "EXPIRED"].forEach((value) => {
       values.add(value);
     });
 
     return Array.from(values);
-  }, [incidents]);
+  }, [incidents, securityEvents]);
 
   const filteredAlerts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -217,6 +261,7 @@ export const AlertsPage = ({
         alert.device,
         alert.severity,
         alert.status,
+        alert.eventCode,
         alert.details,
         alert.recommendedAction,
       ];
@@ -235,25 +280,22 @@ export const AlertsPage = ({
         statusFilter === "ALL" ||
         String(alert.status).toUpperCase() === statusFilter;
 
-      return matchesSearch && matchesSeverity && matchesStatus;
+      const matchesEventType =
+        eventTypeFilter === "ALL" ||
+        (alert.kind === "SECURITY_EVENT" && alert.eventCode === eventTypeFilter);
+
+      return matchesSearch && matchesSeverity && matchesStatus && matchesEventType;
     });
-  }, [alerts, searchQuery, severityFilter, statusFilter]);
+  }, [alerts, searchQuery, severityFilter, statusFilter, eventTypeFilter]);
 
-  const totalCount = alerts.length;
+  const totalCount = recordMetrics.totalIncidents;
+  const criticalCount = recordMetrics.criticalIncidents;
+  const openCount = recordMetrics.openIncidents;
+  const unresolvedCount = recordMetrics.activeUnresolvedIncidents;
+  const securityEventCount = recordMetrics.totalSecurityEvents;
+  const pendingContainmentCount = recordMetrics.pendingContainmentRequests;
 
-  const criticalCount = alerts.filter(
-    (alert) =>
-      String(alert.severity).toUpperCase() === "CRITICAL" &&
-      String(alert.status).toUpperCase() !== "RESOLVED",
-  ).length;
-
-  const openCount = alerts.filter(
-    (alert) => String(alert.status).toUpperCase() === "OPEN",
-  ).length;
-
-  const unresolvedCount = alerts.filter(
-    (alert) => String(alert.status).toUpperCase() !== "RESOLVED",
-  ).length;
+  const eventTypeOptions = useMemo(() => [...new Set(securityEvents.map(event => event?.eventCode).filter(Boolean))], [securityEvents]);
 
   const getSeverityStyle = (severity) => {
     switch (String(severity).toUpperCase()) {
@@ -278,6 +320,14 @@ export const AlertsPage = ({
         return "border-orange-500 text-orange-400 bg-orange-500/10";
       case "RESOLVED":
         return "border-emerald-500 text-emerald-400 bg-emerald-500/10";
+      case "CONFIRMED":
+        return "border-emerald-500 text-emerald-400 bg-emerald-500/10";
+      case "PENDING":
+        return "border-amber-500 text-amber-300 bg-amber-500/10";
+      case "FAILED":
+      case "UNSUPPORTED":
+      case "EXPIRED":
+        return "border-red-500 text-red-400 bg-red-500/10";
       default:
         return "border-gray-500 text-gray-400 bg-gray-500/10";
     }
@@ -399,7 +449,7 @@ export const AlertsPage = ({
   };
 
   const enableNotifications=async()=>{if(!('Notification' in window)){setNotificationPermission('unsupported');return;}const permission=await Notification.requestPermission();setNotificationPermission(permission);};
-  const acknowledgeAlert=async alert=>{const id=getIncidentId(alert);if(!id)return;setActionError('');setInvestigatingId(id);try{const result=await requestApi(`/api/incidents/${encodeURIComponent(id)}`,{method:'PATCH',body:{status:'INVESTIGATING',notes:'Acknowledged from the security alert inbox.'}});setSelectedAlert(current=>current?{...current,...result.incident,status:'INVESTIGATING'}:current);await onRefreshData?.();}catch(error){setActionError(error.message||'Unable to acknowledge this incident.');}finally{setInvestigatingId(null);}};
+  const acknowledgeAlert=async alert=>{if(alert?.kind!=='INCIDENT')return;const id=getIncidentId(alert);if(!id)return;setActionError('');setInvestigatingId(id);try{const result=await requestApi(`/api/incidents/${encodeURIComponent(id)}`,{method:'PATCH',body:{status:'INVESTIGATING',notes:'Acknowledged from the security alert inbox.'}});setSelectedAlert(current=>current?{...current,...result.incident,status:'INVESTIGATING'}:current);await onRefreshData?.();}catch(error){setActionError(error.message||'Unable to acknowledge this incident.');}finally{setInvestigatingId(null);}};
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-5 px-5 pb-10 pt-5 text-[#F4F7FA] sm:px-8 lg:px-12">
@@ -442,19 +492,19 @@ export const AlertsPage = ({
               <span className="block text-[#67E8F9]">Warnings</span>
             </h1>
             <p className="mt-4 max-w-2xl text-[14px] leading-6 text-[#A7B0BA]">
-              Security alerts are generated dynamically from persisted incident records and current employee risk state.
+              Security alerts combine persisted threat incidents with separately tracked containment and restoration events.
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-2.5">
               <span className="rounded-full border border-[#67E8F9]/25 bg-[#67E8F9]/5 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[#67E8F9]">Threat Triage</span>
               <span className="rounded-full border border-[#D4AF37]/25 bg-[#D4AF37]/5 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[#D4AF37]">Behavioral Risk</span>
-              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[#7F8A96]">{unresolvedCount} Active</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[#7F8A96]">{unresolvedCount} Active incidents</span>
               <button type="button" onClick={enableNotifications} disabled={notificationPermission==='granted'||notificationPermission==='unsupported'} className="rounded-full border border-cyan-700/50 px-3 py-1.5 text-[11px] text-cyan-200 disabled:opacity-50">{notificationPermission==='granted'?'Browser notifications enabled':notificationPermission==='denied'?'Browser notifications blocked':notificationPermission==='unsupported'?'Notifications unavailable':'Enable browser notifications'}</button>
             </div>
           </div>
 
           <div className="absolute bottom-7 right-7 hidden items-center gap-3 lg:flex">
             <div className="rounded-xl border border-[#D4AF37]/25 bg-[#070C12]/90 px-4 py-2.5">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-[#7F8A96]">Active Unresolved</div>
+              <div className="text-[10px] uppercase tracking-[0.16em] text-[#7F8A96]">Active incidents</div>
               <div className="mt-1 text-lg font-medium text-[#D4AF37]">{unresolvedCount}</div>
             </div>
             <button
@@ -477,7 +527,7 @@ export const AlertsPage = ({
             type="text"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search incident ID, employee, device..."
+            placeholder="Search incident ID, event type, employee, device..."
             className="w-full rounded-xl border border-white/10 bg-[#070C12] pl-10 pr-3 py-2.5 text-[14px] text-[#F4F7FA] outline-none transition-all duration-300 placeholder:text-[#59636E] hover:border-[#67E8F9]/30 focus:border-[#67E8F9]/60 focus:ring-1 focus:ring-[#67E8F9]/15"
           />
 
@@ -521,16 +571,36 @@ export const AlertsPage = ({
             </select>
           </div>
 
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400">EVENT:</span>
+            <select
+              value={eventTypeFilter}
+              onChange={(event) => setEventTypeFilter(event.target.value)}
+              className="rounded-xl border border-white/10 bg-[#070C12] px-3 py-2 text-[13px] text-[#F4F7FA] outline-none transition-all duration-300 hover:border-[#67E8F9]/30 focus:border-[#67E8F9]/60"
+            >
+              <option value="ALL">All Records</option>
+              {eventTypeOptions.map((eventType) => (
+                <option key={eventType} value={eventType}>{eventType.replaceAll("_", " ")}</option>
+              ))}
+            </select>
+          </div>
+
           <span className="px-3 py-1.5 rounded-full border border-[#D4AF37]/35 bg-[#D4AF37]/5 text-[#D4AF37]">
-            {totalCount} TOTAL
+            {totalCount} INCIDENTS
           </span>
 
           <span className="px-3 py-1.5 rounded-full border border-red-500/30 bg-red-500/5 text-red-400">
-            {criticalCount} CRITICAL
+            {criticalCount} CRITICAL INCIDENTS
           </span>
 
           <span className="px-3 py-1.5 rounded-full border border-orange-500/30 bg-orange-500/5 text-orange-400">
-            {openCount} OPEN
+            {openCount} OPEN INCIDENTS
+          </span>
+          <span className="px-3 py-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/5 text-cyan-300">
+            {securityEventCount} SECURITY EVENTS
+          </span>
+          <span className="px-3 py-1.5 rounded-full border border-amber-500/30 bg-amber-500/5 text-amber-300">
+            {pendingContainmentCount} PENDING CONTAINMENT
           </span>
         </div>
       </div>
@@ -546,7 +616,7 @@ export const AlertsPage = ({
               <tr>
                 <th className="py-4 px-4 text-center">SEVERITY</th>
 
-                <th className="py-4 px-4">INCIDENT</th>
+                <th className="py-4 px-4">RECORD</th>
 
                 <th className="py-4 px-4">EMPLOYEE</th>
 
@@ -583,6 +653,7 @@ export const AlertsPage = ({
 
                     <td className="py-4 px-4">
                       <span className="text-sm font-medium block text-white">
+                        <span className="mr-2 inline-block rounded-full border border-white/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[#67E8F9]">{alert.kind === "SECURITY_EVENT" ? "Security event" : "Incident"}</span>
                         {alert.type}
                       </span>
 
@@ -672,7 +743,7 @@ export const AlertsPage = ({
                     colSpan={9}
                     className="py-14 text-center text-xs text-gray-500"
                   >
-                    No incidents match the current criteria.
+                    No incidents or security events match the current criteria.
                   </td>
                 </tr>
               )}
@@ -689,7 +760,7 @@ export const AlertsPage = ({
             <div className="flex items-center justify-between border-b border-white/10 pb-5">
               <div>
                 <span className="text-[12px] font-mono tracking-[0.12em] text-[#67E8F9]">
-                  INCIDENT INVESTIGATION
+                  {selectedAlert.kind === "SECURITY_EVENT" ? "SECURITY EVENT" : "INCIDENT INVESTIGATION"}
                 </span>
 
                 <h2 className="text-2xl font-medium mt-1 tracking-tight">
@@ -711,10 +782,10 @@ export const AlertsPage = ({
             </div>
 
             <div className="space-y-5 mt-6">
-              <div className="flex flex-wrap gap-3">
+              <div className={`flex flex-wrap gap-3 ${selectedAlert.kind === "SECURITY_EVENT" ? "[&>button:first-child]:hidden" : ""}`}>
                 {selectedAlert.status!=='INVESTIGATING'&&selectedAlert.status!=='RESOLVED'&&<button disabled={investigatingId===getIncidentId(selectedAlert)} className="rounded-lg border border-amber-700 px-4 py-2 text-amber-200 disabled:opacity-50" onClick={()=>acknowledgeAlert(selectedAlert)}>{investigatingId===getIncidentId(selectedAlert)?'Acknowledging…':'Acknowledge & investigate'}</button>}
-                <button className="rounded-lg border border-cyan-800 px-4 py-2 text-cyan-200" onClick={() => onSelectIncident?.(selectedAlert.id)}>Open incident</button>
-                <button className="rounded-lg border border-slate-600 px-4 py-2" onClick={() => onSelectUser?.(selectedAlert.userId)}>Employee profile</button>
+                {selectedAlert.kind === "INCIDENT" && <button className="rounded-lg border border-cyan-800 px-4 py-2 text-cyan-200" onClick={() => onSelectIncident?.(selectedAlert.id)}>Open incident</button>}
+                {selectedAlert.userId && <button className="rounded-lg border border-slate-600 px-4 py-2" onClick={() => onSelectUser?.(selectedAlert.userId)}>Employee profile</button>}
               </div>
               <div className="flex gap-2">
                 <span
@@ -737,7 +808,7 @@ export const AlertsPage = ({
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-4 rounded-xl border border-white/10 bg-white/[0.015] transition-all duration-300 hover:border-[#D4AF37]/30">
                   <span className="text-[12px] text-gray-500 block mb-1">
-                    INCIDENT RISK
+                    {selectedAlert.kind === "SECURITY_EVENT" ? "EVENT RISK" : "INCIDENT RISK"}
                   </span>
 
                   <span className="text-2xl font-bold text-[#D4AF37]">

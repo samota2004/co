@@ -14,6 +14,7 @@ import {sendExport} from '../services/export-service.js';
 import {createLiveModelDataReadiness} from '../services/ml-data-readiness.js';
 import {refreshDailyRiskSnapshot} from '../services/daily-risk-snapshot-service.js';
 import {createContainmentNotifications,broadcastSecurityNotifications} from '../services/security-notification-service.js';
+import {getSecurityEventFeed} from '../services/security-events-service.js';
 const router=Router();router.use(requireAuth);
 const subjectScope=req=>({user:userScope(req.user)});
 const decorateEvent=e=>({...e,eventType:e.type,userName:e.user?.name,ipAddress:e.ip,...(e.metadata?.evaluation||{}),policyAction:e.metadata?.decision,xaiReasons:e.metadata?.ml?.xai_reasons||[],mlThreatProbability:e.metadata?.ml?.threat_probability??null});
@@ -44,6 +45,31 @@ router.get('/users/:id',api(async req=>{
   const dailyRiskHistory=await prisma.dailyRiskSnapshot.findMany({where:{userId:u.id,companyId,day:{gte:new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-89*86400000)}},orderBy:{day:'asc'},take:90});
   const user=await prisma.user.findFirst({where:{id:u.id,companyId,deletedAt:null},include:monitoringInclude()});
   return{user:monitoredUser(user),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),dailyRiskHistory,baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents,sessions:sessions.map(session=>({...session,status:'ACTIVE'})),loginHistory,accessRequests,auditEvents};
+}));
+router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
+  const u=await scopedUser(prisma,req.user,req.params.id);
+  if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','Employee restoration cannot target an administrator.');
+  const [devices,commands,incidents]=await Promise.all([
+    prisma.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,name:true,platform:true,lastSeen:true,enrolledAt:true},orderBy:{name:'asc'}}),
+    prisma.endpointEnforcementCommand.findMany({where:{companyId:req.user.companyId,userId:u.id,action:{in:['BLOCK','ALLOW']}},include:{device:{select:{id:true,name:true,platform:true}}},orderBy:{createdAt:'desc'},take:100}),
+    prisma.incident.findMany({where:{userId:u.id,user:{companyId:req.user.companyId,deletedAt:null},severity:'CRITICAL'},select:{id:true,incidentId:true,title:true,severity:true,status:true,createdAt:true,resolvedAt:true,resolutionNotes:true},orderBy:{createdAt:'desc'},take:20}),
+  ]);
+  const confirmedContainmentDeviceIds=new Set(commands.filter(command=>command.action==='BLOCK'&&command.status==='SUCCEEDED').map(command=>command.deviceId));
+  const unresolvedCritical=incidents.some(incident=>!['RESOLVED','FALSE_POSITIVE','REJECTED'].includes(incident.status));
+  const reviewedCritical=incidents.some(incident=>['RESOLVED','FALSE_POSITIVE','REJECTED'].includes(incident.status));
+  const hasConfirmedContainment=confirmedContainmentDeviceIds.size>0;
+  return{
+    user:publicUser(u),
+    endpoints:devices.map(device=>({
+      ...device,
+      confirmationStatus:confirmedContainmentDeviceIds.has(device.id)?'CONTAINMENT_CONFIRMED':'CONTAINMENT_NOT_CONFIRMED',
+      lastSeen:device.lastSeen||null,
+    })),
+    commands,
+    incidents,
+    canRestore:['RESTRICTED','FROZEN'].includes(u.status)&&hasConfirmedContainment&&!unresolvedCritical&&reviewedCritical,
+    requirements:{mainAdmin:true,freshMfa:true,administrativeReason:true,hasConfirmedContainment,hasUnresolvedCriticalIncident:unresolvedCritical,hasReviewedCriticalIncident:reviewedCritical},
+  };
 }));
 async function userChanges(req,create=false,current=null){
   const b=req.body||{},fields={};
@@ -96,8 +122,9 @@ router.post('/users/:id/freeze',requireSecurityAdmin,api(async req=>{
     const devices=await tx.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,lastSeen:true}});
     const commands=devices.map(d=>({companyId:req.user.companyId,userId:u.id,deviceId:d.id,action:'BLOCK',status:d.lastSeen&&Date.now()-d.lastSeen.getTime()<=300000?'PENDING':'PENDING_OFFLINE',expiresAt:new Date(Date.now()+120000),reason,createdById:req.user.id}));
     if(commands.length)await tx.endpointEnforcementCommand.createMany({data:commands});
+    const persistedCommands=commands.length?await tx.endpointEnforcementCommand.findMany({where:{companyId:req.user.companyId,userId:u.id,action:'BLOCK',createdById:req.user.id,createdAt:{gte:new Date(Date.now()-5000)}},orderBy:{createdAt:'desc'},take:commands.length,select:{commandId:true,deviceId:true}}):[];
     await audit(tx,req.user,'ACCOUNT_CONTAINMENT_REQUESTED',{reason,deviceCount:commands.length},u.id);
-    const notifications=await createContainmentNotifications(tx,{companyId:req.user.companyId,user:u,type:'CONTAINMENT_REQUESTED',severity:'CRITICAL',title:'Containment requested',message:`${u.name}: Main Admin containment request is pending endpoint OS confirmation.`,dedupeKey:`containment:manual-request:${req.user.id}:${commands.map(command=>command.deviceId).sort().join(',')}:${Date.now()}`,metadata:{automatic:false,requestedById:req.user.id,deviceCount:commands.length}});
+    const notifications=await createContainmentNotifications(tx,{companyId:req.user.companyId,user:u,type:'CONTAINMENT_REQUESTED',severity:'CRITICAL',title:'Containment requested',message:`${u.name}: Main Admin containment request is pending endpoint OS confirmation.`,dedupeKey:`containment:manual-request:${req.user.id}:${commands.map(command=>command.deviceId).sort().join(',')}:${Date.now()}`,metadata:{automatic:false,requestedById:req.user.id,deviceCount:commands.length,commandIds:persistedCommands.map(command=>command.commandId)}});
     return{updated,commands:await tx.endpointEnforcementCommand.findMany({where:{userId:u.id,action:'BLOCK',createdById:req.user.id},orderBy:{createdAt:'desc'},take:commands.length}),notifications};
   });
   sseManager.broadcastAccountStatus(u.id,'RESTRICTED',publicUser(result.updated));
@@ -115,12 +142,15 @@ router.post('/users/:id/unfreeze',requireMainAdmin,requireFreshMfa,api(async req
     const devices=await tx.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,lastSeen:true}});
     const blocked=[];for(const d of devices){const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:d.id,userId:u.id,action:'BLOCK',status:'SUCCEEDED'},orderBy:{acknowledgedAt:'desc'}});if(prior)blocked.push({device:d,prior});}
     if(!blocked.length)throw new SecurityError(409,'NO_CONFIRMED_CONTAINMENT','No enrolled Windows device has confirmed OS containment.');
+    const pendingRestoration=await tx.endpointEnforcementCommand.count({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',deviceId:{in:blocked.map(({device})=>device.id)},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:new Date()}}});
+    if(pendingRestoration===blocked.length)throw new SecurityError(409,'RESTORATION_ALREADY_PENDING','Endpoint restoration is already awaiting acknowledgment.');
     await tx.endpointEnforcementCommand.updateMany({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'NEW_RESTORATION_REVIEW'}});
     const rows=blocked.map(({device})=>({companyId:req.user.companyId,userId:u.id,deviceId:device.id,action:'ALLOW',status:device.lastSeen&&Date.now()-device.lastSeen.getTime()<=300000?'PENDING':'PENDING_OFFLINE',expiresAt:new Date(Date.now()+120000),reason,createdById:req.user.id}));
     await tx.endpointEnforcementCommand.createMany({data:rows});
     await tx.session.updateMany({where:{userId:u.id,revokedAt:null},data:{revokedAt:new Date()}});
     await audit(tx,req.user,'ACCOUNT_RESTORATION_AUTHORIZED',{reason,deviceCount:rows.length,incidentIds:(await tx.incident.findMany({where:{userId:u.id,severity:'CRITICAL',status:{in:['RESOLVED','FALSE_POSITIVE','REJECTED']}},select:{id:true}})).map(x=>x.id)},u.id);
-    const notifications=await createContainmentNotifications(tx,{companyId:req.user.companyId,user:u,type:'RESTORATION_REQUESTED',severity:'HIGH',title:'Restoration authorized',message:`${u.name}: fresh Main Admin MFA authorized restoration. Endpoint OS confirmation is pending.`,dedupeKey:`containment:restore-request:${req.user.id}:${rows.map(command=>command.deviceId).sort().join(',')}:${Date.now()}`,metadata:{requestedById:req.user.id,deviceCount:rows.length}});
+    const persistedCommands=await tx.endpointEnforcementCommand.findMany({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',createdById:req.user.id,createdAt:{gte:new Date(Date.now()-5000)}},orderBy:{createdAt:'desc'},take:rows.length,select:{commandId:true}});
+    const notifications=await createContainmentNotifications(tx,{companyId:req.user.companyId,user:u,type:'RESTORATION_REQUESTED',severity:'HIGH',title:'Restoration authorized',message:`${u.name}: fresh Main Admin MFA authorized restoration. Endpoint OS confirmation is pending.`,dedupeKey:`containment:restore-request:${req.user.id}:${rows.map(command=>command.deviceId).sort().join(',')}:${Date.now()}`,metadata:{requestedById:req.user.id,deviceCount:rows.length,commandIds:persistedCommands.map(command=>command.commandId)}});
     return{commands:await tx.endpointEnforcementCommand.findMany({where:{userId:u.id,action:'ALLOW',createdById:req.user.id},orderBy:{createdAt:'desc'},take:rows.length}),notifications};
   });
   broadcastSecurityNotifications(result.notifications);
@@ -190,6 +220,7 @@ for(const [action,status]of [['approve','APPROVED'],['reject','REJECTED']])route
 }));
 
 router.get('/incidents',api(async req=>{if(!isAdmin(req.user)&&req.user.roleCode!=='MANAGER')throw new SecurityError(403,'INVESTIGATION_DENIED','Investigation access required.');return{incidents:await prisma.incident.findMany({where:subjectScope(req),include:{user:{select:{name:true,departmentCode:true}}},orderBy:{createdAt:'desc'},...pagination(req.query)})};}));
+router.get('/security-events',requireSecurityAdmin,api(async req=>getSecurityEventFeed(prisma,req.user,req.query)));
 router.get('/incidents/export',requireSecurityAdmin,async(req,res,next)=>{try{const where={user:userScope(req.user)};if(req.query.status&&req.query.status!=='ALL'){if(!['OPEN','UNDER_REVIEW','APPROVED','REJECTED','RESOLVED','FALSE_POSITIVE','INVESTIGATING','CONTAINED','NEW'].includes(req.query.status))throw new SecurityError(400,'INVALID_STATUS','Invalid incident status filter.');where.status=req.query.status;}if(req.query.severity&&req.query.severity!=='ALL'){if(!['LOW','MEDIUM','HIGH','CRITICAL'].includes(req.query.severity))throw new SecurityError(400,'INVALID_SEVERITY','Invalid incident severity filter.');where.severity=req.query.severity;}const rows=await prisma.incident.findMany({where,orderBy:{createdAt:'desc'},take:5000});await audit(prisma,req.user,'INCIDENT_EXPORT',{rows:rows.length,limit:5000});sendExport(req,res,rows,['id','title','severity','status','userId','riskScore','createdAt','recommendedAction','resolutionNotes'],'cyberorbit-incidents');}catch(e){next(e);}});
 router.get('/incidents/:id',api(async req=>{if(!isAdmin(req.user)&&req.user.roleCode!=='MANAGER')throw new SecurityError(403,'INVESTIGATION_DENIED','Investigation access required.');const incident=await prisma.incident.findFirst({where:{id:req.params.id,...subjectScope(req)},include:{activityEvents:true}});if(!incident)throw new SecurityError(404,'INCIDENT_NOT_FOUND','Incident not found.');return{incident};}));
 router.post('/incidents/:id/ai-explain',requireSecurityAdmin,api(async req=>{const i=await prisma.incident.findFirst({where:{id:req.params.id,user:userScope(req.user)}});if(!i)throw new SecurityError(404,'INCIDENT_NOT_FOUND','Incident not found.');return{explanation:i.aiExplanation||'No recorded assessment explanation is available.',aiExplanation:i.aiExplanation||'No recorded assessment explanation is available.',source:'stored-policy-factors',advisory:true};}));

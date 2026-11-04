@@ -209,7 +209,22 @@ export class EndpointService {
       let accountControlAck=null;
       let accountStatus=d.user.status;
       const notifications=[];
-      if(enforcement)await enforcement.updateMany({where:{deviceId:d.id,action:{in:['BLOCK','ALLOW']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:observedAt}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
+      const auditRestorationOutcome=async(command,action,details={})=>{
+        if(command?.action!=='ALLOW'||!command.createdById)return;
+        const administrator=await tx.user.findFirst({where:{id:command.createdById,companyId:d.companyId},select:{id:true,email:true,companyId:true}});
+        if(administrator)await audit(tx,administrator,action,{...details,commandId:command.commandId,deviceId:d.id},d.userId);
+      };
+      const expiredCommands=enforcement?await enforcement.findMany({where:{deviceId:d.id,action:{in:['BLOCK','ALLOW']},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{lte:observedAt}},select:{id:true,commandId:true,action:true,deviceId:true,createdById:true}}):[];
+      if(expiredCommands.length){
+        await enforcement.updateMany({where:{id:{in:expiredCommands.map(command=>command.id)}},data:{status:'EXPIRED',resultCode:'COMMAND_EXPIRED'}});
+        for(const action of ['BLOCK','ALLOW']){
+          const commands=expiredCommands.filter(command=>command.action===action);
+          if(!commands.length)continue;
+          const restoration=action==='ALLOW';
+          if(restoration)for(const command of commands)await auditRestorationOutcome(command,'ACCOUNT_RESTORATION_EXPIRED',{resultCode:'COMMAND_EXPIRED',status:'EXPIRED'});
+          notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:restoration?'RESTORATION_FAILED':'CONTAINMENT_FAILED',severity:restoration?'HIGH':'CRITICAL',title:restoration?'Restoration expired':'Containment expired',message:restoration?`${d.user.name}: endpoint restoration confirmation expired. The account remains restricted until a fresh approved restoration request is acknowledged.`:`${d.user.name}: endpoint containment confirmation expired. OS containment remains unconfirmed.`,dedupeKey:`containment:expired:${action}:${commands.map(command=>command.commandId).sort().join(',')}`,metadata:{deviceId:d.id,commandIds:commands.map(command=>command.commandId),action,status:'EXPIRED'}}));
+        }
+      }
       // Only the authenticated enrollment's employee determines the OS target.
       // Keep device credentials valid while frozen so an administrator can restore access.
       if(report&&enforcement){
@@ -229,10 +244,12 @@ export class EndpointService {
           if(success&&command.action==='ALLOW'){
             const blocked=await enforcement.findMany({where:{userId:d.userId,action:'BLOCK',status:'SUCCEEDED'},select:{deviceId:true},distinct:['deviceId']});
             const states=await Promise.all(blocked.map(item=>enforcement.findFirst({where:{deviceId:item.deviceId,userId:d.userId,action:'ALLOW'},orderBy:{createdAt:'desc'}})));
-            if(blocked.length&&states.every(item=>item?.status==='SUCCEEDED')){const restored=await tx.user.updateMany({where:{id:d.userId,companyId:d.companyId,status:{in:['FROZEN','RESTRICTED']}},data:{status:'ACTIVE',authVersion:{increment:1}}});if(restored.count){accountStatus='ACTIVE';await tx.session.updateMany({where:{userId:d.userId,revokedAt:null},data:{revokedAt:new Date()}});await audit(tx,d.user,'ACCOUNT_RESTORATION_CONFIRMED',{deviceId:d.id,commandId:command.commandId,resultCode:report.resultCode},d.userId);notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:'RESTORATION_CONFIRMED',severity:'HIGH',title:'Endpoint restoration confirmed',message:`${d.user.name}: all targeted Windows endpoints confirmed OS restoration.`,dedupeKey:`containment:allowed:${command.commandId}`,metadata:{deviceId:d.id,commandId:command.commandId,resultCode:report.resultCode}}));}}
+            if(blocked.length&&states.every(item=>item?.status==='SUCCEEDED')){const restored=await tx.user.updateMany({where:{id:d.userId,companyId:d.companyId,status:{in:['FROZEN','RESTRICTED']}},data:{status:'ACTIVE',authVersion:{increment:1}}});if(restored.count){accountStatus='ACTIVE';await tx.session.updateMany({where:{userId:d.userId,revokedAt:null},data:{revokedAt:new Date()}});await auditRestorationOutcome(command,'ACCOUNT_RESTORATION_CONFIRMED',{resultCode:report.resultCode,status:'SUCCEEDED'});notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:'RESTORATION_CONFIRMED',severity:'HIGH',title:'Endpoint restoration confirmed',message:`${d.user.name}: all targeted Windows endpoints confirmed OS restoration.`,dedupeKey:`containment:allowed:${command.commandId}`,metadata:{deviceId:d.id,commandId:command.commandId,resultCode:report.resultCode}}));}}
           }
           if(!success&&!pending){
-            notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:unsupported?'CONTAINMENT_UNSUPPORTED':'CONTAINMENT_FAILED',severity:'CRITICAL',title:unsupported?'Endpoint containment unsupported':'Endpoint containment failed',message:`${d.user.name}: endpoint ${d.name} reported ${report.resultCode} while processing ${command.action}. OS containment remains unconfirmed.`,dedupeKey:`containment:result:${command.commandId}:${report.resultCode}`,metadata:{deviceId:d.id,commandId:command.commandId,action:command.action,resultCode:report.resultCode,status:unsupported?'UNSUPPORTED':'FAILED'}}));
+            const restoration=command.action==='ALLOW';
+            if(restoration)await auditRestorationOutcome(command,'ACCOUNT_RESTORATION_FAILED',{resultCode:report.resultCode,status:unsupported?'UNSUPPORTED':'FAILED'});
+            notifications.push(...await createContainmentNotifications(tx,{companyId:d.companyId,user:d.user,type:restoration?(unsupported?'RESTORATION_UNSUPPORTED':'RESTORATION_FAILED'):(unsupported?'CONTAINMENT_UNSUPPORTED':'CONTAINMENT_FAILED'),severity:restoration?'HIGH':'CRITICAL',title:restoration?(unsupported?'Endpoint restoration unsupported':'Endpoint restoration failed'):(unsupported?'Endpoint containment unsupported':'Endpoint containment failed'),message:restoration?`${d.user.name}: endpoint ${d.name} reported ${report.resultCode} while processing restoration. The account remains restricted.`:`${d.user.name}: endpoint ${d.name} reported ${report.resultCode} while processing ${command.action}. OS containment remains unconfirmed.`,dedupeKey:`containment:result:${command.commandId}:${report.resultCode}`,metadata:{deviceId:d.id,commandId:command.commandId,action:command.action,resultCode:report.resultCode,status:unsupported?'UNSUPPORTED':'FAILED'}}));
           }
         }
       }

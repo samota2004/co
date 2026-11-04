@@ -11,6 +11,8 @@ test('console routes render with real company records; alerts open the selected 
  const f=await deviceFixture();let server,b,sse,profile;let failIncidents=false;
  try {
   const incident=await f.prisma.incident.create({data:{incidentId:'UI-REGRESSION',title:'Unusual download review',userId:f.employee.id,userEmail:f.employee.email,severity:'HIGH',status:'OPEN',riskScore:78,contributingFactors:['Download volume exceeded the approved baseline'],aiExplanation:'Recorded policy evidence for the isolated browser fixture.'}});
+  await f.prisma.user.update({where:{id:f.employee2.id},data:{status:'FROZEN'}});
+  await f.prisma.securityNotification.create({data:{companyId:'A',recipientId:f.admin.id,targetUserId:f.employee.id,dedupeKey:'containment:ui-regression',type:'CONTAINMENT_REQUESTED',severity:'CRITICAL',title:'Containment requested',message:'Main Admin containment request is pending endpoint OS confirmation.',metadata:{automatic:false,deviceCount:0}}});
   const {default:api}=await import('../routes/index.js');
   const {generateJwtToken}=await import('../middleware/auth.js');
   sse=(await import('../services/sse.js')).sseManager;
@@ -40,6 +42,14 @@ test('console routes render with real company records; alerts open the selected 
     assert.equal(dashboardText.includes('Administrator Intelligence'),true);
    }
    if(['incidents','alerts'].includes(route))await waitUntil(b,"document.querySelector('main')?.textContent.includes('Unusual download review')",'incident from PostgreSQL');
+   if(route==='alerts')await waitUntil(b,"document.querySelector('main')?.textContent.includes('Containment requested')",'containment event from PostgreSQL');
+   if(route==='employees'){
+    await waitUntil(b,"document.querySelector('main')?.textContent.includes('RESTORE ACCESS')",'Main Admin restoration action');
+    const employeeText=await b.evaluate("Array.from(document.querySelectorAll('main tbody tr')).find(row=>row.textContent.includes('Assigned employee'))?.textContent||''");
+    assert.equal(employeeText.includes('FREEZE'),true,'ACTIVE employees expose FREEZE');
+    const frozenText=await b.evaluate("Array.from(document.querySelectorAll('main tbody tr')).find(row=>row.textContent.includes('Second employee'))?.textContent||''");
+    assert.equal(frozenText.includes('RESTORE ACCESS'),true,'FROZEN employees expose RESTORE ACCESS');
+   }
    assert.equal(await b.evaluate("document.body.textContent.includes('This page could not be displayed')"),false,route);
    if(['incidents','ml-analytics','dashboard'].includes(route)){
     if(route==='ml-analytics')await waitUntil(b,"document.querySelector('.model-summary')",'saved model report');

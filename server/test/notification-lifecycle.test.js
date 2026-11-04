@@ -36,6 +36,28 @@ test('unsupported containment acknowledgement persists one scoped failure notifi
  }finally{await f.close();}
 });
 
+test('restoration failures and expirations are persisted without activating the account',{timeout:60000},async()=>{
+ const f=await deviceFixture();
+ try{
+  const {EndpointService,hashSecret}=await import('../services/endpoint-service.js');
+  await f.prisma.user.update({where:{id:f.employee.id},data:{status:'FROZEN'}});
+  const credential=randomBytes(32).toString('base64url');
+  const device=await f.prisma.endpointDevice.create({data:{companyId:'A',userId:f.employee.id,name:'Restoration lifecycle fixture',platform:'win32',mappedIdentity:'S-1-5-21-22-33-44-1002',credentialHash:hashSecret(credential),enrolledAt:new Date(),lastSeen:new Date(),agentVersion:'fixture',health:{queueEvents:0,queueBytes:0,droppedEvents:0,collectors:{},helperLastSeen:null,paused:false},config:{paused:false}}});
+  const failed=await f.prisma.endpointEnforcementCommand.create({data:{companyId:'A',userId:f.employee.id,deviceId:device.id,action:'ALLOW',status:'PENDING',expiresAt:new Date(Date.now()+120000),reason:'Test restoration failure',createdById:f.admin.id}});
+  const service=new EndpointService(f.prisma),health={queueEvents:0,queueBytes:0,droppedEvents:0,collectors:{},helperLastSeen:null,paused:false};
+  await service.heartbeat(credential,{agentVersion:'fixture',health,accountControlReport:{commandId:failed.commandId,resultCode:'ACCESS_DENIED',reportedAt:new Date().toISOString()}},'127.0.0.1');
+  assert.equal((await f.prisma.endpointEnforcementCommand.findUnique({where:{id:failed.id}})).status,'FAILED');
+  assert.equal(await f.prisma.securityNotification.count({where:{targetUserId:f.employee.id,type:'RESTORATION_FAILED'}}),1);
+  assert.equal(await f.prisma.auditLog.count({where:{userId:f.employee.id,action:'ACCOUNT_RESTORATION_FAILED'}}),1);
+  assert.equal((await f.prisma.user.findUnique({where:{id:f.employee.id}})).status,'FROZEN');
+  const expired=await f.prisma.endpointEnforcementCommand.create({data:{companyId:'A',userId:f.employee.id,deviceId:device.id,action:'ALLOW',status:'PENDING',expiresAt:new Date(Date.now()-1000),reason:'Test restoration expiry',createdById:f.admin.id}});
+  await service.heartbeat(credential,{agentVersion:'fixture',health},'127.0.0.1');
+  assert.equal((await f.prisma.endpointEnforcementCommand.findUnique({where:{id:expired.id}})).status,'EXPIRED');
+  assert.equal(await f.prisma.securityNotification.count({where:{targetUserId:f.employee.id,type:'RESTORATION_FAILED'}}),2);
+  assert.equal(await f.prisma.auditLog.count({where:{userId:f.employee.id,action:'ACCOUNT_RESTORATION_EXPIRED'}}),1);
+ }finally{await f.close();}
+});
+
 test('admin notifications are recipient-scoped, persisted, listed, and read state updates unread count',{timeout:60000},async()=>{
  const f=await deviceFixture();let server;
  try{
