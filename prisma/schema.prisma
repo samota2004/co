@@ -492,6 +492,7 @@ model EndpointEnforcementCommand {
 model Incident {
   id          String           @id @default(cuid())
   incidentId  String           @unique
+  companyId   String           @default("legacy")
   title       String
   description String?
   severity    IncidentSeverity @default(MEDIUM)
@@ -509,6 +510,10 @@ model Incident {
   resolutionNotes     String?
   resolvedAt          DateTime?
   resolvedBy          String?
+  reviewedAt          DateTime?
+  reviewedBy          String?
+  reviewOutcome       String?
+  reviewNotes         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -516,6 +521,7 @@ model Incident {
   activityEvents ActivityEvent[]
 
   @@index([userId])
+  @@index([companyId, status])
   @@index([status])
   @@index([severity])
   @@index([createdAt])

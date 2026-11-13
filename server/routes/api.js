@@ -1,5 +1,4 @@
 import express from "express";
-
 import authRoutes from "./auth.js";
 import userRoutes from "./users.js";
 import deviceRoutes from "./devices.js";

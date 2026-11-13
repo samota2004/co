@@ -2,53 +2,37 @@
 
 @layer base {
   :root {
-    /* =========================================================
-       CYBERORBIT — PREMIUM SOC DESIGN SYSTEM
-       ========================================================= */
-
-    /* Core backgrounds */
     --bg-main: #03070C;
     --bg-surface: #050A10;
     --bg-surface-elevated: #070C12;
 
-    /* Borders */
     --border-subtle: rgba(255, 255, 255, 0.08);
     --border-cyan: rgba(103, 232, 249, 0.45);
     --border-gold: rgba(212, 175, 55, 0.45);
 
-    /* Primary identity */
     --cyan: #67E8F9;
     --cyan-dark: #22B8CC;
     --cyan-light: #A5F3FC;
 
-    /* Secondary brand accent */
     --gold: #D4AF37;
     --gold-dark: #A98532;
     --gold-light: #E6D28A;
 
-    /* Typography */
     --text-main: #F4F7FA;
     --text-muted: #A7B0BA;
     --text-dim: #7F8A96;
 
-    /* Semantic colors */
     --success: #4ADE80;
     --warning: #FBBF24;
     --danger: #F87171;
 
-    /* AI / ML accent */
     --ai: #A78BFA;
 
-    /* Shadows */
     --shadow-subtle: 0 8px 30px rgba(0, 0, 0, 0.18);
     --shadow-card: 0 18px 60px rgba(0, 0, 0, 0.18);
     --shadow-cyan: 0 12px 40px rgba(103, 232, 249, 0.08);
     --shadow-gold: 0 12px 40px rgba(212, 175, 55, 0.07);
   }
-
-  /* =========================================================
-     BASE
-     ========================================================= */
 
   html {
     background: var(--bg-main);
@@ -58,7 +42,6 @@
   body {
     background-color: var(--bg-main);
     color: var(--text-main);
-
     font-family:
       "Plus Jakarta Sans",
       -apple-system,
@@ -66,16 +49,12 @@
       "Segoe UI",
       Roboto,
       sans-serif;
-
     transition:
       background-color 0.25s ease,
       color 0.25s ease;
-
     letter-spacing: -0.01em;
     margin: 0;
-
     min-height: 100vh;
-
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -84,10 +63,6 @@
     min-height: 100%;
   }
 
-  /*
-   * Keep the existing class available so components using it
-   * continue to work, but use the CyberOrbit typography system.
-   */
   .font-serif-display {
     font-family:
       "Plus Jakarta Sans",
@@ -97,10 +72,6 @@
       Roboto,
       sans-serif;
   }
-
-  /* =========================================================
-     UNIVERSAL INTERACTIVE & ACCENT HELPERS
-     ========================================================= */
 
   .border-gold {
     border-color: var(--gold);
@@ -162,10 +133,6 @@
     background-color: var(--bg-surface-elevated);
   }
 
-  /* =========================================================
-     PREMIUM SOC SURFACES
-     ========================================================= */
-
   .cyber-surface {
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
@@ -177,10 +144,6 @@
     border: 1px solid var(--border-subtle);
     box-shadow: var(--shadow-card);
   }
-
-  /* =========================================================
-     SLEEK MINIMALIST SHADOWS
-     ========================================================= */
 
   .shadow-subtle {
     box-shadow: var(--shadow-subtle);
@@ -197,10 +160,6 @@
   .shadow-gold {
     box-shadow: var(--shadow-gold);
   }
-
-  /* =========================================================
-     CARD HOVER
-     ========================================================= */
 
   .card-hover-gold {
     transition:
@@ -234,15 +193,10 @@
       0 0 24px rgba(103, 232, 249, 0.05);
   }
 
-  /* =========================================================
-     BUTTON / INTERACTIVE HELPERS
-     ========================================================= */
-
   .cyber-button-primary {
     background-color: var(--cyan);
     color: var(--bg-main);
     border: 1px solid var(--cyan);
-
     transition:
       transform 200ms ease,
       box-shadow 200ms ease,
@@ -259,7 +213,6 @@
     background-color: var(--bg-surface-elevated);
     color: var(--text-main);
     border: 1px solid var(--border-subtle);
-
     transition:
       transform 200ms ease,
       border-color 200ms ease,
@@ -276,7 +229,6 @@
     background-color: var(--gold);
     color: var(--bg-main);
     border: 1px solid var(--gold);
-
     transition:
       transform 200ms ease,
       box-shadow 200ms ease,
@@ -289,15 +241,10 @@
     box-shadow: 0 10px 30px rgba(212, 175, 55, 0.1);
   }
 
-  /* =========================================================
-     INPUT / FORM HELPERS
-     ========================================================= */
-
   .cyber-input {
     background-color: var(--bg-surface);
     color: var(--text-main);
     border: 1px solid var(--border-subtle);
-
     transition:
       border-color 200ms ease,
       box-shadow 200ms ease,
@@ -315,10 +262,6 @@
     background-color: var(--bg-surface-elevated);
   }
 
-  /* =========================================================
-     FOCUS ACCESSIBILITY
-     ========================================================= */
-
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
@@ -329,10 +272,6 @@
     box-shadow: 0 0 0 2px rgba(103, 232, 249, 0.12);
   }
 
-  /* =========================================================
-     SELECTION
-     ========================================================= */
-
   ::selection {
     background: var(--cyan);
     color: var(--bg-main);
@@ -342,10 +281,6 @@
     background: var(--cyan);
     color: var(--bg-main);
   }
-
-  /* =========================================================
-     SLEEK CUSTOM SCROLLBARS
-     ========================================================= */
 
   ::-webkit-scrollbar {
     width: 7px;
@@ -370,15 +305,10 @@
     background: var(--bg-main);
   }
 
-  /* Firefox */
   * {
     scrollbar-width: thin;
     scrollbar-color: rgba(103, 232, 249, 0.25) var(--bg-main);
   }
-
-  /* =========================================================
-     TABLE / DIVIDER HELPERS
-     ========================================================= */
 
   .cyber-divider {
     border-color: rgba(255, 255, 255, 0.08);
@@ -394,10 +324,6 @@
     background-color: rgba(103, 232, 249, 0.025);
     border-color: rgba(103, 232, 249, 0.12);
   }
-
-  /* =========================================================
-     SUBTLE CYBER GRID / ATMOSPHERE
-     ========================================================= */
 
   .cyber-grid {
     background-image:
@@ -431,10 +357,6 @@
       );
   }
 
-  /* =========================================================
-     STATUS HELPERS
-     ========================================================= */
-
   .status-success {
     color: var(--success);
     border-color: rgba(74, 222, 128, 0.25);
@@ -460,10 +382,6 @@
   }
 }
 
-/* =========================================================
-   GLOBAL DOCUMENT SIZING
-   ========================================================= */
-
 html,
 body,
 #root {
@@ -473,12 +391,6 @@ body,
 body {
   margin: 0;
 }
-
-
-/* =========================================================
-   CYBERORBIT — GLOBAL POLISH
-   Safe global rules only; component styling remains intact.
-   ========================================================= */
 
 @layer base {
   *,
@@ -531,10 +443,6 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
-
-/* =========================================================
-   PASSWORD INPUT — HIDE BROWSER REVEAL ICON
-   ========================================================= */
 
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {

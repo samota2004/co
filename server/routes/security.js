@@ -52,7 +52,7 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
   const [devices,commands,incidents]=await Promise.all([
     prisma.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,name:true,platform:true,lastSeen:true,enrolledAt:true},orderBy:{name:'asc'}}),
     prisma.endpointEnforcementCommand.findMany({where:{companyId:req.user.companyId,userId:u.id,action:{in:['BLOCK','ALLOW']}},include:{device:{select:{id:true,name:true,platform:true}}},orderBy:{createdAt:'desc'},take:100}),
-    prisma.incident.findMany({where:{userId:u.id,user:{companyId:req.user.companyId,deletedAt:null},severity:'CRITICAL'},select:{id:true,incidentId:true,title:true,severity:true,status:true,createdAt:true,resolvedAt:true,resolutionNotes:true},orderBy:{createdAt:'desc'},take:20}),
+    prisma.incident.findMany({where:{userId:u.id,user:{companyId:req.user.companyId,deletedAt:null},severity:'CRITICAL'},select:{id:true,incidentId:true,title:true,severity:true,status:true,createdAt:true,resolvedAt:true,resolutionNotes:true,companyId:true,reviewedAt:true,reviewedBy:true,reviewOutcome:true,reviewNotes:true},orderBy:{createdAt:'desc'},take:20}),
   ]);
   const latestContainmentByDevice=new Map();
   for(const command of commands.filter(command=>command.action==='BLOCK'))if(!latestContainmentByDevice.has(command.deviceId))latestContainmentByDevice.set(command.deviceId,command);
@@ -125,7 +125,8 @@ if(updated.roleCode==='MANAGER'&&fields.assignedAdminId!==undefined&&fields.assi
 }
 await tx.session.updateMany({where:{userId:u.id,revokedAt:null},data:{revokedAt:new Date()}});await audit(tx,req.user,'USER_UPDATED',{fields:Object.keys(fields),...(fields.assignedAdminId!==undefined?{previousAdminId:u.assignedAdminId,assignedAdminId:fields.assignedAdminId}: {})},u.id);return updated;});return{user:publicUser(user)};}));
 export async function setAccount(){throw new SecurityError(410,'LEGACY_ACCOUNT_CONTROL_DISABLED','Use the reviewed account containment and Main Admin restoration workflow.');}
-const requireFreshMfa=(req,_res,next)=>{const at=req.authSession?.mfaVerifiedAt?.getTime()??Number(req.authClaims?.iat)*1000;if(req.authClaims?.mfaVerified!==true||!Number.isFinite(at)||at>Date.now()+30000||Date.now()-at>15*60000)return next(new SecurityError(403,'FRESH_MFA_REQUIRED','Verify Main Admin MFA again, then retry restoration.'));next();};
+const hasFreshMfa=req=>{const at=req.authSession?.mfaVerifiedAt?.getTime()??Number(req.authClaims?.iat)*1000;return req.authClaims?.mfaVerified===true&&Number.isFinite(at)&&at<=Date.now()+30000&&Date.now()-at<=15*60000;};
+const requireFreshMfa=(req,_res,next)=>{if(!hasFreshMfa(req))return next(new SecurityError(403,'FRESH_MFA_REQUIRED','Verify Main Admin MFA again, then retry restoration.'));next();};
 router.post('/users/:id/freeze',requireSecurityAdmin,api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id),reason=text(req.body?.reason,'Reason',500);
   if(reason.trim().length<8)throw new SecurityError(400,'REASON_REQUIRED','Provide a reason of at least 8 characters.');
@@ -244,7 +245,27 @@ router.get('/security-events',requireSecurityAdmin,api(async req=>getSecurityEve
 router.get('/incidents/export',requireSecurityAdmin,async(req,res,next)=>{try{const where={user:userScope(req.user)};if(req.query.status&&req.query.status!=='ALL'){if(!['OPEN','UNDER_REVIEW','APPROVED','REJECTED','RESOLVED','FALSE_POSITIVE','INVESTIGATING','CONTAINED','NEW'].includes(req.query.status))throw new SecurityError(400,'INVALID_STATUS','Invalid incident status filter.');where.status=req.query.status;}if(req.query.severity&&req.query.severity!=='ALL'){if(!['LOW','MEDIUM','HIGH','CRITICAL'].includes(req.query.severity))throw new SecurityError(400,'INVALID_SEVERITY','Invalid incident severity filter.');where.severity=req.query.severity;}const rows=await prisma.incident.findMany({where,orderBy:{createdAt:'desc'},take:5000});await audit(prisma,req.user,'INCIDENT_EXPORT',{rows:rows.length,limit:5000});sendExport(req,res,rows,['id','title','severity','status','userId','riskScore','createdAt','recommendedAction','resolutionNotes'],'cyberorbit-incidents');}catch(e){next(e);}});
 router.get('/incidents/:id',api(async req=>{if(!isAdmin(req.user)&&req.user.roleCode!=='MANAGER')throw new SecurityError(403,'INVESTIGATION_DENIED','Investigation access required.');const incident=await prisma.incident.findFirst({where:{id:req.params.id,...subjectScope(req)},include:{activityEvents:true}});if(!incident)throw new SecurityError(404,'INCIDENT_NOT_FOUND','Incident not found.');return{incident};}));
 router.post('/incidents/:id/ai-explain',requireSecurityAdmin,api(async req=>{const i=await prisma.incident.findFirst({where:{id:req.params.id,user:userScope(req.user)}});if(!i)throw new SecurityError(404,'INCIDENT_NOT_FOUND','Incident not found.');return{explanation:i.aiExplanation||'No recorded assessment explanation is available.',aiExplanation:i.aiExplanation||'No recorded assessment explanation is available.',source:'stored-policy-factors',advisory:true};}));
-async function updateIncident(req,status){const incident=await prisma.incident.findFirst({where:{id:req.params.id,user:userScope(req.user)}});if(!incident)throw new SecurityError(404,'INCIDENT_NOT_FOUND','Incident not found.');if(!['OPEN','UNDER_REVIEW','APPROVED','REJECTED','RESOLVED','FALSE_POSITIVE','INVESTIGATING','CONTAINED'].includes(status))throw new SecurityError(400,'INVALID_INCIDENT_STATUS','Invalid incident status.');const reviewed=['RESOLVED','FALSE_POSITIVE'].includes(status);const result=await prisma.$transaction(async tx=>{const i=await tx.incident.update({where:{id:incident.id},data:{status,resolutionNotes:String(req.body.notes||req.body.resolutionNotes||'').slice(0,2000),resolvedAt:reviewed?new Date():null,resolvedBy:reviewed?req.user.id:null}});await audit(tx,req.user,'INCIDENT_'+status,{incidentId:i.id},incident.userId);return i;});sseManager.broadcastIncident({...result,companyId:req.user.companyId});return{incident:result};}
+async function updateIncident(req,status){
+ const incident=await prisma.incident.findFirst({where:{id:req.params.id,user:userScope(req.user)}});
+ if(!incident)throw new SecurityError(404,'INCIDENT_NOT_FOUND','Incident not found.');
+ if(!['OPEN','UNDER_REVIEW','APPROVED','REJECTED','RESOLVED','FALSE_POSITIVE','INVESTIGATING','CONTAINED'].includes(status))throw new SecurityError(400,'INVALID_INCIDENT_STATUS','Invalid incident status.');
+ const reviewOutcome=['INVESTIGATING','RESOLVED','FALSE_POSITIVE','REJECTED'].includes(status);
+ const notes=String(req.body.notes||req.body.resolutionNotes||'').trim().slice(0,2000);
+ if(reviewOutcome&&!notes)throw new SecurityError(400,'INCIDENT_REVIEW_NOTES_REQUIRED','Administrative incident review notes are required.');
+ if(reviewOutcome&&incident.severity==='CRITICAL'){
+   if(!req.user.isMainAdmin)throw new SecurityError(403,'MAIN_ADMIN_REQUIRED','Main Admin authorization is required to review a critical incident.');
+   if(!hasFreshMfa(req))throw new SecurityError(403,'FRESH_MFA_REQUIRED','Verify Main Admin MFA again before reviewing this critical incident.');
+ }
+ const resolved=['RESOLVED','FALSE_POSITIVE'].includes(status),reviewedAt=reviewOutcome?new Date():incident.reviewedAt;
+ const result=await prisma.$transaction(async tx=>{
+   const i=await tx.incident.update({where:{id:incident.id},data:{companyId:req.user.companyId,status,resolutionNotes:notes||incident.resolutionNotes,resolvedAt:resolved?new Date():null,resolvedBy:resolved?req.user.id:null,...(reviewOutcome?{reviewedAt,reviewedBy:req.user.id,reviewOutcome:status,reviewNotes:notes}: {})}});
+   await audit(tx,req.user,'INCIDENT_'+status,{companyId:req.user.companyId,incidentId:i.id,reviewerId:req.user.id,reviewOutcome:status,notes},incident.userId);
+   return i;
+ });
+ sseManager.broadcastIncident({...result,companyId:req.user.companyId});
+ return{incident:result};
+}
+router.post('/incidents/:id/review',requireSecurityAdmin,api(req=>updateIncident(req,'INVESTIGATING')));
 router.patch('/incidents/:id',requireSecurityAdmin,api(req=>updateIncident(req,req.body.status)));
 router.post('/incidents/:id/resolve',requireSecurityAdmin,api(req=>updateIncident(req,req.body.newStatus||'RESOLVED')));
 

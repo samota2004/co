@@ -43,11 +43,15 @@ export const Sidebar = ({
   mobileOpen = false,
   onCloseMobile,
 }) => {
+  // ======================================================
+  // MOBILE SIDEBAR BEHAVIOR
+  // ======================================================
+
   useEffect(() => {
     if (mobileOpen) {
       setIsSidebarOpen(true);
     }
-  }, [mobileOpen]);
+  }, [mobileOpen, setIsSidebarOpen]);
 
   // ======================================================
   // HELPER FUNCTIONS
@@ -135,7 +139,12 @@ export const Sidebar = ({
           icon: Laptop,
           badge: null,
         },
-        { id: "alerts", label: "Detection alerts", icon: Bell },
+        {
+          id: "alerts",
+          label: "Detection alerts",
+          icon: Bell,
+          badge: null,
+        },
         {
           id: "incidents",
           label: "Incidents",
@@ -206,7 +215,19 @@ export const Sidebar = ({
         },
       ],
     },
-  ].sort((a,b)=>(a.title === "Dashboard" ? -1 : b.title === "Dashboard" ? 1 : 0)).map(section=>({...section,items:section.items.filter(item=>isCurrentUserAdmin||['employee-dashboard','settings'].includes(item.id))})).filter(section=>section.items.length);
+  ]
+    .sort((a, b) =>
+      a.title === "Dashboard" ? -1 : b.title === "Dashboard" ? 1 : 0
+    )
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (item) =>
+          isCurrentUserAdmin ||
+          ["employee-dashboard", "settings"].includes(item.id)
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 
   // ======================================================
   // SIDEBAR UI
@@ -217,12 +238,15 @@ export const Sidebar = ({
       id="cyberorbit-sidebar"
       style={{
         width: `${
-          isSidebarOpen ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH
+          isSidebarOpen
+            ? SIDEBAR_EXPANDED_WIDTH
+            : SIDEBAR_COLLAPSED_WIDTH
         }px`,
       }}
       className="fixed left-0 top-0 z-40 flex h-screen shrink-0 select-none flex-col overflow-hidden border-r border-white/10 bg-[#03070C] text-[#F4F7FA] shadow-[12px_0_50px_rgba(0,0,0,0.18)] transition-[width] duration-300 ease-in-out"
     >
       {/* Technical background */}
+
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.08]"
         style={{
@@ -235,6 +259,7 @@ export const Sidebar = ({
       {/* ==================================================
           SIDEBAR HEADER
           ================================================== */}
+
       <div
         className={`relative z-10 shrink-0 border-b border-white/10 transition-all duration-300 ${
           isSidebarOpen
@@ -244,7 +269,8 @@ export const Sidebar = ({
       >
         {isSidebarOpen ? (
           <>
-            {/* CyberOrbit brand — kept exactly as the original logo UI */}
+            {/* Original CyberOrbit logo — unchanged */}
+
             <button
               id="btn-sidebar-dashboard"
               onClick={() => handleTabSelect("dashboard")}
@@ -305,6 +331,7 @@ export const Sidebar = ({
       {/* ==================================================
           NAVIGATION
           ================================================== */}
+
       <nav
         className={`relative z-10 min-h-0 flex-1 overflow-y-auto custom-scrollbar transition-all duration-300 ${
           isSidebarOpen ? "px-3 py-5" : "px-2 py-5"
@@ -328,7 +355,8 @@ export const Sidebar = ({
                     (item.id === "employees" &&
                       (activeTab === "users" ||
                         activeTab === "employee-mgmt")) ||
-                    (item.id === "risk-analysis" && activeTab === "ai-risk");
+                    (item.id === "risk-analysis" &&
+                      activeTab === "ai-risk");
 
                   return (
                     <button
@@ -393,6 +421,7 @@ export const Sidebar = ({
       {/* ==================================================
           USER / ADMIN FOOTER
           ================================================== */}
+
       <div className="relative z-10 shrink-0 border-t border-white/10 p-3">
         {isSidebarOpen ? (
           <div className="group flex items-center justify-between rounded-2xl border border-white/10 bg-[#050A10] p-3 shadow-[0_12px_35px_rgba(0,0,0,0.16)] transition-all duration-200 hover:border-[#67E8F9]/25 hover:bg-[#070C12]">
@@ -405,6 +434,7 @@ export const Sidebar = ({
                 <div className="truncate text-[11px] font-semibold leading-tight text-[#F4F7FA]">
                   {adminName}
                 </div>
+
                 <div className="mt-0.5 truncate text-[9px] font-medium uppercase tracking-[0.13em] text-[#D4AF37]">
                   {adminRole}
                 </div>

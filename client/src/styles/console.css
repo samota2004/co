@@ -1,97 +1,345 @@
-/* Shared visual system for the authenticated console. Semantic status colors
-   and all application actions remain owned by the underlying components. */
+/* =========================================================
+   CYBERORBIT — AUTHENTICATED CONSOLE DESIGN SYSTEM
+   Shared styling only. Individual pages own their UI.
+   ========================================================= */
+
 :root {
-  --console-bg: #080e1b;
-  --console-panel: #101a2b;
-  --console-border: #24334b;
-  --console-muted: #a4b4cd;
-  --console-accent: #67e8f9;
+  --console-bg: #03070C;
+  --console-panel: #050A10;
+  --console-panel-elevated: #070C12;
+
+  --console-border: rgba(255, 255, 255, 0.08);
+  --console-border-cyan: rgba(103, 232, 249, 0.45);
+  --console-border-gold: rgba(212, 175, 55, 0.45);
+
+  --console-cyan: #67E8F9;
+  --console-gold: #D4AF37;
+
+  --console-text: #F4F7FA;
+  --console-muted: #A7B0BA;
+  --console-dim: #7F8A96;
 }
+
+/* =========================================================
+   MAIN APPLICATION SURFACES
+   ========================================================= */
+
 #cyberorbit-main-content {
-  background: radial-gradient(ellipse at 85% 0%, #13253b 0, transparent 48%), var(--console-bg);
-  color: #edf3ff;
+  background: var(--console-bg);
+  color: var(--console-text);
   scrollbar-gutter: stable;
 }
-#cyberorbit-sidebar { background: #0b1322; border-color: var(--console-border); }
-#cyberorbit-topbar { background: #0b1322f5; border-color: var(--console-border); box-shadow: none; }
-#cyberorbit-topbar > .pointer-events-none,
-#cyberorbit-sidebar > .pointer-events-none { display: none; }
-#cyberorbit-sidebar button { border-radius: 10px; }
-#cyberorbit-sidebar button:hover { background-color: #17253b; }
-.console-workspace { padding: 24px; font-size: 14px; line-height: 1.6; }
-.employee-dashboard-content { font-size: 15px; line-height: 1.65; }
-.employee-dashboard-content > .console-hero { margin-bottom: 4px; }
-.employee-dashboard-content [aria-label="Installed endpoint agents"] { margin-top: 8px; }
-.endpoint-monitor-panel { font-size: 15px; line-height: 1.65; }
-.endpoint-monitor-panel :is(p,dd,dt,button,summary) { line-height: 1.6; }
-.endpoint-monitor-panel [class*="text-xs"] { font-size: 13px; }
-.console-workspace > div { padding: 0; background: transparent; }
-.console-workspace > div > div:has(> .console-hero) { padding-inline: 0; }
-.console-workspace :is(h1,h2,h3,h4) { text-wrap: balance; }
-.console-workspace h1 { font-size: clamp(25px, 2.4vw, 34px); font-weight: 650; line-height: 1.2; letter-spacing: -.035em; }
-.console-workspace h2 { letter-spacing: -.02em; }
-.console-workspace .font-mono:not(pre):not(code) { font-family: inherit; }
-.console-workspace :is(p,td,label,button)[class*="text-[12px]"] { font-size: 13px; }
-.console-workspace :is(p,td)[class*="text-[11px]"] { font-size: 12px; }
-.console-workspace :is(section, article, form, div).border:is(.rounded-xl,.rounded-2xl) {
+
+#cyberorbit-sidebar {
+  background: var(--console-panel);
   border-color: var(--console-border);
-  border-radius: 14px;
-  box-shadow: 0 4px 20px #00000012;
 }
-.console-workspace :is(section,article,form,div)[class*="bg-[#050A10]"]:not(.fixed) { background-color: var(--console-panel); }
-.console-workspace :is(section,article,div)[class*="hover:-translate-y"]:hover { translate: none; transform: none; }
-.console-workspace :is(section,article,div)[class*="text-[#7F8A96]"],
-.console-workspace [class*="text-[#A7B0BA]"] { color: var(--console-muted); }
-.console-workspace :is(input,select,textarea) {
-  border: 1px solid #34445f;
-  border-radius: 8px;
-  background-color: #0b1425;
-  color: #edf3ff;
+
+#cyberorbit-topbar {
+  background: rgba(5, 10, 16, 0.96);
+  border-color: var(--console-border);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+/* Preserve the original CyberOrbit logo and navigation design. */
+
+#cyberorbit-sidebar button {
+  border-radius: 10px;
+}
+
+#cyberorbit-sidebar button:hover {
+  background-color: rgba(103, 232, 249, 0.06);
+}
+
+/* =========================================================
+   CONSOLE WORKSPACE
+   ========================================================= */
+
+.console-workspace {
+  padding: 24px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--console-text);
+}
+
+.employee-dashboard-content {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.employee-dashboard-content > .console-hero {
+  margin-bottom: 4px;
+}
+
+.employee-dashboard-content [aria-label="Installed endpoint agents"] {
+  margin-top: 8px;
+}
+
+.endpoint-monitor-panel {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.endpoint-monitor-panel :is(p, dd, dt, button, summary) {
+  line-height: 1.6;
+}
+
+.endpoint-monitor-panel [class*="text-xs"] {
+  font-size: 13px;
+}
+
+/* Preserve page-specific layouts and spacing. */
+
+.console-workspace > div {
+  background: transparent;
+}
+
+.console-workspace :is(h1, h2, h3, h4) {
+  text-wrap: balance;
+}
+
+.console-workspace h1 {
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+}
+
+.console-workspace h2 {
+  letter-spacing: -0.02em;
+}
+
+/* Typography remains controlled by each component. */
+
+.console-workspace .font-mono:not(pre):not(code) {
+  font-family: inherit;
+}
+
+/* =========================================================
+   CYBERORBIT SURFACES
+   ========================================================= */
+
+.console-workspace .cyber-surface {
+  background: var(--console-panel);
+  border: 1px solid var(--console-border);
+}
+
+.console-workspace .cyber-surface-elevated {
+  background: var(--console-panel-elevated);
+  border: 1px solid var(--console-border);
+}
+
+/* =========================================================
+   INPUTS AND FORM ELEMENTS
+   ========================================================= */
+
+.console-workspace :is(input, select, textarea) {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background-color: var(--console-panel-elevated);
+  color: var(--console-text);
   max-width: 100%;
   min-height: 40px;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background-color 200ms ease;
 }
-.console-workspace input[type=checkbox] { min-height: auto; accent-color: #67e8f9; width: 18px; height: 18px; }
-.console-workspace :is(input,textarea)::placeholder { color: #8293b0; }
-.console-workspace :is(button,input,select,textarea,summary):focus-visible {
-  outline: 2px solid #67e8f9; outline-offset: 3px; box-shadow: none;
+
+.console-workspace input[type="checkbox"] {
+  min-height: auto;
+  accent-color: var(--console-cyan);
+  width: 18px;
+  height: 18px;
 }
-.console-workspace button { transition: background-color .15s, border-color .15s; }
-.console-workspace button:disabled { opacity: .45; cursor: not-allowed; }
-.console-workspace table { border-collapse: collapse; font-size: 13px; }
-.console-workspace thead { background: #0b1425; color: #b9c9e1; }
-.console-workspace th { font-size: 11px; letter-spacing: .055em; font-weight: 650; text-transform: uppercase; }
-.console-workspace :is(th,td) { padding: 14px 16px; border-bottom: 1px solid #24334b; }
-.console-workspace tbody tr:hover { background-color: #1a294080; }
-.console-workspace pre { background: #091222; border: 1px solid #24334b; border-radius: 8px; padding: 16px; font-size: 12px; }
-.console-workspace details { border-bottom: 1px solid #24334b; padding: 14px 0; }
-.console-workspace summary { cursor: pointer; color: #bed6ef; }
-.console-heading { display: flex; align-items: flex-start; gap: 18px; padding: 24px; border: 1px solid #2b405e; border-radius: 14px; background: linear-gradient(115deg,#14243b,#101a2b); }
-.console-heading-icon { padding: 13px; color: #67e8f9; background: #67e8f90d; border: 1px solid #67e8f933; border-radius: 12px; }
-.console-heading-ai .console-heading-icon { color: #c4b5fd; border-color: #a78bfa44; background: #a78bfa0d; }
-.console-eyebrow { color: #93aecb; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 8px; }
-.console-heading p { color: #a4b4cd; margin-top: 10px; max-width: 750px; }
-.console-workspace > div > :is(section,form).border { background-color: #101a2b; }
-.console-workspace > div > :is(section,form) h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
-.console-workspace > div > :is(section,form) > p { color: #a4b4cd; line-height: 1.7; }
-.console-workspace [role=alert] { border-left: 3px solid #fb7185; background: #fb71850d; padding: 14px 16px; border-radius: 8px; }
-.console-workspace [role=status] { border-left: 3px solid #67e8f9; padding: 14px 16px; }
+
+.console-workspace :is(input, textarea)::placeholder {
+  color: var(--console-dim);
+}
+
+.console-workspace :is(input, select, textarea):focus {
+  outline: none;
+  border-color: var(--console-cyan);
+  box-shadow: 0 0 0 2px rgba(103, 232, 249, 0.1);
+}
+
+.console-workspace :is(button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--console-cyan);
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
+.console-workspace button {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.console-workspace button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* =========================================================
+   TABLES
+   ========================================================= */
+
+.console-workspace table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.console-workspace thead {
+  background: var(--console-panel-elevated);
+  color: var(--console-text);
+}
+
+.console-workspace th {
+  font-size: 11px;
+  letter-spacing: 0.055em;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.console-workspace :is(th, td) {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--console-border);
+}
+
+.console-workspace tbody tr {
+  transition: background-color 200ms ease;
+}
+
+.console-workspace tbody tr:hover {
+  background-color: rgba(103, 232, 249, 0.025);
+}
+
+/* =========================================================
+   CODE BLOCKS AND DETAILS
+   ========================================================= */
+
+.console-workspace pre {
+  background: var(--console-panel-elevated);
+  border: 1px solid var(--console-border);
+  border-radius: 10px;
+  padding: 16px;
+  font-size: 12px;
+}
+
+.console-workspace details {
+  border-bottom: 1px solid var(--console-border);
+  padding: 14px 0;
+}
+
+.console-workspace summary {
+  cursor: pointer;
+  color: var(--console-muted);
+}
+
+/* =========================================================
+   CONSOLE HEADINGS
+   ========================================================= */
+
+.console-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--console-border);
+  border-radius: 14px;
+  background: var(--console-panel);
+}
+
+.console-heading-icon {
+  padding: 13px;
+  color: var(--console-cyan);
+  background: rgba(103, 232, 249, 0.05);
+  border: 1px solid rgba(103, 232, 249, 0.2);
+  border-radius: 12px;
+}
+
+.console-heading-ai .console-heading-icon {
+  color: #A78BFA;
+  border-color: rgba(167, 139, 250, 0.3);
+  background: rgba(167, 139, 250, 0.06);
+}
+
+.console-eyebrow {
+  color: var(--console-gold);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.console-heading p {
+  color: var(--console-muted);
+  margin-top: 10px;
+  max-width: 750px;
+}
+
+/* =========================================================
+   ALERTS AND STATUS MESSAGES
+   ========================================================= */
+
+.console-workspace [role="alert"] {
+  border-left: 3px solid #F87171;
+  background: rgba(248, 113, 113, 0.06);
+  padding: 14px 16px;
+  border-radius: 8px;
+}
+
+.console-workspace [role="status"] {
+  border-left: 3px solid var(--console-cyan);
+  padding: 14px 16px;
+}
+
+/* =========================================================
+   ADMINISTRATOR WORKFLOW FORM
+   Retained from the existing implementation.
+   ========================================================= */
+
 .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
   align-items: end;
   gap: 16px;
   padding: clamp(20px, 3vw, 32px);
-  background: linear-gradient(145deg, #111f33, #0e1829);
-  border-color: #2b405e;
-  box-shadow: 0 12px 36px #00000020;
+  background: var(--console-panel);
+  border-color: var(--console-border);
+  box-shadow: var(--shadow-card);
 }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(h2, p, textarea, button) { grid-column: 1 / -1; }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > h2 { margin: 0; font-size: 22px; }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > p { margin: 0; max-width: 1000px; }
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(h2, p, textarea, button) {
+  grid-column: 1 / -1;
+}
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > p {
+  margin: 0;
+  max-width: 1000px;
+  color: var(--console-muted);
+}
+
 .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > select,
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > label { width: 100%; }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > label { display: grid; gap: 8px; color: #c4d2e5; }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(select, input, textarea) { padding: 12px 14px; }
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > label {
+  width: 100%;
+}
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > label {
+  display: grid;
+  gap: 8px;
+  color: var(--console-muted);
+}
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(select, input, textarea) {
+  padding: 12px 14px;
+}
+
 .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea {
   height: 260px;
   min-height: 200px;
@@ -99,70 +347,164 @@
   line-height: 1.6;
   tab-size: 2;
 }
+
 .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button {
   justify-self: start;
   min-height: 46px;
   padding: 11px 20px;
-  border: 1px solid #67e8f94d;
-  background: #0e5667;
+  border: 1px solid var(--console-cyan);
+  border-radius: 10px;
+  background: var(--console-cyan);
+  color: var(--console-bg);
   font-weight: 650;
 }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button:hover:not(:disabled) { background: #12677a; }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button:disabled { cursor: not-allowed; }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea:focus { border-color: #67e8f9; }
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--console-cyan);
+}
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > button:disabled {
+  cursor: not-allowed;
+}
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea:focus {
+  border-color: var(--console-cyan);
+}
+
 .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > h2::before {
   content: "ADMINISTRATOR WORKFLOW";
   display: block;
   margin-bottom: 8px;
-  color: #67e8f9;
-  font-size: 10px;
+  color: var(--console-gold);
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: .16em;
+  letter-spacing: 0.16em;
 }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) + [role="status"] { border-color: #2b6972; background: #10212c; }
-.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) + [role="status"] pre { max-height: 320px; overflow: auto; }
-.console-workspace > section.border:has(> h2 + p) { background: linear-gradient(145deg, #111f33, #0e1829); }
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) + [role="status"] {
+  border-color: rgba(103, 232, 249, 0.25);
+  background: rgba(103, 232, 249, 0.04);
+}
+
+.console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) + [role="status"] pre {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.console-workspace > section.border:has(> h2 + p) {
+  background: var(--console-panel);
+}
+
+/* =========================================================
+   RECOVERY PANEL
+   ========================================================= */
+
+.console-recovery {
+  margin: 24px;
+  padding: 32px;
+  border: 1px solid #F87171;
+  border-radius: 14px;
+  background: var(--console-panel);
+}
+
+.console-recovery button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-top: 16px;
+  border: 1px solid var(--console-border);
+  border-radius: 8px;
+}
+
+/* =========================================================
+   MODEL SUMMARY
+   ========================================================= */
+
+.console-workspace .model-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.console-workspace .model-stat {
+  padding: 20px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 12px;
+  background: var(--console-panel);
+}
+
+.model-stat span {
+  display: block;
+  color: var(--console-muted);
+  font-size: 12px;
+}
+
+.model-stat strong {
+  display: block;
+  font-size: 28px;
+  color: #A78BFA;
+  margin: 8px 0;
+  font-weight: 600;
+}
+
+/* =========================================================
+   PAGE-SPECIFIC ACCENTS
+   ========================================================= */
+
+.console-workspace[data-page="xai"] .console-hero,
+.console-workspace[data-page="risk-analysis"] .console-hero {
+  border-top: 2px solid #A78BFA;
+}
+
+.console-workspace[data-page="incidents"] .console-hero,
+.console-workspace[data-page="alerts"] .console-hero {
+  border-top: 2px solid var(--console-cyan);
+}
+
+/* =========================================================
+   RESPONSIVE LAYOUT
+   ========================================================= */
+
+@media (max-width: 767px) {
+  .console-workspace {
+    padding: 16px;
+  }
+
+  .console-workspace .model-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .console-workspace :is(th, td) {
+    padding: 12px;
+  }
+
+  #cyberorbit-topbar h1 {
+    font-size: 16px;
+  }
+
+  .console-heading {
+    padding: 20px;
+    gap: 12px;
+  }
+
+  .console-heading-icon {
+    display: none;
+  }
+}
+
 @media (max-width: 700px) {
-  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(h2, p, select, label, textarea, button) { grid-column: 1; }
-  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea { height: 220px; }
-}
-/* Replace decorative billboard proportions with compact working headers.
-   Retain all interactive descendants, including export and employee selectors. */
-.console-workspace .console-hero {
-  min-height: 0; background: linear-gradient(110deg,#13243b,#101a2b);
-  border: 1px solid #2b405e; border-radius: 14px; padding: 24px;
-  overflow: visible; margin-bottom: 24px;
-}
-.console-hero .pointer-events-none { display: none; }
-.console-hero .absolute:not(:has(button,select,input)):not(button):not(select):not(input) { display: none; }
-.console-hero :is(div,section):has(h1) { min-height: 0; max-width: none; padding: 0; width: auto; }
-.console-hero div:has(h1) { display: block; }
-.console-hero h1 { margin-top: 8px; }
-.console-hero h1 span.block { display: inline; }
-.console-hero h1 span.block::before { content: ' '; }
-.console-hero p { max-width: 760px; margin-top: 12px; line-height: 1.7; }
-.console-hero .absolute:has(button,select,input) { position: static; width: auto; margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; }
-.console-hero .absolute:has(button) button { width: auto; min-height: 40px; }
-.console-hero .absolute:has(select) select { min-width: 180px; }
-.console-workspace[data-page=xai] .console-hero,
-.console-workspace[data-page=risk-analysis] .console-hero { border-top: 2px solid #a78bfa; }
-.console-workspace[data-page=incidents] .console-hero,
-.console-workspace[data-page=alerts] .console-hero { border-top: 2px solid #67e8f9; }
-.console-recovery { margin: 24px; padding: 32px; border: 1px solid #fb7185; border-radius: 14px; background: #101a2b; }
-.console-recovery button { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; margin-top: 16px; border: 1px solid #34445f; border-radius: 8px; }
-.console-workspace .model-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; }
-.console-workspace .model-stat { padding: 20px; border: 1px solid #34405a; border-radius: 12px; background: linear-gradient(140deg,#1c2440,#101a2b); }
-.model-stat span { display: block; color: #a4b4cd; font-size: 12px; }
-.model-stat strong { display: block; font-size: 28px; color: #c4b5fd; margin: 8px 0; font-weight: 600; }
-@media(max-width: 767px) {
-  .console-workspace { padding: 16px; }
-  .console-workspace .console-hero { padding: 20px; }
-  .console-workspace > div > div:has(> .console-hero) { padding-inline: 0; }
-  .console-workspace .model-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .console-hero .absolute:has(button,select,input) { align-items: stretch; }
-  .console-workspace :is(th,td) { padding: 12px; }
-  #cyberorbit-topbar h1 { font-size: 16px; }
-  .console-heading { padding: 20px; gap: 12px; }
-  .console-heading-icon { display: none; }
+  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > :is(h2, p, select, label, textarea, button) {
+    grid-column: 1;
+  }
+
+  .console-workspace form:has(> textarea[aria-label="Complete feature JSON"]) > textarea {
+    height: 220px;
+  }
 }

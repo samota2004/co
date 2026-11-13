@@ -1,7 +1,22 @@
+
 import React from "react";
 
+// Shared badge styling
 const badgeBase =
-  "group inline-flex items-center justify-center rounded-full border font-medium tracking-wide transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_16px_rgba(103,232,249,0.08)]";
+  "group inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-medium uppercase tracking-wide transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_16px_rgba(103,232,249,0.08)]";
+
+const getBadgeClass = (config) =>
+  `${badgeBase} ${config.bg} ${config.text} ${config.border}`;
+
+const BadgeDot = ({ color }) => (
+  <span
+    className={`h-1.5 w-1.5 shrink-0 rounded-full ${color} shadow-[0_0_7px_currentColor]`}
+  />
+);
+
+// ======================================================
+// RISK BADGE
+// ======================================================
 
 const riskConfigs = {
   LOW: {
@@ -37,23 +52,27 @@ const riskConfigs = {
 };
 
 export const RiskBadge = ({ level, score }) => {
-  const c = riskConfigs[level] || riskConfigs.LOW;
+  const normalizedLevel = level?.toUpperCase() || "LOW";
+  const config = riskConfigs[normalizedLevel] || riskConfigs.LOW;
 
   return (
-    <span
-      className={`${badgeBase} gap-2 px-3 py-1.5 text-[12px] uppercase ${c.bg} ${c.text} ${c.border}`}
-    >
-      <span
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.dot} shadow-[0_0_7px_currentColor]`}
-      />
-      <span>{level?.replace(/_/g, " ")}</span>
+    <span className={getBadgeClass(config)}>
+      <BadgeDot color={config.dot} />
+
+      <span>{normalizedLevel.replace(/_/g, " ")}</span>
 
       {typeof score === "number" && (
-        <span className="text-[11px] opacity-75">({score})</span>
+        <span className="text-[11px] opacity-75">
+          ({score})
+        </span>
       )}
     </span>
   );
 };
+
+// ======================================================
+// SEVERITY BADGE
+// ======================================================
 
 const severityConfigs = {
   LOW: {
@@ -83,19 +102,21 @@ const severityConfigs = {
 };
 
 export const SeverityBadge = ({ severity }) => {
-  const c = severityConfigs[severity] || severityConfigs.LOW;
+  const normalizedSeverity = severity?.toUpperCase() || "LOW";
+  const config =
+    severityConfigs[normalizedSeverity] || severityConfigs.LOW;
 
   return (
-    <span
-      className={`${badgeBase} gap-2 px-3 py-1.5 text-[12px] uppercase ${c.bg} ${c.text} ${c.border}`}
-    >
-      <span
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.dot} shadow-[0_0_7px_currentColor]`}
-      />
-      {severity}
+    <span className={getBadgeClass(config)}>
+      <BadgeDot color={config.dot} />
+      {normalizedSeverity}
     </span>
   );
 };
+
+// ======================================================
+// STATUS BADGE
+// ======================================================
 
 const statusConfigs = {
   ACTIVE: {
@@ -179,7 +200,9 @@ const statusConfigs = {
 };
 
 export const StatusBadge = ({ status }) => {
-  const c = statusConfigs[status] || {
+  const normalizedStatus = status?.toUpperCase() || "UNKNOWN";
+
+  const config = statusConfigs[normalizedStatus] || {
     bg: "bg-white/[0.04]",
     text: "text-[#7F8A96]",
     border: "border-white/10",
@@ -187,16 +210,16 @@ export const StatusBadge = ({ status }) => {
   };
 
   return (
-    <span
-      className={`${badgeBase} gap-2 px-3 py-1.5 text-[12px] uppercase ${c.bg} ${c.text} ${c.border}`}
-    >
-      <span
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.dot} shadow-[0_0_7px_currentColor]`}
-      />
-      {status?.replace(/_/g, " ")}
+    <span className={getBadgeClass(config)}>
+      <BadgeDot color={config.dot} />
+      {normalizedStatus.replace(/_/g, " ")}
     </span>
   );
 };
+
+// ======================================================
+// POLICY ACTION BADGE
+// ======================================================
 
 const policyActionConfigs = {
   ALLOW: {
@@ -244,16 +267,14 @@ const policyActionConfigs = {
 };
 
 export const PolicyActionBadge = ({ action }) => {
-  const c = policyActionConfigs[action] || policyActionConfigs.ALLOW;
+  const normalizedAction = action?.toUpperCase() || "ALLOW";
+  const config =
+    policyActionConfigs[normalizedAction] || policyActionConfigs.ALLOW;
 
   return (
-    <span
-      className={`${badgeBase} gap-2 px-3 py-1.5 text-[12px] uppercase ${c.bg} ${c.text} ${c.border}`}
-    >
-      <span
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.dot} shadow-[0_0_7px_currentColor]`}
-      />
-      {c.label}
+    <span className={getBadgeClass(config)}>
+      <BadgeDot color={config.dot} />
+      {config.label}
     </span>
   );
 };

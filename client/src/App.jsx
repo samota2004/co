@@ -273,8 +273,6 @@ export default function App() {
   const [users, setUsers] = useState([]);
 
   const [incidents, setIncidents] = useState([]);
-  const [securityEvents, setSecurityEvents] = useState([]);
-  const [securityMetrics, setSecurityMetrics] = useState(null);
 
   const [resources, setResources] = useState([]);
 
@@ -647,7 +645,6 @@ export default function App() {
       const [
         usersRes,
         incidentsRes,
-        securityEventsRes,
         resourcesRes,
         devicesRes,
         eventsRes,
@@ -656,7 +653,6 @@ export default function App() {
       ] = await Promise.all([
         ...userRequests,
         isCurrentUserAdmin || getUserRole(currentUser)==='MANAGER' ? safeFetchJson("/api/incidents") : Promise.resolve(null),
-        isCurrentUserAdmin ? safeFetchJson("/api/security-events") : Promise.resolve(null),
         safeFetchJson("/api/resources"),
         safeFetchJson("/api/devices"),
         safeFetchJson("/api/activity"),
@@ -664,7 +660,7 @@ export default function App() {
         safeFetchJson("/api/stats"),
       ]);
 
-      const unavailable = [["Employees",usersRes],["Incidents",incidentsRes],["Security events",securityEventsRes],["Resources",resourcesRes],["Devices",devicesRes],["Activity",eventsRes],["Audit logs",logsRes],["Statistics",statsRes]].filter(([,result])=>result && !result.success).map(([name])=>name);
+      const unavailable = [["Employees",usersRes],["Incidents",incidentsRes],["Resources",resourcesRes],["Devices",devicesRes],["Activity",eventsRes],["Audit logs",logsRes],["Statistics",statsRes]].filter(([,result])=>result && !result.success).map(([name])=>name);
       setSyncError(unavailable.length ? `Could not refresh: ${unavailable.join(", ")}. Previously loaded records may be out of date. Use Refresh to retry.` : "");
 
       if (usersRes?.success && usersRes.users) {
@@ -673,11 +669,6 @@ export default function App() {
 
       if (incidentsRes?.success && incidentsRes.incidents) {
         setIncidents(incidentsRes.incidents);
-      }
-
-      if (securityEventsRes?.success) {
-        setSecurityEvents(Array.isArray(securityEventsRes.events) ? securityEventsRes.events : []);
-        setSecurityMetrics(securityEventsRes.metrics || null);
       }
 
       if (resourcesRes?.success && resourcesRes.resources) {
@@ -1105,20 +1096,19 @@ export default function App() {
     setCopilotOpen(true);
   };
 
-  const accountAction=async(userId,action,providedReason)=>{
+  const accountAction=async(userId,action)=>{
     const verb=action==='freeze'?'freeze':'unfreeze';
-    if(!providedReason&&!window.confirm(`Confirm ${verb} for this employee? This revokes active application sessions.`))return;
-    const reason=providedReason||window.prompt(`Enter the reason for ${verb} (minimum 8 characters):`);
+    if(!window.confirm(`Confirm ${verb} for this employee? This revokes active application sessions.`))return;
+    const reason=window.prompt(`Enter the reason for ${verb} (minimum 8 characters):`);
     if(typeof reason!=='string'||reason.trim().length<8){setLiveToast({type:'warning',title:'Reason required',message:'No account change was made. Enter at least 8 characters.',timestamp:new Date().toLocaleTimeString()});return;}
     try{
       const result=await requestApi('/api/users/'+userId+'/'+action,{method:'POST',body:{reason:reason.trim()}});
-      setLiveToast({type:'warning',title:action==='unfreeze'?'Restoration requested':'Account updated',message:result.message,timestamp:new Date().toLocaleTimeString()});
+      setLiveToast({type:'warning',title:'Account updated',message:result.message,timestamp:new Date().toLocaleTimeString()});
       await fetchAllData();
-      return result;
-    }catch(error){setLiveToast({type:'danger',title:'Account update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});if(providedReason)throw error;}
+    }catch(error){setLiveToast({type:'danger',title:'Account update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});}
   };
   const handleFreezeUser=userId=>accountAction(userId,'freeze');
-  const handleUnfreezeUser=(userId,reason)=>accountAction(userId,'unfreeze',reason);
+  const handleUnfreezeUser=userId=>accountAction(userId,'unfreeze');
 
   const handleAddUser = (createdUser) => {
     if (!createdUser?.id) {
@@ -1426,7 +1416,6 @@ export default function App() {
 
             {activeTab === "employees" && isCurrentUserAdmin && (
               <EmployeeManagementPage
-                currentUser={currentUser}
                 users={users}
                 onSelectUser={userId=>{setCurrentUserId(userId);handleNavigate('employee-dashboard');}}
                 onAddUser={handleAddUser}
@@ -1484,8 +1473,6 @@ export default function App() {
                 users={users}
                 events={recentEvents}
                 incidents={incidents}
-                securityEvents={securityEvents}
-                securityMetrics={securityMetrics}
                 onSelectUser={(userId) => {
                   setCurrentUserId(userId);
 

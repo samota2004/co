@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+
 import {
   ArrowLeft,
   Database,
@@ -45,11 +46,16 @@ const getToken = () => localStorage.getItem("zero_trust_token");
 const getErrorMessage = (data, fallback) =>
   data?.error?.message || data?.message || fallback;
 
-const localOperationStatusLabel=(status)=>({
-  AUTH_REQUESTED:'Pending Main Admin review',AUTH_APPROVED:'Approved · waiting for endpoint heartbeat',
-  AUTH_GRANT_ISSUED:'Grant issued · awaiting endpoint confirmation',AUTH_EXECUTING:'Agent accepted authorization · Windows state is separate',
-  AUTH_REJECTED:'Rejected',AUTH_EXPIRED:'Expired',AUTH_FAILED:'Operation failed',AUTH_COMPLETED:'Uninstalled · credential revoked',
-}[status]||String(status||'Unknown').replaceAll('_',' '));
+const localOperationStatusLabel = (status) => ({
+  AUTH_REQUESTED: "Pending Main Admin review",
+  AUTH_APPROVED: "Approved · waiting for endpoint heartbeat",
+  AUTH_GRANT_ISSUED: "Grant issued · awaiting endpoint confirmation",
+  AUTH_EXECUTING: "Agent accepted authorization · Windows state is separate",
+  AUTH_REJECTED: "Rejected",
+  AUTH_EXPIRED: "Expired",
+  AUTH_FAILED: "Operation failed",
+  AUTH_COMPLETED: "Uninstalled · credential revoked",
+}[status] || String(status || "Unknown").replaceAll("_", " "));
 
 const normalizeAdmin = (admin) => ({
   ...admin,
@@ -58,20 +64,15 @@ const normalizeAdmin = (admin) => ({
   status: admin.status || "ACTIVE",
 });
 
-const StatusBadge = ({ status, isDark }) => {
+const StatusBadge = ({ status }) => {
   const active = status === "ACTIVE";
 
   return (
     <span
       className={`
         inline-flex items-center gap-1.5
-        px-2.5 py-1
-        rounded-full
-        border
-        text-[12px]
-        
-        uppercase
-        tracking-wider
+        px-2.5 py-1 rounded-full border
+        text-[12px] uppercase tracking-wider
         ${
           active
             ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/5"
@@ -101,13 +102,13 @@ const RoleBadge = ({ role }) => {
   );
 };
 
-const Panel = ({ children, className = "", isDark }) => (
+const Panel = ({ children, className = "" }) => (
   <div
     className={`
-      border
-      bg-[#050A10] border-white/10 rounded-2xl
-      shadow-[0_18px_60px_rgba(0,0,0,0.18)]
+      relative overflow-hidden rounded-2xl border border-white/10
+      bg-[#050A10] shadow-[0_18px_60px_rgba(0,0,0,0.18)]
       transition-all duration-300
+      hover:border-[#67E8F9]/30 hover:bg-[#070C12]
       ${className}
     `}
   >
@@ -116,23 +117,21 @@ const Panel = ({ children, className = "", isDark }) => (
 );
 
 export const AdminManagementPage = ({ currentUser, onBack }) => {
-  const isDark = true;
-
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
   const [localOperationRequests, setLocalOperationRequests] = useState([]);
-  const [localOperationRequestsError, setLocalOperationRequestsError] = useState("");
+  const [localOperationRequestsError, setLocalOperationRequestsError] =
+    useState("");
   const [reviewingOperation, setReviewingOperation] = useState("");
 
   const [showForm, setShowForm] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState(null);
-
   const [form, setForm] = useState(INITIAL_FORM);
-
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const currentAdminRecord = admins.find(
@@ -201,36 +200,97 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
   }, []);
 
   const loadLocalOperationRequests = async () => {
-    const token=getToken();
-    if(!token)return;
+    const token = getToken();
+
+    if (!token) return;
+
     try {
-      const response=await fetch('/api/endpoint/local-operation-requests',{headers:{Authorization:`Bearer ${token}`}});
-      const data=await response.json();
-      if(!response.ok)throw new Error(getErrorMessage(data,'Unable to load local operation requests.'));
-      setLocalOperationRequests(data.requests||[]);setLocalOperationRequestsError("");
-    } catch(error) { setLocalOperationRequestsError(error.message||'Unable to load local operation requests.'); }
-  };
-  useEffect(()=>{
-    if(!isMainAdmin)return;
-    loadLocalOperationRequests();
-    const timer=setInterval(loadLocalOperationRequests,15000);
-    return()=>clearInterval(timer);
-  },[isMainAdmin]);
-  const reviewLocalOperation=async(request,decision)=>{
-    const reason=window.prompt(`${decision==='APPROVE'?'Approve':'Reject'} ${request.action} for ${request.device?.user?.name||'employee'} on ${request.device?.name||request.deviceId}. Enter an audit reason (8–500 characters):`);
-    if(reason===null)return;
-    if(reason.trim().length<8||reason.trim().length>500){setError('Enter an audit reason containing 8–500 characters.');return;}
-    setReviewingOperation(request.commandId);setError('');setSuccess('');
-    try{
-      const response=await fetch(`/api/endpoint/local-operation-requests/${encodeURIComponent(request.commandId)}/review`,{method:'POST',headers:{Authorization:`Bearer ${getToken()}`,'Content-Type':'application/json'},body:JSON.stringify({decision,reason})});
-      const data=await response.json();if(!response.ok)throw new Error(getErrorMessage(data,'Unable to review authorization request.'));
-      setSuccess(`${request.action} ${decision.toLowerCase()}d. The device must still complete the operation before the grant expires.`);
-      await loadLocalOperationRequests();
-    }catch(error){setError(error.message||'Unable to review authorization request.');await loadLocalOperationRequests();}
-    finally{setReviewingOperation('');}
+      const response = await fetch(
+        "/api/endpoint/local-operation-requests",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          getErrorMessage(data, "Unable to load local operation requests."),
+        );
+      }
+
+      setLocalOperationRequests(data.requests || []);
+      setLocalOperationRequestsError("");
+    } catch (error) {
+      setLocalOperationRequestsError(
+        error.message || "Unable to load local operation requests.",
+      );
+    }
   };
 
-  const openCreateForm = () => {
+  useEffect(() => {
+    if (!isMainAdmin) return;
+
+    loadLocalOperationRequests();
+
+    const timer = setInterval(loadLocalOperationRequests, 15000);
+
+    return () => clearInterval(timer);
+  }, [isMainAdmin]);
+
+  const reviewLocalOperation = async (request, decision) => {
+    const reason = window.prompt(
+      `${decision === "APPROVE" ? "Approve" : "Reject"} ${request.action} for ${request.device?.user?.name || "employee"} on ${request.device?.name || request.deviceId}. Enter an audit reason (8–500 characters):`,
+    );
+
+    if (reason === null) return;
+
+    if (reason.trim().length < 8 || reason.trim().length > 500) {
+      setError("Enter an audit reason containing 8–500 characters.");
+      return;
+    }
+
+    setReviewingOperation(request.commandId);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch(
+        `/api/endpoint/local-operation-requests/${encodeURIComponent(request.commandId)}/review`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ decision, reason }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          getErrorMessage(data, "Unable to review authorization request."),
+        );
+      }
+
+      setSuccess(
+        `${request.action} ${decision.toLowerCase()}d. The device must still complete the operation before the grant expires.`,
+      );
+
+      await loadLocalOperationRequests();
+    } catch (error) {
+      setError(error.message || "Unable to review authorization request.");
+      await loadLocalOperationRequests();
+    } finally {
+      setReviewingOperation("");
+    }
+  };
+    const openCreateForm = () => {
     setEditingAdmin(null);
     setForm(INITIAL_FORM);
     setError("");
@@ -358,9 +418,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) {
-      return;
-    }
+    if (!deleteTarget) return;
 
     const token = getToken();
 
@@ -393,7 +451,6 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
       );
 
       setDeleteTarget(null);
-
       setSuccess("Administrator deleted successfully.");
     } catch (err) {
       setError(err.message || "Unable to delete administrator.");
@@ -405,30 +462,24 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
 
   return (
     <div
-      className={`
-    mx-auto
-    w-full
-    max-w-[1500px]
-    px-5
-    sm:px-8
-    lg:px-12
-    pb-6
-    text-[#F4F7FA]
-  `}
+      className="
+        mx-auto w-full max-w-[1500px]
+        px-5 sm:px-8 lg:px-12 pb-6
+        text-[#F4F7FA]
+      "
     >
+      {/* Hero */}
       <section
-        className="console-hero 
-          relative overflow-hidden
-          min-h-[190px]
-          rounded-2xl
-          border border-[#67E8F9]/45
+        className="
+          console-hero
+          group relative min-h-[210px] overflow-hidden
+          rounded-2xl border border-[#67E8F9]/55
           bg-[#050A10]
-          shadow-[0_18px_60px_rgba(0,0,0,0.24)]
+          shadow-[0_18px_60px_rgba(0,0,0,0.28)]
           transition-all duration-300
           hover:-translate-y-0.5
-          hover:border-[#67E8F9]/80
-          hover:bg-[#070C12]
-          hover:shadow-[0_20px_65px_rgba(103,232,249,0.12)]
+          hover:border-[#67E8F9]/85
+          hover:shadow-[0_22px_70px_rgba(103,232,249,0.12)]
         "
       >
         {/* Technical security background */}
@@ -451,28 +502,25 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           <div className="absolute inset-1 rounded-full border border-[#67E8F9]/20" />
           <div className="absolute inset-5 rounded-full border border-[#D4AF37]/35" />
           <div className="absolute inset-9 rounded-full border border-[#67E8F9]/30" />
+
           <div className="absolute left-1/2 top-1/2 h-20 w-20 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[18px] border-2 border-[#67E8F9]/75 bg-[#050A10]/90 shadow-[0_0_30px_rgba(103,232,249,0.18)]" />
+
           <ShieldCheck className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 text-[#67E8F9]" />
+
           <div className="absolute -left-3 top-7 h-1.5 w-1.5 rounded-full bg-[#D4AF37] shadow-[0_0_12px_rgba(212,175,55,0.8)]" />
           <div className="absolute -right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#67E8F9] shadow-[0_0_12px_rgba(103,232,249,0.8)]" />
         </div>
 
-        <div className="pointer-events-none absolute left-0 top-0 h-10 w-1 rounded-r-full bg-[#D4AF37]" />
-        <div className="pointer-events-none absolute bottom-0 right-0 h-10 w-1 rounded-l-full bg-[#67E8F9]" />
-
-        <div className="relative z-10 flex min-h-[190px] items-center px-6 py-6 sm:px-7 lg:px-8">
+        <div className="relative z-10 flex min-h-[210px] items-center px-6 py-6 sm:px-7 lg:px-8">
           <div className="max-w-[62%]">
             <button
               onClick={onBack}
               className="
-                inline-flex items-center gap-2
-                mb-4
-                text-[12px]
-                uppercase tracking-[0.15em]
+                inline-flex items-center gap-2 mb-4
+                text-[12px] uppercase tracking-[0.15em]
                 text-[#7F8A96]
                 transition-all duration-300
-                hover:-translate-x-0.5
-                hover:text-[#67E8F9]
+                hover:-translate-x-0.5 hover:text-[#67E8F9]
               "
             >
               <ArrowLeft className="h-3.5 w-3.5" />
@@ -481,6 +529,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
 
             <div className="mb-2.5 flex items-center gap-2.5">
               <span className="h-2 w-2 rounded-full bg-[#D4AF37] shadow-[0_0_12px_rgba(212,175,55,0.45)]" />
+
               <span className="text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">
                 Identity Administration
               </span>
@@ -522,6 +571,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
         </div>
       </section>
 
+      {/* Feedback messages */}
       {error && (
         <div className="mt-3 flex items-center gap-3 rounded-xl border border-red-500/45 bg-red-500/[0.06] px-4 py-2.5 text-[12px] text-red-400 transition-all duration-300 hover:border-red-500/70 hover:bg-red-500/[0.09]">
           <ShieldAlert className="h-4 w-4 shrink-0" />
@@ -535,18 +585,120 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           {success}
         </div>
       )}
+            {/* Local agent operation requests */}
+      {isMainAdmin && (
+        <section className="mt-4 rounded-2xl border border-[#D4AF37]/35 bg-[#050A10] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-[#F4F7FA]">
+                Local agent operation requests
+              </h2>
 
-      {isMainAdmin&&<section className="mt-4 rounded-2xl border border-[#D4AF37]/35 bg-[#050A10] p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold text-[#F4F7FA]">Local agent operation requests</h2><p className="mt-1 text-sm text-[#A7B0BA]">SERVICE_STOP and AGENT_UNINSTALL require your fresh MFA approval. Monitoring pause/resume remains a separate operation.</p></div><button type="button" onClick={loadLocalOperationRequests} className="rounded-lg border border-[#67E8F9]/40 px-3 py-2 text-sm text-[#67E8F9]">Refresh requests</button></div>
-        {localOperationRequestsError?<p role="alert" className="mt-4 rounded-lg border border-red-400/30 p-4 text-sm text-red-300">{localOperationRequestsError}</p>:!localOperationRequests.length?<p className="mt-4 rounded-lg border border-white/10 p-4 text-sm text-[#A7B0BA]">No local agent operation requests.</p>:<div className="mt-4 space-y-3">{localOperationRequests.map(request=><article key={request.commandId} className="rounded-xl border border-white/10 bg-[#0B1320] p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><strong className="text-[#F4F7FA]">{request.action.replace('_',' ')}</strong><div className="mt-1 text-sm text-[#A7B0BA]">{request.device?.user?.name||'Unknown employee'} ({request.device?.user?.employeeId||'no employee ID'}) · {request.device?.name||'Unknown device'} · {request.deviceId}</div><div className="mt-1 text-xs text-[#7F8A96]">Requested {new Date(request.requestedAt||request.createdAt).toLocaleString()} · expires {request.expiresAt?new Date(request.expiresAt).toLocaleString():'unknown'}{request.reviewedBy?` · reviewed by ${request.reviewedBy} at ${new Date(request.reviewedAt).toLocaleString()}`:''}</div><p className="mt-2 whitespace-pre-line text-sm text-[#C8D1DC]">{request.reason}</p></div><span className="max-w-[300px] rounded-full border border-[#D4AF37]/30 px-3 py-1 text-xs text-[#D4AF37]">{localOperationStatusLabel(request.status)}</span></div>
-          {request.status==='AUTH_REQUESTED'&&<div className="mt-3 flex gap-2"><button disabled={Boolean(reviewingOperation)} onClick={()=>reviewLocalOperation(request,'APPROVE')} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{reviewingOperation===request.commandId?'Working…':'Approve'}</button><button disabled={Boolean(reviewingOperation)} onClick={()=>reviewLocalOperation(request,'REJECT')} className="rounded-lg border border-red-400/40 px-3 py-2 text-sm text-red-300 disabled:opacity-50">Reject</button></div>}
-        </article>)}</div>}
-      </section>}
+              <p className="mt-1 text-sm text-[#A7B0BA]">
+                SERVICE_STOP and AGENT_UNINSTALL require your fresh MFA
+                approval. Monitoring pause/resume remains a separate operation.
+              </p>
+            </div>
 
+            <button
+              type="button"
+              onClick={loadLocalOperationRequests}
+              className="rounded-lg border border-[#67E8F9]/40 px-3 py-2 text-sm text-[#67E8F9] transition-all hover:border-[#67E8F9] hover:bg-[#67E8F9]/[0.06]"
+            >
+              Refresh requests
+            </button>
+          </div>
+
+          {localOperationRequestsError ? (
+            <p
+              role="alert"
+              className="mt-4 rounded-lg border border-red-400/30 p-4 text-sm text-red-300"
+            >
+              {localOperationRequestsError}
+            </p>
+          ) : !localOperationRequests.length ? (
+            <p className="mt-4 rounded-lg border border-white/10 p-4 text-sm text-[#A7B0BA]">
+              No local agent operation requests.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {localOperationRequests.map((request) => (
+                <article
+                  key={request.commandId}
+                  className="rounded-xl border border-white/10 bg-[#0B1320] p-4 transition-all duration-300 hover:border-[#D4AF37]/30"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <strong className="text-[#F4F7FA]">
+                        {request.action.replace("_", " ")}
+                      </strong>
+
+                      <div className="mt-1 text-sm text-[#A7B0BA]">
+                        {request.device?.user?.name || "Unknown employee"} (
+                        {request.device?.user?.employeeId || "no employee ID"})
+                        · {request.device?.name || "Unknown device"} ·{" "}
+                        {request.deviceId}
+                      </div>
+
+                      <div className="mt-1 text-xs text-[#7F8A96]">
+                        Requested{" "}
+                        {new Date(
+                          request.requestedAt || request.createdAt,
+                        ).toLocaleString()}
+                        {" · "}expires{" "}
+                        {request.expiresAt
+                          ? new Date(request.expiresAt).toLocaleString()
+                          : "unknown"}
+                        {request.reviewedBy
+                          ? ` · reviewed by ${request.reviewedBy} at ${new Date(request.reviewedAt).toLocaleString()}`
+                          : ""}
+                      </div>
+
+                      <p className="mt-2 whitespace-pre-line text-sm text-[#C8D1DC]">
+                        {request.reason}
+                      </p>
+                    </div>
+
+                    <span className="max-w-[300px] rounded-full border border-[#D4AF37]/30 px-3 py-1 text-xs text-[#D4AF37]">
+                      {localOperationStatusLabel(request.status)}
+                    </span>
+                  </div>
+
+                  {request.status === "AUTH_REQUESTED" && (
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        disabled={Boolean(reviewingOperation)}
+                        onClick={() =>
+                          reviewLocalOperation(request, "APPROVE")
+                        }
+                        className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-emerald-500 disabled:opacity-50"
+                      >
+                        {reviewingOperation === request.commandId
+                          ? "Working…"
+                          : "Approve"}
+                      </button>
+
+                      <button
+                        disabled={Boolean(reviewingOperation)}
+                        onClick={() =>
+                          reviewLocalOperation(request, "REJECT")
+                        }
+                        className="rounded-lg border border-red-400/40 px-3 py-2 text-sm text-red-300 transition-all hover:bg-red-500/[0.08] disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Statistics */}
       <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Panel
-          isDark={isDark}
           className="
             group relative overflow-hidden rounded-xl p-4
             border-[#D4AF37]/60
@@ -555,14 +707,17 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           "
         >
           <div className="absolute right-4 top-3 h-1.5 w-1.5 rounded-full bg-[#D4AF37] shadow-[0_0_10px_rgba(212,175,55,0.8)]" />
+
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#D4AF37]/30 bg-[#D4AF37]/[0.06] text-[#D4AF37] transition-all duration-300 group-hover:border-[#D4AF37]/70 group-hover:bg-[#D4AF37]/[0.12]">
               <UsersRound className="h-5 w-5" />
             </div>
+
             <div>
               <span className="block text-[12px] uppercase tracking-[0.18em] text-[#7F8A96]">
                 Total Administrators
               </span>
+
               <span className="mt-1 block text-2xl leading-none text-[#D4AF37]">
                 {adminCount}
               </span>
@@ -571,7 +726,6 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
         </Panel>
 
         <Panel
-          isDark={isDark}
           className="
             group relative overflow-hidden rounded-xl p-4
             border-[#67E8F9]/55
@@ -580,14 +734,17 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           "
         >
           <div className="absolute right-4 top-3 h-1.5 w-1.5 rounded-full bg-[#67E8F9] shadow-[0_0_10px_rgba(103,232,249,0.8)]" />
+
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#67E8F9]/30 bg-[#67E8F9]/[0.06] text-[#67E8F9] transition-all duration-300 group-hover:border-[#67E8F9]/70 group-hover:bg-[#67E8F9]/[0.12]">
               <UserRoundCheck className="h-5 w-5" />
             </div>
+
             <div>
               <span className="block text-[12px] uppercase tracking-[0.18em] text-[#7F8A96]">
                 Active
               </span>
+
               <span className="mt-1 block text-2xl leading-none text-emerald-400">
                 {activeCount}
               </span>
@@ -596,7 +753,6 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
         </Panel>
 
         <Panel
-          isDark={isDark}
           className="
             group relative overflow-hidden rounded-xl p-4
             border-red-500/55
@@ -605,14 +761,17 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           "
         >
           <div className="absolute right-4 top-3 h-1.5 w-1.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.8)]" />
+
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/[0.06] text-red-400 transition-all duration-300 group-hover:border-red-500/70 group-hover:bg-red-500/[0.12]">
               <UserRoundX className="h-5 w-5" />
             </div>
+
             <div>
               <span className="block text-[12px] uppercase tracking-[0.18em] text-[#7F8A96]">
                 Inactive
               </span>
+
               <span className="mt-1 block text-2xl leading-none text-red-400">
                 {inactiveCount}
               </span>
@@ -621,18 +780,16 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
         </Panel>
       </section>
 
+      {/* Administrator directory */}
       <section className="mt-5">
-        <Panel
-          isDark={isDark}
-          className="relative overflow-hidden rounded-2xl border-[#67E8F9]/45 hover:border-[#67E8F9]/80 hover:bg-[#070C12] hover:shadow-[0_18px_60px_rgba(103,232,249,0.08)]"
-        >
-          <div className="pointer-events-none absolute bottom-0 right-0 h-8 w-1 rounded-l-full bg-[#D4AF37]" />
+        <Panel className="relative overflow-hidden rounded-2xl border-[#67E8F9]/45 hover:border-[#67E8F9]/80 hover:bg-[#070C12] hover:shadow-[0_18px_60px_rgba(103,232,249,0.08)]">
           <div className="p-4 sm:p-5 transition-colors duration-300 hover:bg-[#67E8F9]/[0.012]">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#D4AF37]/30 bg-[#D4AF37]/[0.06] text-[#D4AF37]">
                   <Database className="h-4 w-4" />
                 </div>
+
                 <div>
                   <span className="block text-[12px] uppercase tracking-[0.2em] text-[#D4AF37] mb-1.5">
                     Administrator Directory
@@ -650,11 +807,11 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
               </div>
 
               <div className="text-right">
-                <span className="block text-[12px]  uppercase text-[#7F8A96]">
+                <span className="block text-[12px] uppercase text-[#7F8A96]">
                   Accounts
                 </span>
 
-                <span className=" text-2xl">{adminCount}</span>
+                <span className="text-2xl">{adminCount}</span>
               </div>
             </div>
           </div>
@@ -662,7 +819,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           {loading ? (
             <div className="px-4 sm:px-5 pb-5">
               <div className="min-h-[105px] flex items-center justify-center rounded-xl border border-dashed border-white/10 transition-all duration-300 hover:border-[#67E8F9]/35 hover:bg-[#67E8F9]/[0.02]">
-                <span className="text-[13px]  uppercase tracking-wider text-[#7F8A96]">
+                <span className="text-[13px] uppercase tracking-wider text-[#7F8A96]">
                   Loading administrators...
                 </span>
               </div>
@@ -670,16 +827,12 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           ) : admins.length === 0 ? (
             <div className="px-4 sm:px-5 pb-5">
               <div
-                className={`
-                  min-h-[105px]
-                  flex items-center justify-center
-                  rounded-xl
-                  border border-dashed
-                  border-white/10
+                className="
+                  min-h-[105px] flex items-center justify-center
+                  rounded-xl border border-dashed border-white/10
                   transition-all duration-300
-                  hover:border-[#67E8F9]/35
-                  hover:bg-[#67E8F9]/[0.02]
-                `}
+                  hover:border-[#67E8F9]/35 hover:bg-[#67E8F9]/[0.02]
+                "
               >
                 <div className="text-center">
                   <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full border border-[#67E8F9]/15 bg-[#67E8F9]/[0.03]">
@@ -696,26 +849,12 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[950px] text-left">
                 <thead>
-                  <tr
-                    className={`
-                      border-y
-                      text-[12px]
-                      
-                      uppercase
-                      tracking-[0.15em]
-                      border-white/10 text-[#7F8A96]
-                    `}
-                  >
+                  <tr className="border-y text-[12px] uppercase tracking-[0.15em] border-white/10 text-[#7F8A96]">
                     <th className="px-6 py-4">Administrator</th>
-
                     <th className="px-4 py-4">Department</th>
-
                     <th className="px-4 py-4">Role</th>
-
                     <th className="px-4 py-4">Status</th>
-
                     <th className="px-4 py-4">Access</th>
-
                     <th className="px-6 py-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -730,30 +869,30 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                         .slice(0, 2)
                         .toUpperCase() || "AD";
 
-                    const isMain = Boolean(admin.isMainAdmin);
+                    const isMain = Boolean(
+                      admin.isMainAdmin || admin.is_main_admin,
+                    );
 
                     return (
                       <tr
                         key={admin.id}
-                        className={`
-                            border-b
-                            transition-all duration-300
-                            border-white/10 hover:bg-[#67E8F9]/[0.035] hover:border-[#67E8F9]/35 hover:shadow-[inset_2px_0_0_rgba(103,232,249,0.45)]
-                          `}
+                        className="
+                          border-b border-white/10
+                          transition-all duration-300
+                          hover:bg-[#67E8F9]/[0.035]
+                          hover:border-[#67E8F9]/35
+                          hover:shadow-[inset_2px_0_0_rgba(103,232,249,0.45)]
+                        "
                       >
                         <td className="px-6 py-5">
                           <div className="flex items-center gap-3">
                             <div
                               className="
-                                w-10 h-10
-                                rounded-xl
+                                w-10 h-10 rounded-xl
                                 flex items-center justify-center
                                 border border-[#D4AF37]/40
-                                bg-[#D4AF37]/5
-                                text-[#D4AF37]
-                                text-[13px]
-                                
-                                font-bold
+                                bg-[#D4AF37]/5 text-[#D4AF37]
+                                text-[13px] font-bold
                               "
                             >
                               {initials}
@@ -764,7 +903,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                                 {admin.name}
                               </div>
 
-                              <div className="mt-1 text-[13px]  text-[#7F8A96]">
+                              <div className="mt-1 text-[13px] text-[#7F8A96]">
                                 {admin.email}
                               </div>
                             </div>
@@ -782,16 +921,16 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                         </td>
 
                         <td className="px-4 py-5">
-                          <StatusBadge status={admin.status} isDark={isDark} />
+                          <StatusBadge status={admin.status} />
                         </td>
 
                         <td className="px-4 py-5">
                           {isMain ? (
-                            <span className="inline-flex px-2.5 py-1 rounded-full border border-[#D4AF37]/30 bg-[#D4AF37]/5 text-[#D4AF37] text-[12px]  uppercase tracking-wider">
+                            <span className="inline-flex px-2.5 py-1 rounded-full border border-[#D4AF37]/30 bg-[#D4AF37]/5 text-[#D4AF37] text-[12px] uppercase tracking-wider">
                               Main Admin
                             </span>
                           ) : (
-                            <span className="text-[12px]  uppercase tracking-wider text-[#7F8A96]">
+                            <span className="text-[12px] uppercase tracking-wider text-[#7F8A96]">
                               Administrator
                             </span>
                           )}
@@ -803,19 +942,17 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                               <>
                                 <button
                                   onClick={() => openEditForm(admin)}
-                                  className={`
-                                        w-9 h-9
-                                        rounded-lg
-                                        flex items-center justify-center
-                                        border border-white/10
-                                        text-[#A7B0BA]
-                                        hover:text-[#67E8F9]
-                                        hover:border-[#67E8F9]/70
-                                        hover:bg-[#67E8F9]/[0.08]
-                                        hover:-translate-y-0.5
-                                        hover:shadow-[0_8px_20px_rgba(103,232,249,0.12)]
-                                        transition-all duration-300
-                                      `}
+                                  className="
+                                    w-9 h-9 rounded-lg
+                                    flex items-center justify-center
+                                    border border-white/10 text-[#A7B0BA]
+                                    hover:text-[#67E8F9]
+                                    hover:border-[#67E8F9]/70
+                                    hover:bg-[#67E8F9]/[0.08]
+                                    hover:-translate-y-0.5
+                                    hover:shadow-[0_8px_20px_rgba(103,232,249,0.12)]
+                                    transition-all duration-300
+                                  "
                                   title="Edit administrator"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
@@ -824,18 +961,16 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                                 <button
                                   onClick={() => setDeleteTarget(admin)}
                                   className="
-                                        w-9 h-9
-                                        rounded-lg
-                                        flex items-center justify-center
-                                        border border-red-500/20
-                                        text-red-400
-                                        hover:bg-red-500/12
-                                        hover:border-red-500/60
-                                        hover:text-red-300
-                                        hover:-translate-y-0.5
-                                        hover:shadow-[0_8px_20px_rgba(239,68,68,0.10)]
-                                        transition-all duration-300
-                                      "
+                                    w-9 h-9 rounded-lg
+                                    flex items-center justify-center
+                                    border border-red-500/20 text-red-400
+                                    hover:bg-red-500/12
+                                    hover:border-red-500/60
+                                    hover:text-red-300
+                                    hover:-translate-y-0.5
+                                    hover:shadow-[0_8px_20px_rgba(239,68,68,0.10)]
+                                    transition-all duration-300
+                                  "
                                   title="Delete administrator"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -844,7 +979,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                             )}
 
                             {canManageAdmin && isMain && (
-                              <span className="text-[12px]  uppercase tracking-wider text-[#A7B0BA]">
+                              <span className="text-[12px] uppercase tracking-wider text-[#A7B0BA]">
                                 Protected
                               </span>
                             )}
@@ -859,7 +994,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           )}
         </Panel>
       </section>
-
+            {/* Create / Edit Administrator Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
@@ -868,28 +1003,23 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           />
 
           <div
-            className={`
-              relative
-              w-full
-              max-w-2xl
-              max-h-[90vh]
-              overflow-y-auto
-              rounded-2xl
-              border
+            className="
+              relative w-full max-w-2xl max-h-[90vh]
+              overflow-y-auto rounded-2xl border
               bg-[#050A10] border-white/10
               shadow-[0_24px_80px_rgba(0,0,0,0.42)]
               hover:border-[#67E8F9]/30
-            `}
+            "
           >
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
               <div>
-                <span className="block text-[12px]  uppercase tracking-[0.2em] text-[#D4AF37]">
+                <span className="block text-[12px] uppercase tracking-[0.2em] text-[#D4AF37]">
                   {editingAdmin
                     ? "Administrator Update"
                     : "Administrator Provisioning"}
                 </span>
 
-                <h3 className="mt-1  text-2xl font-light">
+                <h3 className="mt-1 text-2xl font-light">
                   {editingAdmin ? "Edit Administrator" : "Add Administrator"}
                 </h3>
               </div>
@@ -904,7 +1034,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
               <div>
-                <label className="block mb-2 text-[12px]  uppercase tracking-wider text-[#7F8A96]">
+                <label className="block mb-2 text-[12px] uppercase tracking-wider text-[#7F8A96]">
                   Full Name
                 </label>
 
@@ -914,21 +1044,19 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                   value={form.name}
                   onChange={handleChange}
                   required
-                  className={`
-                    w-full
-                    px-4 py-3
-                    border rounded-xl
-                    outline-none
-                    text-sm transition-all duration-200
+                  className="
+                    w-full px-4 py-3 border rounded-xl
+                    outline-none text-sm transition-all duration-200
                     hover:border-[#67E8F9]/30
-                    bg-[#050A10]/[0.02] border-white/10 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:ring-2 focus:ring-[#67E8F9]/10
-                  `}
+                    bg-[#050A10] border-white/10 text-[#F4F7FA]
+                    focus:border-[#67E8F9]/60 focus:ring-2 focus:ring-[#67E8F9]/10
+                  "
                   placeholder="Administrator name"
                 />
               </div>
 
               <div>
-                <label className="block mb-2 text-[12px]  uppercase tracking-wider text-[#7F8A96]">
+                <label className="block mb-2 text-[12px] uppercase tracking-wider text-[#7F8A96]">
                   Corporate Email
                 </label>
 
@@ -938,21 +1066,19 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                   value={form.email}
                   onChange={handleChange}
                   required
-                  className={`
-                    w-full
-                    px-4 py-3
-                    border rounded-xl
-                    outline-none
-                    text-sm transition-all duration-200
+                  className="
+                    w-full px-4 py-3 border rounded-xl
+                    outline-none text-sm transition-all duration-200
                     hover:border-[#67E8F9]/30
-                    bg-[#050A10]/[0.02] border-white/10 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:ring-2 focus:ring-[#67E8F9]/10
-                  `}
+                    bg-[#050A10] border-white/10 text-[#F4F7FA]
+                    focus:border-[#67E8F9]/60 focus:ring-2 focus:ring-[#67E8F9]/10
+                  "
                   placeholder="admin@company.com"
                 />
               </div>
 
               <div>
-                <label className="block mb-2 text-[12px]  uppercase tracking-wider text-[#7F8A96]">
+                <label className="block mb-2 text-[12px] uppercase tracking-wider text-[#7F8A96]">
                   {editingAdmin ? "New Password" : "Password"}
                 </label>
 
@@ -967,15 +1093,13 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                     required={!editingAdmin}
                     minLength={12}
                     maxLength={128}
-                    className={`
-                      w-full
-                      pl-11 pr-4 py-3
-                      border rounded-xl
-                      outline-none
-                      text-sm transition-all duration-200
+                    className="
+                      w-full pl-11 pr-4 py-3 border rounded-xl
+                      outline-none text-sm transition-all duration-200
                       hover:border-[#67E8F9]/30
-                      bg-[#050A10]/[0.02] border-white/10 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:ring-2 focus:ring-[#67E8F9]/10
-                    `}
+                      bg-[#050A10] border-white/10 text-[#F4F7FA]
+                      focus:border-[#67E8F9]/60 focus:ring-2 focus:ring-[#67E8F9]/10
+                    "
                     placeholder={
                       editingAdmin
                         ? "Leave blank to keep current password"
@@ -987,7 +1111,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="block mb-2 text-[12px]  uppercase tracking-wider text-[#7F8A96]">
+                  <label className="block mb-2 text-[12px] uppercase tracking-wider text-[#7F8A96]">
                     Department
                   </label>
 
@@ -995,15 +1119,12 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                     name="department"
                     value={form.department}
                     onChange={handleChange}
-                    className={`
-                      w-full
-                      px-4 py-3
-                      border rounded-xl
-                      outline-none
-                      text-sm transition-all duration-200
+                    className="
+                      w-full px-4 py-3 border rounded-xl
+                      outline-none text-sm transition-all duration-200
                       hover:border-[#67E8F9]/30
                       bg-[#050A10] border-white/10 text-[#F4F7FA]
-                    `}
+                    "
                   >
                     {DEPARTMENTS.map((department) => (
                       <option key={department} value={department}>
@@ -1014,7 +1135,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                 </div>
 
                 <div>
-                  <label className="block mb-2 text-[12px]  uppercase tracking-wider text-[#7F8A96]">
+                  <label className="block mb-2 text-[12px] uppercase tracking-wider text-[#7F8A96]">
                     Role
                   </label>
 
@@ -1022,15 +1143,12 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                     name="role"
                     value={form.role}
                     onChange={handleChange}
-                    className={`
-                      w-full
-                      px-4 py-3
-                      border rounded-xl
-                      outline-none
-                      text-sm transition-all duration-200
+                    className="
+                      w-full px-4 py-3 border rounded-xl
+                      outline-none text-sm transition-all duration-200
                       hover:border-[#67E8F9]/30
                       bg-[#050A10] border-white/10 text-[#F4F7FA]
-                    `}
+                    "
                   >
                     {ROLES.map((role) => (
                       <option key={role} value={role}>
@@ -1043,7 +1161,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                 </div>
 
                 <div>
-                  <label className="block mb-2 text-[12px]  uppercase tracking-wider text-[#7F8A96]">
+                  <label className="block mb-2 text-[12px] uppercase tracking-wider text-[#7F8A96]">
                     Status
                   </label>
 
@@ -1052,16 +1170,13 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                     value={form.status}
                     onChange={handleChange}
                     disabled={Boolean(editingAdmin?.isMainAdmin)}
-                    className={`
-                      w-full
-                      px-4 py-3
-                      border rounded-xl
-                      outline-none
-                      text-sm transition-all duration-200
+                    className="
+                      w-full px-4 py-3 border rounded-xl
+                      outline-none text-sm transition-all duration-200
                       hover:border-[#67E8F9]/30
                       disabled:opacity-50
                       bg-[#050A10] border-white/10 text-[#F4F7FA]
-                    `}
+                    "
                   >
                     <option value="ACTIVE">Active</option>
                     <option value="DISABLED">Inactive</option>
@@ -1069,54 +1184,49 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                 </div>
               </div>
 
+              {/* Authentication information */}
               <div
-                className={`
-                  rounded-xl
-                  border
-                  p-4
+                className="
+                  rounded-xl border p-4
                   border-white/10 bg-[#070C12]
                   transition-all duration-300
                   hover:border-[#D4AF37]/30
-                `}
+                "
               >
                 <div className="flex items-start gap-3">
                   <Shield className="w-4 h-4 text-[#D4AF37] mt-0.5" />
 
                   <div>
-                    <div className="text-[13px]  uppercase tracking-wider text-[#D4AF37]">
+                    <div className="text-[13px] uppercase tracking-wider text-[#D4AF37]">
                       Authentication
                     </div>
 
                     <p className="mt-1 text-[13px] leading-relaxed text-[#7F8A96]">
                       The password is hashed by the backend before storage. The
-                      administrator will use this email and password for website
-                      authentication followed by MFA.
+                      administrator will use this email and password for
+                      website authentication followed by MFA.
                     </p>
                   </div>
                 </div>
               </div>
 
+              {/* Form actions */}
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={closeForm}
                   disabled={saving}
-                  className={`
-                    px-5 py-3
-                    rounded-xl
-                    border
-                    text-[13px]
-                    
-                    uppercase
-                    tracking-wider
+                  className="
+                    px-5 py-3 rounded-xl border
+                    text-[13px] uppercase tracking-wider
                     text-[#7F8A96]
                     hover:text-[#F4F7FA]
                     hover:border-[#67E8F9]/50
                     hover:bg-[#67E8F9]/[0.04]
                     hover:-translate-y-0.5
                     transition-all duration-300
-                    border-white/10
-                  `}
+                    border-white/10 disabled:opacity-50
+                  "
                 >
                   Cancel
                 </button>
@@ -1125,25 +1235,15 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
                   type="submit"
                   disabled={saving}
                   className="
-                    inline-flex
-                    items-center
-                    gap-2
-                    px-5 py-3
-                    rounded-xl
-                    bg-[#67E8F9]
-                    border border-[#67E8F9]
+                    inline-flex items-center gap-2
+                    px-5 py-3 rounded-xl
+                    bg-[#67E8F9] border border-[#67E8F9]
                     text-[#03070C]
-                    rounded-xl
-                    hover:bg-transparent
-                    hover:text-[#67E8F9]
+                    hover:bg-transparent hover:text-[#67E8F9]
                     hover:-translate-y-0.5
                     hover:shadow-[0_10px_28px_rgba(103,232,249,0.14)]
                     transition-all duration-300
-                    text-[13px]
-                    
-                    font-semibold
-                    uppercase
-                    tracking-wider
+                    text-[13px] font-semibold uppercase tracking-wider
                     disabled:opacity-50
                   "
                 >
@@ -1160,7 +1260,7 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           </div>
         </div>
       )}
-
+            {/* Delete Administrator Confirmation Modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div
@@ -1169,45 +1269,41 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
           />
 
           <div
-            className={`
-              relative
-              w-full
-              max-w-md
-              border rounded-2xl
-              p-6
+            className="
+              relative w-full max-w-md
+              border rounded-2xl p-6
               bg-[#050A10] border-white/10
               shadow-[0_24px_80px_rgba(0,0,0,0.42)]
               hover:border-[#67E8F9]/30
-            `}
+            "
           >
             <div className="w-10 h-10 rounded-xl flex items-center justify-center border border-red-500/30 bg-red-500/5 text-red-400 transition-all duration-300 hover:border-red-500/60 hover:bg-red-500/10">
               <Trash2 className="w-4 h-4" />
             </div>
 
-            <h3 className="mt-5  text-2xl font-light">Delete Administrator</h3>
+            <h3 className="mt-5 text-2xl font-light">
+              Delete Administrator
+            </h3>
 
             <p className="mt-3 text-sm leading-relaxed text-[#7F8A96]">
               Delete{" "}
               <span className="text-[#F4F7FA]">{deleteTarget.name}</span>? This
-              removes the account from the directory and revokes access. Security history is retained. The main admin must reassign its staff.
+              removes the account from the directory and revokes access.
+              Security history is retained. The main admin must reassign its
+              staff.
             </p>
 
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => setDeleteTarget(null)}
                 className="
-                  px-5 py-3
-                  border border-white/10
-                  text-[13px]
-                  rounded-xl
+                  px-5 py-3 border border-white/10
+                  text-[13px] rounded-xl
                   hover:border-[#67E8F9]/40
                   hover:text-[#67E8F9]
                   hover:bg-[#67E8F9]/5
                   transition-all duration-300
-                  
-                  uppercase
-                  tracking-wider
-                  text-[#7F8A96]
+                  uppercase tracking-wider text-[#7F8A96]
                 "
               >
                 Cancel
@@ -1216,21 +1312,16 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
               <button
                 onClick={handleDelete}
                 className="
-                  px-5 py-3
-                  bg-red-500
+                  px-5 py-3 bg-red-500
                   border border-red-500
-                  text-[#F4F7FA]
-                  text-[13px]
+                  text-[#F4F7FA] text-[13px]
                   rounded-xl
                   hover:bg-red-600
                   hover:border-red-400
                   hover:-translate-y-0.5
                   hover:shadow-[0_10px_28px_rgba(239,68,68,0.16)]
                   transition-all duration-300
-                  
-                  font-semibold
-                  uppercase
-                  tracking-wider
+                  font-semibold uppercase tracking-wider
                 "
               >
                 Delete Administrator
@@ -1242,3 +1333,5 @@ export const AdminManagementPage = ({ currentUser, onBack }) => {
     </div>
   );
 };
+
+export default AdminManagementPage;

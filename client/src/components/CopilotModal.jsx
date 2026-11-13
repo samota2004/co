@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from "react";
 import {
   Sparkles,
@@ -11,7 +12,12 @@ import {
   LockKeyhole,
 } from "lucide-react";
 
-export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
+export const CopilotModal = ({
+  isOpen,
+  onClose,
+  initialContext,
+  context,
+}) => {
   const activeContext = context || initialContext;
 
   const [input, setInput] = useState("");
@@ -23,11 +29,14 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
       timestamp: new Date().toLocaleTimeString(),
     },
   ]);
+
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
   };
 
   useEffect(() => {
@@ -57,7 +66,9 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
     try {
       const res = await fetch("/api/copilot/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           message: textToSend,
           context: activeContext,
@@ -98,9 +109,10 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-end bg-[#03070C]/85 backdrop-blur-md">
+    <div className="fixed inset-0 z-50 flex items-center justify-end bg-[#03070C]/85 p-0 backdrop-blur-md">
       <div className="relative flex h-full w-full max-w-2xl flex-col overflow-hidden border-l border-[#67E8F9]/20 bg-[#050A10] text-[#F4F7FA] shadow-[-24px_0_80px_rgba(0,0,0,0.45)]">
-        {/* Master reference accents */}
+
+        {/* Decorative accents */}
         <div className="pointer-events-none absolute left-0 top-0 h-20 w-[1.5px] rounded-full bg-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.5)]" />
         <div className="pointer-events-none absolute bottom-0 right-0 h-20 w-[1.5px] rounded-full bg-[#67E8F9] shadow-[0_0_20px_rgba(103,232,249,0.5)]" />
 
@@ -115,7 +127,7 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
         />
 
         {/* Header */}
-        <div className="relative z-10 border-b border-white/10 bg-[#050A10]/95 px-5 py-5 sm:px-6 lg:px-7">
+        <div className="relative z-10 shrink-0 border-b border-white/10 bg-[#050A10]/95 px-5 py-5 sm:px-6 lg:px-7">
           <div className="flex items-start justify-between gap-4">
             <div className="flex min-w-0 items-start gap-4">
               <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#67E8F9]/30 bg-[#070C12] shadow-[0_0_25px_rgba(103,232,249,0.08)]">
@@ -125,26 +137,30 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
 
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="text-[12px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#67E8F9]">
                     AI Security Operations
                   </span>
-                  <span className="rounded-full border border-[#D4AF37]/25 bg-[#D4AF37]/10 px-2.5 py-1 text-[11px] font-medium tracking-wide text-[#D4AF37]">
+
+                  <span className="rounded-full border border-[#D4AF37]/25 bg-[#D4AF37]/10 px-2.5 py-1 text-[10px] font-medium tracking-wide text-[#D4AF37]">
                     GEMINI ENGINE
                   </span>
                 </div>
 
-                <h3 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
+                <h3 className="mt-1 text-xl font-semibold tracking-tight text-[#F4F7FA] sm:text-2xl">
                   CyberOrbit{" "}
-                  <span className="text-[#67E8F9]">Security Copilot</span>
+                  <span className="text-[#67E8F9]">
+                    Security Copilot
+                  </span>
                 </h3>
 
-                <p className="mt-1.5 text-[13px] leading-5 text-[#7F8A96]">
+                <p className="mt-1.5 text-xs leading-5 text-[#7F8A96] sm:text-[13px]">
                   Autonomous Cybersecurity & UEBA Forensic Investigator
                 </p>
               </div>
             </div>
 
             <button
+              type="button"
               onClick={onClose}
               aria-label="Close Copilot"
               className="shrink-0 rounded-xl border border-white/10 bg-[#070C12] p-2.5 text-[#7F8A96] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#050A10] hover:text-[#67E8F9] hover:shadow-[0_8px_25px_rgba(103,232,249,0.07)] focus:border-[#67E8F9]/50 focus:outline-none focus:ring-1 focus:ring-[#67E8F9]/20"
@@ -155,11 +171,12 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
 
           {/* Operational status */}
           <div className="mt-4 flex flex-wrap items-center gap-2.5">
-            <div className="inline-flex items-center gap-2 rounded-lg border border-[#67E8F9]/20 bg-[#070C12] px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-[#7F8A96]">
+            <div className="inline-flex items-center gap-2 rounded-lg border border-[#67E8F9]/20 bg-[#070C12] px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-[#7F8A96]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#67E8F9] shadow-[0_0_8px_rgba(103,232,249,0.8)]" />
               Engine Online
             </div>
-            <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-[#070C12] px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-[#7F8A96]">
+
+            <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-[#070C12] px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-[#7F8A96]">
               <LockKeyhole className="h-3.5 w-3.5 text-[#D4AF37]" />
               Zero Trust Context
             </div>
@@ -167,12 +184,18 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
         </div>
 
         {/* Chat Stream */}
-        <div className="relative z-10 flex-1 space-y-5 overflow-y-auto bg-[#03070C] p-5 sm:p-6">
+        <div
+          className="relative z-10 flex-1 space-y-5 overflow-y-auto bg-[#03070C] p-4 sm:p-6"
+          aria-live="polite"
+          aria-relevant="additions"
+        >
           {messages.map((msg) => (
             <div
               key={msg.id}
               className={`group flex gap-3 ${
-                msg.sender === "user" ? "justify-end" : "justify-start"
+                msg.sender === "user"
+                  ? "justify-end"
+                  : "justify-start"
               }`}
             >
               {msg.sender === "assistant" && (
@@ -184,7 +207,7 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
               <div
                 className={`max-w-[88%] rounded-2xl border p-4 text-[13px] leading-6 shadow-[0_10px_30px_rgba(0,0,0,0.12)] transition-all duration-300 ${
                   msg.sender === "user"
-                    ? "border-[#67E8F9]/25 bg-[#050A10] text-[#F4F7FA] hover:-translate-y-0.5 hover:border-[#67E8F9]/45 hover:shadow-[0_14px_35px_rgba(103,232,249,0.06)]"
+                    ? "border-[#67E8F9]/25 bg-[#050A10] text-[#F4F7FA] hover:border-[#67E8F9]/45 hover:shadow-[0_14px_35px_rgba(103,232,249,0.06)]"
                     : "border-white/10 bg-[#070C12] text-[#A7B0BA] hover:border-[#67E8F9]/20 hover:bg-[#050A10]"
                 }`}
               >
@@ -194,12 +217,15 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
                   ) : (
                     <Sparkles className="h-3.5 w-3.5 text-[#67E8F9]" />
                   )}
+
                   <span className="text-[10px] uppercase tracking-[0.16em] text-[#7F8A96]">
                     {msg.sender === "user" ? "Operator" : "Copilot"}
                   </span>
                 </div>
 
-                <div className="whitespace-pre-line">{msg.text}</div>
+                <div className="whitespace-pre-line break-words">
+                  {msg.text}
+                </div>
 
                 <span className="mt-2 block text-[11px] text-[#7F8A96]">
                   {msg.timestamp}
@@ -222,7 +248,9 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
 
               <div className="flex items-center gap-3 rounded-xl border border-[#67E8F9]/20 bg-[#070C12] px-4 py-3 text-[13px] text-[#67E8F9] shadow-[0_10px_30px_rgba(103,232,249,0.05)]">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-[#67E8F9] shadow-[0_0_8px_rgba(103,232,249,0.8)]" />
-                <span>Evaluating telemetry with Gemini Security Engine...</span>
+                <span>
+                  Evaluating telemetry with Gemini Security Engine...
+                </span>
               </div>
             </div>
           )}
@@ -231,10 +259,10 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
         </div>
 
         {/* Quick Prompts */}
-        <div className="relative z-10 border-t border-white/10 bg-[#050A10] px-5 py-4 sm:px-6">
+        <div className="relative z-10 shrink-0 border-t border-white/10 bg-[#050A10] px-4 py-4 sm:px-6">
           <div className="mb-3 flex items-center gap-2">
             <Activity className="h-3.5 w-3.5 text-[#D4AF37]" />
-            <span className="text-[12px] uppercase tracking-[0.16em] text-[#67E8F9]">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#67E8F9]">
               Suggested Investigations
             </span>
           </div>
@@ -242,9 +270,11 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
           <div className="flex flex-wrap gap-2">
             {quickPrompts.map((prompt, idx) => (
               <button
+                type="button"
                 key={idx}
                 onClick={() => handleSend(prompt)}
-                className="rounded-xl border border-white/10 bg-[#070C12] px-3 py-2.5 text-left text-[12px] leading-4 text-[#A7B0BA] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#050A10] hover:text-[#67E8F9] hover:shadow-[0_10px_28px_rgba(103,232,249,0.06)] focus:border-[#67E8F9]/50 focus:outline-none focus:ring-1 focus:ring-[#67E8F9]/20"
+                disabled={loading}
+                className="rounded-xl border border-white/10 bg-[#070C12] px-3 py-2.5 text-left text-[11px] leading-4 text-[#A7B0BA] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/35 hover:bg-[#050A10] hover:text-[#67E8F9] hover:shadow-[0_10px_28px_rgba(103,232,249,0.06)] disabled:cursor-not-allowed disabled:opacity-40 focus:border-[#67E8F9]/50 focus:outline-none focus:ring-1 focus:ring-[#67E8F9]/20"
               >
                 {prompt}
               </button>
@@ -253,7 +283,7 @@ export const CopilotModal = ({ isOpen, onClose, initialContext, context }) => {
         </div>
 
         {/* Input Bar */}
-        <div className="relative z-10 border-t border-white/10 bg-[#03070C] p-5 sm:p-6">
+        <div className="relative z-10 shrink-0 border-t border-white/10 bg-[#03070C] p-4 sm:p-6">
           <form
             onSubmit={(e) => {
               e.preventDefault();

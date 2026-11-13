@@ -1,32 +1,1468 @@
-import {ConsoleHeader} from '../components/ConsoleHeader.jsx';
-import React,{useEffect,useState} from 'react';
-import {BarChart,Bar,LineChart,Line,XAxis,YAxis,Tooltip,ResponsiveContainer} from 'recharts';
-import {requestApi} from '../services/api.js';
-export function MlAnalyticsPage(){
- const[data,setData]=useState(null),[users,setUsers]=useState([]),[selected,setSelected]=useState(''),[aggregationDate,setAggregationDate]=useState(''),[predictions,setPredictions]=useState([]),[features,setFeatures]=useState('{}'),[error,setError]=useState(''),[submitError,setSubmitError]=useState(''),[busy,setBusy]=useState(false),[result,setResult]=useState(null);
- useEffect(()=>{let cancelled=false;Promise.all([requestApi('/api/ml/metrics'),requestApi('/api/users'),requestApi('/api/ml/predictions')]).then(([m,u,p])=>{if(!cancelled){setData(m);setUsers(u.users);setPredictions(p.predictions);}}).catch(e=>!cancelled&&setError(e.message));return()=>{cancelled=true;};},[]);
- async function predict(e){
-  e.preventDefault();setBusy(true);setSubmitError('');setResult(null);
-  try{
-   const parsedFeatures=JSON.parse(features);
-   const response=await requestApi('/api/ml/predict',{method:'POST',body:{userId:selected,aggregationDate,features:parsedFeatures}});
-   setResult(response);
-   try{const history=await requestApi('/api/ml/predictions');setPredictions(history.predictions);}catch{/* The completed assessment remains visible if history refresh is unavailable. */}
-  }catch(e){setSubmitError(e instanceof SyntaxError?'Feature input is not valid JSON. Check commas, quotes, and braces.':e.message||'Assessment could not be completed.');}
-  finally{setBusy(false);}
- }
- const metrics=data?.metrics?.test_metrics;
- const bars=metrics?['Accuracy','Precision','Recall','F1','ROC_AUC','PR_AUC','FPR','FNR'].map(name=>({name,value:metrics[name]})):[];
- return <div className="p-6 space-y-6"><ConsoleHeader title="Model evidence & evaluation" description="Inspect saved model performance, feature requirements and recorded inference results." kind="ai"/>{error&&<p role="alert" className="text-red-400">{error}</p>}{!data&&!error&&<p>Loading model report…</p>}
- {data&&<><div className="model-summary">{["Precision","Recall","F1","ROC_AUC"].map(key=><article className="model-stat" key={key}><span>{key.replaceAll("_"," ")}</span><strong>{Number.isFinite(metrics?.[key])?(metrics[key]*100).toFixed(1)+"%":"Unavailable"}</strong><span>Saved report; original data and splits unverified</span></article>)}</div><section className="rounded-xl border border-cyan-900 p-5 space-y-2"><h2>{data.metrics.model_name}</h2><p>{data.provenance}</p><p>Version: {data.modelFingerprint?.slice(0,16)} · Dataset: {data.metrics.dataset} · Window: {data.metrics.aggregation_level} · Features: {data.metrics.feature_count} · Operating threshold: {data.metrics.operating_threshold}</p><p>Test rows: {data.metrics.test_rows}. Accuracy describes all predictions; it is not threat detection recall.</p></section>
- <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={bars}><XAxis dataKey="name" stroke="#aab"/><YAxis domain={[0,1]} stroke="#aab"/><Tooltip contentStyle={{background:'#0f172a'}}/><Bar dataKey="value" fill="#a78bfa" radius={[4,4,0,0]} isAnimationActive={false}/></BarChart></ResponsiveContainer></div>
- <div className="overflow-x-auto"><table className="w-full"><caption>Saved test confusion matrix</caption><thead><tr><th>True positives</th><th>False positives</th><th>True negatives</th><th>False negatives</th></tr></thead><tbody><tr>{['TP','FP','TN','FN'].map(k=><td className="text-center p-3" key={k}>{metrics?.[k]??'Unavailable'}</td>)}</tr></tbody></table></div>
- <p>Enhanced model comparison: {data.enhancedModel.reason}</p>
- {data.experiment&&<section className="space-y-4"><h2 className="text-xl">Paired experiment: {data.experiment.dataset}</h2><p>{data.experiment.synthetic?'SYNTHETIC SMOKE TEST — not research performance':'Authorized dataset report'}</p><p>{data.experiment.split}</p><p>{data.experiment.limitations}</p><div className="overflow-x-auto"><table className="w-full"><thead><tr><th>Metric</th><th>Baseline</th><th>Enhanced</th><th>Difference</th></tr></thead><tbody>{Object.entries(data.experiment.comparison).map(([metric,delta])=><tr key={metric}><td>{metric}</td><td>{data.experiment.models.baseline.test_metrics[metric].toFixed(4)}</td><td>{data.experiment.models.enhanced.test_metrics[metric].toFixed(4)}</td><td>{delta.toFixed(4)}</td></tr>)}</tbody></table></div><div className="grid md:grid-cols-2 gap-4">{['baseline','enhanced'].map(name=><div key={name}><h3>{name} test ROC</h3><div className="h-60"><ResponsiveContainer width="100%" height="100%"><LineChart data={data.experiment.models[name].curves.roc}><XAxis dataKey="fpr" type="number" domain={[0,1]}/><YAxis domain={[0,1]}/><Tooltip contentStyle={{background:'#0f172a'}}/><Line dataKey="tpr" dot={false} stroke="#67E8F9"/></LineChart></ResponsiveContainer></div></div>)}</div></section>}
- <details><summary>Exact required feature schema</summary><pre className="overflow-x-auto p-4">{JSON.stringify(data.featureSchema,null,2)}</pre></details></>}
- <form onSubmit={predict} className="rounded-xl border border-cyan-900 p-5 space-y-4"><h2 className="text-xl">Import an approved complete user-day aggregate</h2><p>This runs the deployed model on an administrator-supplied prior-day aggregate and records a policy decision. It does not construct that aggregate from live endpoint events and can restrict the selected account. Use a synthetic demo employee for demonstrations. File-change and connection observations cannot supply file-read, content, URL or email features.</p><select required aria-label="Employee for ML import" value={selected} onChange={e=>setSelected(e.target.value)} className="bg-slate-900 p-3"><option value="">Select employee</option>{users.map(u=><option key={u.id} value={u.id}>{u.name} ({u.employeeId})</option>)}</select><label className="block">Complete UTC user-day date<input type="date" required aria-label="Aggregate date" value={aggregationDate} onChange={e=>setAggregationDate(e.target.value)} className="block bg-slate-900 p-3 rounded"/></label><textarea aria-label="Complete feature JSON" required rows={12} value={features} onChange={e=>setFeatures(e.target.value)} className="block bg-slate-900 rounded p-3 w-full font-mono"/><button disabled={busy} className="p-3 rounded bg-cyan-900">{busy?'Assessing…':'Run inference and policy assessment'}</button></form>
- {submitError&&<p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-400/10 p-4 text-rose-100">{submitError}</p>}
- {result&&<section role="status" className="rounded-xl border border-cyan-900 p-5"><h2 className="text-xl">Assessment completed</h2>{result.ml?.threat_probability!==undefined&&result.decision?<><p>Uncalibrated positive-class RF score: {(result.ml.threat_probability*100).toFixed(2)} / 100 · Policy: {result.decision.decision}</p><p>{result.decision.reason}</p><h3 className="mt-4">SHAP model feature contributions</h3><pre className="overflow-x-auto">{JSON.stringify(result.ml.xai_reasons,null,2)}</pre><p>SHAP attributes the model prediction; contextual rules determine additional risk independently.</p></>:<p>The server returned an assessment response in an unexpected format. Contact the administrator; do not treat this as an access approval.</p>}</section>}
- <section className="border border-cyan-900 rounded-xl p-5"><h2>Recent persisted predictions</h2>{!predictions.length&&<p>No model predictions recorded for this company.</p>}{predictions.map(p=><details key={p.id}><summary>{new Date(p.timestamp).toLocaleString()} · {users.find(u=>u.id===p.userId)?.name||p.userId} · {(p.anomalyScore*100).toFixed(2)} / 100 RF score · application risk {p.riskScore}/100</summary><p>Model version: {p.modelVersionId||'Legacy unversioned prediction'}</p><pre className="overflow-x-auto">{JSON.stringify(p.attributions,null,2)}</pre></details>)}</section>
- </div>;
+import React, { useEffect, useMemo, useState } from "react";
+import { ConsoleHeader } from "../components/ConsoleHeader.jsx";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
+import {
+  Activity,
+  BrainCircuit,
+  ShieldCheck,
+  Database,
+  FileJson,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Cpu,
+  Gauge,
+  Upload,
+  ChevronDown,
+  Info,
+} from "lucide-react";
+import { requestApi } from "../services/api.js";
+
+export function MlAnalyticsPage() {
+  const [data, setData] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [selected, setSelected] = useState("");
+  const [aggregationDate, setAggregationDate] = useState("");
+  const [predictions, setPredictions] = useState([]);
+  const [features, setFeatures] = useState("{}");
+
+  const [error, setError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [result, setResult] = useState(null);
+  const [schemaOpen, setSchemaOpen] = useState(false);
+
+  // CyberOrbit theme: cyan primary, gold secondary.
+  const colors = {
+    background: "#03070C",
+    panel: "#050A10",
+    panelHover: "#070C12",
+    cyan: "#67E8F9",
+    gold: "#D4AF37",
+    primary: "#F4F7FA",
+    secondary: "#A7B0BA",
+    muted: "#7F8A96",
+  };
+
+  const cardClass =
+    "group relative overflow-hidden rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/30 hover:bg-[#070C12] sm:p-6";
+
+  const sectionClass =
+    "rounded-2xl border border-white/10 bg-[#050A10] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.18)] sm:p-6";
+
+  // Initial data fetch.
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDashboard = async () => {
+      setLoading(true);
+      setError("");
+
+      try {
+        const [
+          metricsResponse,
+          usersResponse,
+          predictionsResponse,
+        ] = await Promise.all([
+          requestApi("/api/ml/metrics"),
+          requestApi("/api/users"),
+          requestApi("/api/ml/predictions"),
+        ]);
+
+        if (cancelled) return;
+
+        setData(metricsResponse);
+
+        setUsers(
+          Array.isArray(usersResponse?.users)
+            ? usersResponse.users
+            : [],
+        );
+
+        setPredictions(
+          Array.isArray(predictionsResponse?.predictions)
+            ? predictionsResponse.predictions
+            : [],
+        );
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err?.message ||
+              "Unable to load machine learning analytics.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Derived model data.
+  const metrics = data?.metrics?.test_metrics || null;
+
+  const modelName =
+    data?.metrics?.model_name || "Model unavailable";
+
+  const bars = useMemo(() => {
+    if (!metrics) return [];
+
+    const metricNames = [
+      "Accuracy",
+      "Precision",
+      "Recall",
+      "F1",
+      "ROC_AUC",
+      "PR_AUC",
+      "FPR",
+      "FNR",
+    ];
+
+    return metricNames
+      .filter(
+        (name) =>
+          typeof metrics[name] === "number" &&
+          Number.isFinite(metrics[name]),
+      )
+      .map((name) => ({
+        name,
+        value: metrics[name],
+      }));
+  }, [metrics]);
+
+  const summaryMetrics = [
+    {
+      key: "Precision",
+      label: "Precision",
+      description: "Correct positive predictions",
+      color: "text-[#67E8F9]",
+      icon: ShieldCheck,
+    },
+    {
+      key: "Recall",
+      label: "Recall",
+      description: "Detected positive cases",
+      color: "text-[#D4AF37]",
+      icon: Activity,
+    },
+    {
+      key: "F1",
+      label: "F1 Score",
+      description: "Precision and recall balance",
+      color: "text-[#67E8F9]",
+      icon: Gauge,
+    },
+    {
+      key: "ROC_AUC",
+      label: "ROC AUC",
+      description: "Class separation performance",
+      color: "text-[#67E8F9]",
+      icon: BrainCircuit,
+    },
+  ];
+
+  const formatPercent = (value) => {
+    return typeof value === "number" && Number.isFinite(value)
+      ? `${(value * 100).toFixed(1)}%`
+      : "Unavailable";
+  };
+
+  const formatMetric = (value, digits = 4) => {
+    return typeof value === "number" && Number.isFinite(value)
+      ? value.toFixed(digits)
+      : "Unavailable";
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "Date unavailable";
+
+    const parsed = new Date(value);
+
+    return Number.isNaN(parsed.getTime())
+      ? "Date unavailable"
+      : parsed.toLocaleString();
+  };
+
+  // Prediction submission.
+  async function predict(event) {
+    event.preventDefault();
+
+    setBusy(true);
+    setSubmitError("");
+    setResult(null);
+
+    try {
+      if (!selected) {
+        throw new Error("Please select an employee.");
+      }
+
+      if (!aggregationDate) {
+        throw new Error("Please select the aggregate date.");
+      }
+
+      const parsedFeatures = JSON.parse(features);
+
+      if (
+        !parsedFeatures ||
+        typeof parsedFeatures !== "object" ||
+        Array.isArray(parsedFeatures)
+      ) {
+        throw new Error("Feature input must be a JSON object.");
+      }
+
+      const response = await requestApi("/api/ml/predict", {
+        method: "POST",
+        body: {
+          userId: selected,
+          aggregationDate,
+          features: parsedFeatures,
+        },
+      });
+
+      setResult(response);
+
+      // Refresh prediction history after successful inference.
+      try {
+        const history = await requestApi("/api/ml/predictions");
+
+        setPredictions(
+          Array.isArray(history?.predictions)
+            ? history.predictions
+            : [],
+        );
+      } catch {
+        // Keep the completed assessment visible if history refresh fails.
+      }
+    } catch (err) {
+      setSubmitError(
+        err instanceof SyntaxError
+          ? "Feature input is not valid JSON. Check commas, quotes, and braces."
+          : err?.message || "Assessment could not be completed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Experiment data.
+  const experiment = data?.experiment || null;
+
+  const experimentRows = useMemo(() => {
+    if (!experiment?.comparison) return [];
+
+    return Object.entries(experiment.comparison).map(
+      ([metric, difference]) => {
+        const baseline =
+          experiment.models?.baseline?.test_metrics?.[metric];
+
+        const enhanced =
+          experiment.models?.enhanced?.test_metrics?.[metric];
+
+        return {
+          metric,
+          baseline,
+          enhanced,
+          difference,
+        };
+      },
+    );
+  }, [experiment]);
+
+  const rocModels = ["baseline", "enhanced"];
+
+  // Prediction result data.
+  const predictionResult = result?.ml || null;
+  const policyDecision = result?.decision || null;
+
+  const hasValidResult =
+    predictionResult?.threat_probability !== undefined &&
+    policyDecision !== null;
+
+  const threatProbability =
+    typeof predictionResult?.threat_probability === "number" &&
+    Number.isFinite(predictionResult.threat_probability)
+      ? predictionResult.threat_probability
+      : null;
+
+  // Recent predictions.
+  const getUserName = (userId) => {
+    const matchedUser = users.find(
+      (user) => String(user.id) === String(userId),
+    );
+
+    return matchedUser?.name || userId || "Unknown employee";
+  };
+
+  const getPredictionScore = (score) => {
+    return typeof score === "number" && Number.isFinite(score)
+      ? `${(score * 100).toFixed(2)} / 100`
+      : "Unavailable";
+  };
+
+  // Main page.
+  return (
+    <div
+      className="min-h-full overflow-x-hidden px-4 pb-10 pt-2 sm:px-6 lg:px-8"
+      style={{
+        backgroundColor: colors.background,
+        color: colors.primary,
+      }}
+    >
+      <div className="mx-auto w-full max-w-[1500px] space-y-6">
+        <ConsoleHeader
+          title="Model evidence & evaluation"
+          description="Inspect saved model performance, feature requirements and recorded inference results."
+          kind="ai"
+        />
+
+        {/* Hero banner */}
+        <section className="group relative min-h-[220px] overflow-hidden rounded-2xl border border-[#67E8F9]/55 bg-[#050A10] shadow-[0_18px_60px_rgba(0,0,0,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#67E8F9]/85 hover:shadow-[0_22px_70px_rgba(103,232,249,0.12)]">
+          <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-[48%] overflow-hidden lg:block">
+            <div
+              className="absolute inset-0 opacity-40"
+              style={{
+                backgroundImage:
+                  "linear-gradient(rgba(103,232,249,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(103,232,249,0.07) 1px, transparent 1px)",
+                backgroundSize: "72px 72px",
+              }}
+            />
+
+            <div className="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-[#050A10] to-transparent" />
+
+            <div className="absolute right-[18%] top-1/2 h-[215px] w-[215px] -translate-y-1/2 rounded-full border border-[#67E8F9]/10" />
+
+            <div className="absolute right-[23%] top-1/2 h-[160px] w-[160px] -translate-y-1/2 rounded-full border border-[#67E8F9]/15" />
+
+            <div className="absolute right-[29%] top-1/2 flex h-[86px] w-[86px] -translate-y-1/2 items-center justify-center rounded-2xl border border-[#67E8F9]/30 bg-[#050A10]/95 shadow-[0_0_35px_rgba(103,232,249,0.08)]">
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-[#67E8F9]/20 bg-[#070C12] text-[#67E8F9]">
+                <BrainCircuit className="h-7 w-7" strokeWidth={1.4} />
+              </div>
+            </div>
+
+            <div className="absolute right-[15%] top-[20%] h-2 w-2 rounded-full bg-[#D4AF37] shadow-[0_0_14px_rgba(212,175,55,0.55)]" />
+
+            <div className="absolute right-[9%] bottom-[23%] h-2 w-2 rounded-full bg-[#67E8F9] shadow-[0_0_14px_rgba(103,232,249,0.55)]" />
+
+            <div className="absolute right-[6%] top-[24%] rounded-lg border border-[#67E8F9]/20 bg-[#050A10]/90 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[#7F8A96]">
+              <span className="mr-2 text-[#67E8F9]">◈</span>
+              ML ENGINE
+            </div>
+          </div>
+
+          <div className="relative z-10 flex min-h-[220px] items-center px-6 py-8 sm:px-8 lg:px-9">
+            <div className="max-w-2xl">
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <span className="text-[12px] uppercase tracking-[0.22em] text-[#D4AF37]">
+                  ● MODEL PERFORMANCE
+                </span>
+
+                <span className="text-[12px] uppercase tracking-wider text-[#7F8A96]">
+                  MACHINE LEARNING · EVIDENCE ANALYTICS
+                </span>
+              </div>
+
+              <h1 className="text-4xl font-light leading-[1.05] tracking-tight text-[#F4F7FA] sm:text-5xl lg:text-6xl">
+                ML <span className="text-[#67E8F9]">Analytics</span>
+              </h1>
+
+              <p className="mt-4 max-w-xl text-[14px] leading-6 text-[#A7B0BA]">
+                Evaluate model performance, inspect experimental results, and
+                review recorded machine learning predictions.
+              </p>
+
+              <div className="mt-5 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-lg border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] px-3 py-1.5 text-[11px] text-[#67E8F9]">
+                  <BrainCircuit className="h-3.5 w-3.5" />
+                  {modelName}
+                </span>
+
+                <span className="inline-flex items-center gap-2 rounded-lg border border-[#67E8F9]/15 bg-[#67E8F9]/[0.04] px-3 py-1.5 text-[11px] text-[#67E8F9]">
+                  <Database className="h-3.5 w-3.5" />
+                  Model evaluation
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+                {/* Error and loading states */}
+        {error && (
+          <section
+            role="alert"
+            className="flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/[0.05] p-4 text-sm text-red-300"
+          >
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <span>{error}</span>
+          </section>
+        )}
+
+        {loading && !data && (
+          <section className={sectionClass}>
+            <div className="flex items-center gap-3 text-[#67E8F9]">
+              <RefreshCw className="h-5 w-5 animate-spin" />
+              <span className="text-sm">
+                Loading machine learning evaluation data...
+              </span>
+            </div>
+          </section>
+        )}
+
+        {/* Model performance metrics */}
+        {data && (
+          <>
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <span className="text-[11px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                    PERFORMANCE OVERVIEW
+                  </span>
+
+                  <h2 className="mt-1 text-2xl font-light tracking-tight text-[#F4F7FA]">
+                    Model Evaluation Metrics
+                  </h2>
+                </div>
+
+                <span className="text-xs text-[#7F8A96]">
+                  Saved test report
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {summaryMetrics.map((item) => {
+                  const Icon = item.icon;
+
+                  return (
+                    <article
+                      key={item.key}
+                      className={cardClass}
+                    >
+                      <div className="flex items-start justify-between">
+                        <span className="text-[11px] font-medium tracking-[0.14em] text-[#A7B0BA]">
+                          {item.label.toUpperCase()}
+                        </span>
+
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#67E8F9]/15 bg-[#67E8F9]/[0.04]">
+                          <Icon className={`h-4 w-4 ${item.color}`} />
+                        </div>
+                      </div>
+
+                      <div
+                        className={`mt-5 text-4xl font-light tracking-tight ${item.color}`}
+                      >
+                        {formatPercent(metrics?.[item.key])}
+                      </div>
+
+                      <p className="mt-2 text-xs text-[#7F8A96]">
+                        {item.description}
+                      </p>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <p className="flex items-start gap-2 text-xs leading-5 text-[#7F8A96]">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#D4AF37]" />
+                Saved report values are displayed as provided by the backend.
+                Original dataset and train/test splits have not been
+                independently verified.
+              </p>
+            </section>
+
+            {/* Model information */}
+            <section className={sectionClass}>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] pb-5">
+                <div>
+                  <span className="text-[11px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                    MODEL DETAILS
+                  </span>
+
+                  <h2 className="mt-1 text-2xl font-light text-[#F4F7FA]">
+                    Model Provenance
+                  </h2>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
+                  <Cpu className="h-5 w-5" />
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <h3 className="text-lg font-medium text-[#F4F7FA]">
+                  {modelName}
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-[#A7B0BA]">
+                  {data.provenance ||
+                    "Model provenance information unavailable."}
+                </p>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {[
+                  {
+                    label: "Model fingerprint",
+                    value: data.modelFingerprint
+                      ? data.modelFingerprint.slice(0, 16)
+                      : "Unavailable",
+                  },
+                  {
+                    label: "Dataset",
+                    value: data.metrics?.dataset || "Unavailable",
+                  },
+                  {
+                    label: "Aggregation level",
+                    value:
+                      data.metrics?.aggregation_level || "Unavailable",
+                  },
+                  {
+                    label: "Feature count",
+                    value: data.metrics?.feature_count ?? "Unavailable",
+                  },
+                  {
+                    label: "Operating threshold",
+                    value: formatMetric(
+                      data.metrics?.operating_threshold,
+                    ),
+                  },
+                  {
+                    label: "Test rows",
+                    value: data.metrics?.test_rows ?? "Unavailable",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-xl border border-white/[0.07] bg-[#03070C] p-4 transition-colors hover:border-[#67E8F9]/20"
+                  >
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[#7F8A96]">
+                      {item.label}
+                    </p>
+
+                    <p className="mt-2 break-words text-sm font-medium text-[#F4F7FA]">
+                      {item.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-5 border-l-2 border-[#D4AF37]/50 pl-3 text-xs leading-5 text-[#A7B0BA]">
+                Accuracy describes all predictions; it is not equivalent to
+                threat detection recall.
+              </p>
+            </section>
+
+            {/* Model metric chart */}
+            <section className={sectionClass}>
+              <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <span className="text-[11px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                    METRIC DISTRIBUTION
+                  </span>
+
+                  <h2 className="mt-1 text-2xl font-light text-[#F4F7FA]">
+                    Test Performance Breakdown
+                  </h2>
+
+                  <p className="mt-1 text-xs text-[#7F8A96]">
+                    Metrics are displayed using the saved test report values.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-[#67E8F9]">
+                  <span className="h-2 w-2 rounded-full bg-[#67E8F9]" />
+                  Model metrics
+                </div>
+              </div>
+
+              <div className="h-[300px] w-full">
+                {bars.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-[#7F8A96]">
+                    No numeric model metrics are available.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={bars}
+                      margin={{
+                        top: 10,
+                        right: 12,
+                        left: -16,
+                        bottom: 8,
+                      }}
+                    >
+                      <CartesianGrid
+                        stroke="rgba(255,255,255,0.055)"
+                        vertical={false}
+                      />
+
+                      <XAxis
+                        dataKey="name"
+                        stroke="#7F8A96"
+                        fontSize={10}
+                        tickLine={false}
+                        axisLine={{
+                          stroke: "rgba(255,255,255,0.08)",
+                        }}
+                      />
+
+                      <YAxis
+                        domain={[0, 1]}
+                        stroke="#7F8A96"
+                        fontSize={10}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+
+                      <Tooltip
+                        formatter={(value) => [
+                          formatPercent(value),
+                          "Value",
+                        ]}
+                        contentStyle={{
+                          backgroundColor: "#050A10",
+                          border: "1px solid rgba(103,232,249,0.25)",
+                          borderRadius: "10px",
+                          color: "#F4F7FA",
+                          fontSize: "12px",
+                        }}
+                        labelStyle={{
+                          color: "#67E8F9",
+                          marginBottom: "4px",
+                        }}
+                      />
+
+                      <Bar
+                        dataKey="value"
+                        fill="#67E8F9"
+                        radius={[5, 5, 0, 0]}
+                        isAnimationActive={false}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </section>
+
+            {/* Confusion matrix */}
+            <section className={sectionClass}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span className="text-[11px] uppercase tracking-[0.2em] text-[#D4AF37]">
+                    CLASSIFICATION RESULTS
+                  </span>
+
+                  <h2 className="mt-1 text-2xl font-light text-[#F4F7FA]">
+                    Confusion Matrix
+                  </h2>
+                </div>
+
+                <span className="rounded-lg border border-[#D4AF37]/20 bg-[#D4AF37]/[0.04] px-3 py-1.5 text-[10px] uppercase tracking-wider text-[#D4AF37]">
+                  Saved test values
+                </span>
+              </div>
+
+              <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                {[
+                  {
+                    key: "TP",
+                    label: "True Positives",
+                    description: "Correctly predicted positive cases",
+                    color: "text-[#67E8F9]",
+                    border: "border-[#67E8F9]/20",
+                  },
+                  {
+                    key: "FP",
+                    label: "False Positives",
+                    description: "Incorrect positive predictions",
+                    color: "text-[#D4AF37]",
+                    border: "border-[#D4AF37]/20",
+                  },
+                  {
+                    key: "TN",
+                    label: "True Negatives",
+                    description: "Correctly predicted negative cases",
+                    color: "text-[#67E8F9]",
+                    border: "border-[#67E8F9]/20",
+                  },
+                  {
+                    key: "FN",
+                    label: "False Negatives",
+                    description: "Missed positive cases",
+                    color: "text-[#D4AF37]",
+                    border: "border-[#D4AF37]/20",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.key}
+                    className={`rounded-xl border ${item.border} bg-[#03070C] p-4`}
+                  >
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-[#7F8A96]">
+                      {item.label}
+                    </p>
+
+                    <p className={`mt-3 text-3xl font-light ${item.color}`}>
+                      {metrics?.[item.key] ?? "Unavailable"}
+                    </p>
+
+                    <p className="mt-2 text-[11px] leading-4 text-[#7F8A96]">
+                      {item.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-4 text-xs leading-5 text-[#7F8A96]">
+                These values represent the saved test confusion matrix.
+                They are not recalculated in the browser.
+              </p>
+            </section>
+                        {/* Enhanced model comparison */}
+            <section className={sectionClass}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span className="text-[11px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                    EXPERIMENTAL EVALUATION
+                  </span>
+
+                  <h2 className="mt-1 text-2xl font-light text-[#F4F7FA]">
+                    Enhanced Model Comparison
+                  </h2>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
+                  <Activity className="h-5 w-5" />
+                </div>
+              </div>
+
+              <p className="mt-4 text-sm leading-6 text-[#A7B0BA]">
+                {data.enhancedModel?.reason ||
+                  "Enhanced model comparison information is unavailable."}
+              </p>
+
+              {experiment ? (
+                <div className="mt-6 space-y-6">
+                  <div className="rounded-xl border border-white/[0.07] bg-[#03070C] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-[#7F8A96]">
+                          EXPERIMENT DATASET
+                        </p>
+
+                        <h3 className="mt-1 text-lg font-medium text-[#F4F7FA]">
+                          {experiment.dataset || "Dataset unavailable"}
+                        </h3>
+                      </div>
+
+                      <span
+                        className={`rounded-lg border px-3 py-1.5 text-[10px] uppercase tracking-wider ${
+                          experiment.synthetic
+                            ? "border-[#D4AF37]/25 bg-[#D4AF37]/[0.05] text-[#D4AF37]"
+                            : "border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]"
+                        }`}
+                      >
+                        {experiment.synthetic
+                          ? "Synthetic smoke test"
+                          : "Authorized dataset report"}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-[#7F8A96]">
+                          Data split
+                        </p>
+
+                        <p className="mt-1 text-sm text-[#A7B0BA]">
+                          {experiment.split || "Not available"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-[#7F8A96]">
+                          Limitations
+                        </p>
+
+                        <p className="mt-1 text-sm leading-5 text-[#A7B0BA]">
+                          {experiment.limitations || "Not specified"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {experiment.synthetic && (
+                      <p className="mt-4 flex items-start gap-2 rounded-lg border border-[#D4AF37]/20 bg-[#D4AF37]/[0.04] p-3 text-xs leading-5 text-[#D4AF37]">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        This is a synthetic smoke test, not evidence of
+                        research-level model performance.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Experiment comparison table */}
+                  <div>
+                    <h3 className="mb-3 text-sm font-medium text-[#F4F7FA]">
+                      Baseline vs Enhanced Results
+                    </h3>
+
+                    <div className="overflow-x-auto rounded-xl border border-white/[0.08]">
+                      <table className="w-full min-w-[620px] text-left text-sm">
+                        <thead className="bg-[#03070C] text-[10px] uppercase tracking-wider text-[#7F8A96]">
+                          <tr>
+                            <th className="px-4 py-3">Metric</th>
+                            <th className="px-4 py-3">Baseline</th>
+                            <th className="px-4 py-3">Enhanced</th>
+                            <th className="px-4 py-3">Difference</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {experimentRows.length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={4}
+                                className="px-4 py-6 text-center text-[#7F8A96]"
+                              >
+                                No experiment comparison values available.
+                              </td>
+                            </tr>
+                          ) : (
+                            experimentRows.map((row) => (
+                              <tr
+                                key={row.metric}
+                                className="border-t border-white/[0.06] transition-colors hover:bg-white/[0.02]"
+                              >
+                                <td className="px-4 py-3 font-medium text-[#F4F7FA]">
+                                  {row.metric}
+                                </td>
+
+                                <td className="px-4 py-3 text-[#A7B0BA]">
+                                  {formatMetric(row.baseline)}
+                                </td>
+
+                                <td className="px-4 py-3 text-[#67E8F9]">
+                                  {formatMetric(row.enhanced)}
+                                </td>
+
+                                <td className="px-4 py-3 text-[#D4AF37]">
+                                  {formatMetric(row.difference)}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* ROC curve comparison */}
+                  <div>
+                    <div className="mb-4">
+                      <h3 className="text-lg font-medium text-[#F4F7FA]">
+                        ROC Curve Comparison
+                      </h3>
+
+                      <p className="mt-1 text-xs text-[#7F8A96]">
+                        Receiver Operating Characteristic curves for the
+                        saved baseline and enhanced experiment models.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                      {rocModels.map((name) => {
+                        const curve =
+                          experiment.models?.[name]?.curves?.roc;
+
+                        const validCurve = Array.isArray(curve)
+                          ? curve.filter(
+                              (point) =>
+                                point &&
+                                typeof point.fpr === "number" &&
+                                Number.isFinite(point.fpr) &&
+                                typeof point.tpr === "number" &&
+                                Number.isFinite(point.tpr),
+                            )
+                          : [];
+
+                        return (
+                          <div
+                            key={name}
+                            className="rounded-xl border border-white/[0.08] bg-[#03070C] p-4"
+                          >
+                            <div className="mb-3 flex items-center justify-between gap-2">
+                              <h4 className="text-sm font-medium capitalize text-[#F4F7FA]">
+                                {name} model ROC
+                              </h4>
+
+                              <span
+                                className={`h-2 w-2 rounded-full ${
+                                  name === "baseline"
+                                    ? "bg-[#D4AF37]"
+                                    : "bg-[#67E8F9]"
+                                }`}
+                              />
+                            </div>
+
+                            <div className="h-[230px]">
+                              {validCurve.length === 0 ? (
+                                <div className="flex h-full items-center justify-center text-xs text-[#7F8A96]">
+                                  ROC curve data unavailable.
+                                </div>
+                              ) : (
+                                <ResponsiveContainer
+                                  width="100%"
+                                  height="100%"
+                                >
+                                  <LineChart
+                                    data={validCurve}
+                                    margin={{
+                                      top: 10,
+                                      right: 10,
+                                      left: -18,
+                                      bottom: 5,
+                                    }}
+                                  >
+                                    <CartesianGrid
+                                      stroke="rgba(255,255,255,0.055)"
+                                      strokeDasharray="3 3"
+                                    />
+
+                                    <XAxis
+                                      dataKey="fpr"
+                                      type="number"
+                                      domain={[0, 1]}
+                                      stroke="#7F8A96"
+                                      fontSize={10}
+                                      tickLine={false}
+                                    />
+
+                                    <YAxis
+                                      domain={[0, 1]}
+                                      stroke="#7F8A96"
+                                      fontSize={10}
+                                      tickLine={false}
+                                    />
+
+                                    <Tooltip
+                                      contentStyle={{
+                                        backgroundColor: "#050A10",
+                                        border:
+                                          "1px solid rgba(103,232,249,0.2)",
+                                        borderRadius: "10px",
+                                        color: "#F4F7FA",
+                                        fontSize: "11px",
+                                      }}
+                                    />
+
+                                    <Line
+                                      type="monotone"
+                                      dataKey="tpr"
+                                      dot={false}
+                                      stroke={
+                                        name === "baseline"
+                                          ? "#D4AF37"
+                                          : "#67E8F9"
+                                      }
+                                      strokeWidth={2}
+                                      isAnimationActive={false}
+                                    />
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              )}
+                            </div>
+
+                            <div className="mt-2 flex justify-between text-[10px] text-[#7F8A96]">
+                              <span>False Positive Rate</span>
+                              <span>True Positive Rate</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-5 rounded-xl border border-white/[0.07] bg-[#03070C] p-5 text-sm text-[#7F8A96]">
+                  No paired experiment report is available.
+                </div>
+              )}
+            </section>
+
+            {/* Feature schema */}
+            <section className={sectionClass}>
+              <button
+                type="button"
+                onClick={() => setSchemaOpen((previous) => !previous)}
+                aria-expanded={schemaOpen}
+                className="flex w-full items-center justify-between gap-4 text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
+                    <FileJson className="h-5 w-5" />
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-[#67E8F9]">
+                      MODEL INPUT REQUIREMENTS
+                    </span>
+
+                    <h2 className="mt-1 text-lg font-medium text-[#F4F7FA]">
+                      Exact Required Feature Schema
+                    </h2>
+
+                    <p className="mt-1 text-xs text-[#7F8A96]">
+                      Inspect the feature structure expected by the model.
+                    </p>
+                  </div>
+                </div>
+
+                <ChevronDown
+                  className={`h-5 w-5 shrink-0 text-[#7F8A96] transition-transform duration-300 ${
+                    schemaOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              {schemaOpen && (
+                <div className="mt-5 border-t border-white/[0.07] pt-5">
+                  <pre className="max-h-[420px] overflow-auto rounded-xl border border-white/[0.08] bg-[#03070C] p-4 text-xs leading-6 text-[#A7B0BA]">
+                    {JSON.stringify(data.featureSchema ?? {}, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </section>
+          </>
+        )}
+                {/* Approved aggregate inference */}
+        <section className="overflow-hidden rounded-2xl border border-[#67E8F9]/25 bg-[#050A10] shadow-[0_18px_60px_rgba(0,0,0,0.2)]">
+          <div className="border-b border-white/[0.07] px-5 py-5 sm:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                  MODEL INFERENCE
+                </span>
+
+                <h2 className="mt-1 text-2xl font-light text-[#F4F7FA]">
+                  Run ML Assessment
+                </h2>
+
+                <p className="mt-1 text-xs text-[#7F8A96]">
+                  Import an approved complete user-day aggregate.
+                </p>
+              </div>
+
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
+                <Upload className="h-5 w-5" />
+              </div>
+            </div>
+          </div>
+
+          <form
+            onSubmit={predict}
+            className="space-y-5 p-5 sm:p-6"
+          >
+            <div className="rounded-xl border border-[#D4AF37]/20 bg-[#D4AF37]/[0.035] p-4">
+              <div className="flex items-start gap-3">
+                <Info className="mt-0.5 h-5 w-5 shrink-0 text-[#D4AF37]" />
+
+                <div>
+                  <p className="text-sm font-medium text-[#D4AF37]">
+                    Important assessment information
+                  </p>
+
+                  <p className="mt-2 text-xs leading-6 text-[#A7B0BA]">
+                    This runs the deployed model on an administrator-supplied
+                    prior-day aggregate and records a policy decision. It does
+                    not construct that aggregate from live endpoint events
+                    and can restrict the selected account. Use a synthetic
+                    demo employee for demonstrations. File-change and
+                    connection observations cannot supply file-read, content,
+                    URL or email features.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              {/* Employee selection */}
+              <div className="space-y-2">
+                <label
+                  htmlFor="ml-employee"
+                  className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#A7B0BA]"
+                >
+                  Select employee
+                </label>
+
+                <select
+                  id="ml-employee"
+                  required
+                  aria-label="Employee for ML import"
+                  value={selected}
+                  onChange={(event) => setSelected(event.target.value)}
+                  disabled={users.length === 0 || busy}
+                  className="h-12 w-full rounded-xl border border-white/10 bg-[#03070C] px-4 text-sm text-[#F4F7FA] outline-none transition-all hover:border-[#67E8F9]/35 focus:border-[#67E8F9] focus:ring-2 focus:ring-[#67E8F9]/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">Select employee</option>
+
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} ({user.employeeId || user.id})
+                    </option>
+                  ))}
+                </select>
+
+                {users.length === 0 && (
+                  <p className="text-xs text-[#7F8A96]">
+                    No employees are currently available.
+                  </p>
+                )}
+              </div>
+
+              {/* Aggregate date */}
+              <div className="space-y-2">
+                <label
+                  htmlFor="ml-aggregation-date"
+                  className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#A7B0BA]"
+                >
+                  Complete UTC user-day date
+                </label>
+
+                <input
+                  id="ml-aggregation-date"
+                  type="date"
+                  required
+                  aria-label="Aggregate date"
+                  value={aggregationDate}
+                  onChange={(event) =>
+                    setAggregationDate(event.target.value)
+                  }
+                  disabled={busy}
+                  className="h-12 w-full rounded-xl border border-white/10 bg-[#03070C] px-4 text-sm text-[#F4F7FA] outline-none transition-all hover:border-[#67E8F9]/35 focus:border-[#67E8F9] focus:ring-2 focus:ring-[#67E8F9]/10 disabled:opacity-50"
+                />
+              </div>
+            </div>
+
+            {/* Feature JSON */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label
+                  htmlFor="ml-feature-json"
+                  className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#A7B0BA]"
+                >
+                  Complete feature JSON
+                </label>
+
+                <span className="text-[10px] uppercase tracking-wider text-[#67E8F9]">
+                  JSON INPUT
+                </span>
+              </div>
+
+              <textarea
+                id="ml-feature-json"
+                aria-label="Complete feature JSON"
+                required
+                rows={12}
+                value={features}
+                onChange={(event) => setFeatures(event.target.value)}
+                disabled={busy}
+                spellCheck={false}
+                placeholder='{"feature_name": 0}'
+                className="block min-h-[230px] w-full resize-y rounded-xl border border-white/10 bg-[#03070C] p-4 font-mono text-xs leading-6 text-[#67E8F9] outline-none transition-all placeholder:text-[#596570] hover:border-[#67E8F9]/30 focus:border-[#67E8F9] focus:ring-2 focus:ring-[#67E8F9]/10 disabled:opacity-50"
+              />
+
+              <p className="text-xs leading-5 text-[#7F8A96]">
+                Provide a complete feature object matching the exact required
+                schema. Missing or invalid features may cause inference to
+                fail.
+              </p>
+            </div>
+
+            {/* Submission error */}
+            {submitError && (
+              <div
+                role="alert"
+                className="flex items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/[0.05] p-4 text-sm text-red-300"
+              >
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <span>{submitError}</span>
+              </div>
+            )}
+
+            {/* Submit */}
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-white/[0.07] pt-5">
+              <p className="max-w-lg text-xs leading-5 text-[#7F8A96]">
+                The assessment uses the selected employee and supplied
+                aggregate date.
+              </p>
+
+              <button
+                type="submit"
+                disabled={busy || !data || users.length === 0}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#67E8F9]/35 bg-[#67E8F9]/[0.08] px-5 py-3 text-sm font-medium text-[#67E8F9] transition-all duration-300 hover:border-[#67E8F9]/70 hover:bg-[#67E8F9]/[0.14] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <BrainCircuit className="h-4 w-4" />
+                )}
+
+                {busy
+                  ? "Assessing..."
+                  : "Run inference and policy assessment"}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        {/* Assessment result */}
+        {result && (
+          <section
+            role="status"
+            className="overflow-hidden rounded-2xl border border-[#67E8F9]/30 bg-[#050A10] shadow-[0_18px_60px_rgba(0,0,0,0.2)]"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-5 sm:px-6">
+              <div>
+                <span className="text-[11px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                  INFERENCE RESPONSE
+                </span>
+
+                <h2 className="mt-1 text-2xl font-light text-[#F4F7FA]">
+                  Assessment Result
+                </h2>
+              </div>
+
+              <span className="inline-flex items-center gap-2 rounded-lg border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] px-3 py-2 text-xs text-[#67E8F9]">
+                <CheckCircle2 className="h-4 w-4" />
+                Response received
+              </span>
+            </div>
+
+            <div className="space-y-5 p-5 sm:p-6">
+              {hasValidResult ? (
+                <>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="rounded-xl border border-[#67E8F9]/20 bg-[#67E8F9]/[0.04] p-5">
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-[#67E8F9]">
+                        UNCALIBRATED RF SCORE
+                      </p>
+
+                      <p className="mt-3 text-4xl font-light text-[#67E8F9]">
+                        {threatProbability === null
+                          ? "Unavailable"
+                          : `${(threatProbability * 100).toFixed(2)} / 100`}
+                      </p>
+
+                      <p className="mt-2 text-xs text-[#7F8A96]">
+                        Positive-class model score; not a calibrated
+                        probability.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-[#D4AF37]/20 bg-[#D4AF37]/[0.04] p-5">
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-[#D4AF37]">
+                        POLICY DECISION
+                      </p>
+
+                      <p className="mt-3 break-words text-3xl font-light text-[#D4AF37]">
+                        {policyDecision?.decision || "Unavailable"}
+                      </p>
+
+                      <p className="mt-2 text-xs text-[#7F8A96]">
+                        Decision returned by the server.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/[0.08] bg-[#03070C] p-4">
+                    <h3 className="text-sm font-medium text-[#F4F7FA]">
+                      Policy reasoning
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-6 text-[#A7B0BA]">
+                      {policyDecision?.reason ||
+                        "No policy reasoning was provided."}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-[#67E8F9]/20 bg-[#03070C] p-4">
+                    <div className="flex items-center gap-2">
+                      <BrainCircuit className="h-4 w-4 text-[#67E8F9]" />
+
+                      <h3 className="text-sm font-medium text-[#F4F7FA]">
+                        SHAP Model Feature Contributions
+                      </h3>
+                    </div>
+
+                    <pre className="mt-4 max-h-[350px] overflow-auto rounded-lg border border-white/[0.07] bg-[#050A10] p-4 text-xs leading-6 text-[#67E8F9]">
+                      {JSON.stringify(
+                        predictionResult?.xai_reasons ?? {},
+                        null,
+                        2,
+                      )}
+                    </pre>
+
+                    <p className="mt-3 text-xs leading-5 text-[#7F8A96]">
+                      SHAP attributes the model prediction; contextual rules
+                      determine additional risk independently.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-start gap-3 rounded-xl border border-[#D4AF37]/20 bg-[#D4AF37]/[0.04] p-4">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[#D4AF37]" />
+
+                  <div>
+                    <p className="text-sm font-medium text-[#D4AF37]">
+                      Unexpected assessment response
+                    </p>
+
+                    <p className="mt-2 text-xs leading-5 text-[#A7B0BA]">
+                      The server returned an assessment response in an
+                      unexpected format. Contact the administrator; do not
+                      treat this as an access approval.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+                {/* Recent persisted predictions */}
+        <section className={sectionClass}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] pb-5">
+            <div>
+              <span className="text-[11px] uppercase tracking-[0.2em] text-[#67E8F9]">
+                PREDICTION HISTORY
+              </span>
+
+              <h2 className="mt-1 text-2xl font-light text-[#F4F7FA]">
+                Recent Persisted Predictions
+              </h2>
+
+              <p className="mt-1 text-xs text-[#7F8A96]">
+                Previously recorded model assessments.
+              </p>
+            </div>
+
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#67E8F9]/20 bg-[#67E8F9]/[0.05] text-[#67E8F9]">
+              <Clock3 className="h-5 w-5" />
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {!predictions.length ? (
+              <div className="rounded-xl border border-white/[0.07] bg-[#03070C] p-6 text-center">
+                <Database className="mx-auto h-7 w-7 text-[#7F8A96]" />
+
+                <p className="mt-3 text-sm text-[#A7B0BA]">
+                  No model predictions recorded for this company.
+                </p>
+              </div>
+            ) : (
+              predictions.map((prediction) => (
+                <details
+                  key={prediction.id}
+                  className="group rounded-xl border border-white/[0.08] bg-[#03070C] transition-all duration-300 open:border-[#67E8F9]/25"
+                >
+                  <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-4 p-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-[#F4F7FA]">
+                        {getUserName(prediction.userId)}
+                      </p>
+
+                      <p className="mt-1 text-xs text-[#7F8A96]">
+                        {formatDate(prediction.timestamp)}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase tracking-wider text-[#7F8A96]">
+                          RF score
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-[#67E8F9]">
+                          {getPredictionScore(prediction.anomalyScore)}
+                        </p>
+                      </div>
+
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase tracking-wider text-[#7F8A96]">
+                          Application risk
+                        </p>
+
+                        <p className="mt-1 text-sm font-medium text-[#D4AF37]">
+                          {typeof prediction.riskScore === "number" &&
+                          Number.isFinite(prediction.riskScore)
+                            ? `${prediction.riskScore} / 100`
+                            : "Unavailable"}
+                        </p>
+                      </div>
+
+                      <ChevronDown className="h-4 w-4 text-[#7F8A96] transition-transform group-open:rotate-180" />
+                    </div>
+                  </summary>
+
+                  <div className="space-y-4 border-t border-white/[0.07] p-4">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[#7F8A96]">
+                        Model version
+                      </p>
+
+                      <p className="mt-1 break-all text-xs text-[#A7B0BA]">
+                        {prediction.modelVersionId ||
+                          "Legacy unversioned prediction"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[#7F8A96]">
+                        Feature attributions
+                      </p>
+
+                      <pre className="mt-2 max-h-[300px] overflow-auto rounded-lg border border-white/[0.07] bg-[#050A10] p-4 text-xs leading-6 text-[#A7B0BA]">
+                        {JSON.stringify(
+                          prediction.attributions ?? {},
+                          null,
+                          2,
+                        )}
+                      </pre>
+                    </div>
+                  </div>
+                </details>
+              ))
+            )}
+          </div>
+        </section>
+
+        {/* Footer note */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-5">
+          <p className="text-[11px] leading-5 text-[#7F8A96]">
+            CyberOrbit · Machine Learning Analytics
+          </p>
+
+          <p className="text-[11px] text-[#596570]">
+            Model evidence and saved evaluation records
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
+
+export default MlAnalyticsPage;
