@@ -42,6 +42,11 @@ import {
 import { useTheme } from "../context/ThemeContext";
 import backgroundImage from "../images/Landingpage.png";
 
+import priyankaAvatar from "../Avatars/priyanka.svg";
+import sangameshAvatar from "../Avatars/sangamesh.svg";
+import nishithaAvatar from "../Avatars/nishitha.svg";
+import jayantAvatar from "../Avatars/jayant.svg";
+
 const HEADER_HEIGHT = 76;
 
 const LOGO_COLORS = {
@@ -327,8 +332,7 @@ export const LandingPage = ({
       responsibility:
         "Backend development and integration, cybersecurity design including Zero Trust policies, and building the project's agent workflows.",
       initials: "PS",
-      avatar:
-        "https://api.dicebear.com/10.x/voxel-art/svg?seed=Aryan&skinColor=f5d0b0&hairColor=8b5e3c&cheeksVariant=blush&outfitVariant=dress&jacketColor=c4b5fd&backgroundColor=03070c",
+      avatar: priyankaAvatar,
     },
 
     {
@@ -337,8 +341,7 @@ export const LandingPage = ({
       responsibility:
         "Database design and management, agent development support and project documentation.",
       initials: "SK",
-      avatar:
-        "https://api.dicebear.com/10.x/voxel-art/svg?seed=ArjunMale10&skinColor=f5d0b0&hairColor=8d6e63&backgroundColor=03070c",
+      avatar: sangameshAvatar,
     },
 
     {
@@ -347,8 +350,7 @@ export const LandingPage = ({
       responsibility:
         "Machine learning model work, application testing, feature validation and project documentation.",
       initials: "KN",
-      avatar:
-        "https://api.dicebear.com/10.x/voxel-art/svg?seed=GirlAva&skinColor=f5d0b0&hairColor=cc6677&cheeksVariant=blush&outfitVariant=dress&jacketColor=e64980&backgroundColor=03070c",
+      avatar: nishithaAvatar,
     },
 
     {
@@ -357,8 +359,7 @@ export const LandingPage = ({
       responsibility:
         "Machine learning model work, frontend development and UI design and implementation.",
       initials: "JB",
-      avatar:
-        "https://api.dicebear.com/10.x/voxel-art/svg?seed=ArjunMale04&skinColor=f5d0b0&hairColor=3b2f2f&cheeksVariant=none&backgroundColor=03070c",
+      avatar: jayantAvatar,
     },
   ];
 
