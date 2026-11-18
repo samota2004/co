@@ -89,7 +89,14 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
 async function userChanges(req,create=false,current=null){
   const b=req.body||{},fields={};
   if(b.password!==undefined||b.passwordHash!==undefined)throw new SecurityError(400,'EMPLOYEE_PASSWORD_NOT_ALLOWED','Employees are monitoring identities and cannot have console passwords. Refresh the employee form and submit without a password.');
-  if(b.status!==undefined){if(!['ACTIVE','RESTRICTED','FROZEN','DISABLED','INVESTIGATION'].includes(b.status))throw new SecurityError(400,'INVALID_STATUS','Invalid account status.');if(!create)throw new SecurityError(400,'ACCOUNT_STATUS_WORKFLOW_REQUIRED','Use the audited containment or Main Admin restoration workflow to change account status.');if(b.status!=='ACTIVE')throw new SecurityError(400,'INVALID_STATUS','New employee accounts must start ACTIVE.');fields.status=b.status;}
+  if(b.status!==undefined){
+    if(!['ACTIVE','RESTRICTED','FROZEN','DISABLED','INVESTIGATION'].includes(b.status))
+      throw new SecurityError(400,'INVALID_STATUS','Invalid account status.');
+    if(!create)
+      throw new SecurityError(400,'ACCOUNT_STATUS_WORKFLOW_REQUIRED','Use the audited containment or Main Admin restoration workflow to change account status.');
+    if(b.status!=='ACTIVE')throw new SecurityError(400,'INVALID_STATUS','New employee accounts must start ACTIVE.');
+    fields.status=b.status;
+  }
   for(const k of ['name','employeeId'])if(create||b[k]!==undefined)fields[k]=text(b[k],k,100);
   if(create||b.email!==undefined){fields.email=text(b.email,'Email',254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email))throw new SecurityError(400,'INVALID_EMAIL','Enter a valid email.');}
   if(create||b.departmentCode!==undefined||b.department!==undefined){fields.departmentCode=b.departmentCode||b.department;if(!await prisma.department.findUnique({where:{code:fields.departmentCode}}))throw new SecurityError(400,'INVALID_DEPARTMENT','Select an existing department.');}

@@ -563,7 +563,8 @@ export const EmployeeManagementPage = ({
 
       role: formData.role,
 
-      status: formData.status,
+      // Status is intentionally omitted: the server only allows account status
+      // changes through the audited containment / restoration workflow.
 
       managerId: formData.role === "EMPLOYEE" ? managerId : null,
 
@@ -1025,7 +1026,15 @@ export const EmployeeManagementPage = ({
 
               }
 
-              className={SELECT_CLASS}
+              disabled={isEdit}
+
+              title={
+                isEdit
+                  ? "Change status through the containment / restoration workflow."
+                  : undefined
+              }
+
+              className={`${SELECT_CLASS}${isEdit ? " cursor-not-allowed opacity-60" : ""}`}
 
             >
 
@@ -1035,7 +1044,18 @@ export const EmployeeManagementPage = ({
 
               <option value="FROZEN">FROZEN</option>
 
+              {isEdit &&
+                !["ACTIVE", "RESTRICTED", "FROZEN"].includes(formData.status) && (
+                  <option value={formData.status}>{formData.status}</option>
+                )}
+
             </select>
+
+            {isEdit && (
+              <p className="mt-1.5 text-[11px] text-[#65717E]">
+                Change status through the containment / restoration workflow.
+              </p>
+            )}
 
           </div>
 
