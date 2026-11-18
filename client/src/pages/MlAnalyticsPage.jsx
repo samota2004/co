@@ -237,10 +237,13 @@ export function MlAnalyticsPage() {
     },
   ];
 
+  // Never round up: 2 decimals are truncated, so 0.9998 shows 99.98% (not 100%).
+  // Very small values (e.g. FPR 0.0044%) keep two significant digits instead of 0.00%.
   const formatPercent = (value) => {
-    return typeof value === "number" && Number.isFinite(value)
-      ? `${(value * 100).toFixed(1)}%`
-      : "Unavailable";
+    if (typeof value !== "number" || !Number.isFinite(value)) return "Unavailable";
+    const percent = value * 100;
+    if (percent > 0 && percent < 0.01) return `${percent.toPrecision(2)}%`;
+    return `${(Math.floor(percent * 100 + 1e-6) / 100).toFixed(2)}%`;
   };
 
   const formatMetric = (value, digits = 4) => {
