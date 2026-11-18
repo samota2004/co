@@ -43,6 +43,9 @@ test('existing employee detail API returns only selected employee monitoring rec
   assert.ok(nineResponse.body.incidents.every(row=>row.userId===nine.id));
   assert.ok(nineResponse.body.accessRequests.every(row=>row.justification.startsWith('Nine')));
   assert.ok(nineResponse.body.events.every(row=>row.resourceName==='Nine resource'));
+  assert.equal(nineResponse.body.endpointEvents.length,1);
+  assert.equal(nineResponse.body.endpointEvents[0].userId,nine.id);
+  assert.equal(nineResponse.body.endpointEvents[0].type,'APPLICATION_USAGE');
   assert.ok(nineResponse.body.auditEvents.every(row=>row.action==='AUTH_LOGIN'));
   assert.equal(JSON.stringify(nineResponse.body).includes('Priyanka'),false);
   assert.equal(JSON.stringify(nineResponse.body).includes(f.admin.email),false);

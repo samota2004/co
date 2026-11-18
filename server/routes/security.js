@@ -30,9 +30,10 @@ router.get('/users',api(async req=>({users:(await prisma.user.findMany({where:{.
 router.get('/users/:id',api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id);
   const companyId=req.user.companyId,now=new Date(),historyFrom=new Date(now.getTime()-90*86400000),canReview=isAdmin(req.user)||req.user.roleCode==='MANAGER';
-  const [devices,events,trustHistory,riskHistory,baseline,incidents,sessions,loginHistory,accessRequests,auditEvents]=await Promise.all([
+  const [devices,events,endpointEvents,trustHistory,riskHistory,baseline,incidents,sessions,loginHistory,accessRequests,auditEvents]=await Promise.all([
     prisma.device.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}}}),
     prisma.activityEvent.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}},orderBy:{timestamp:'desc'},take:100}),
+    prisma.endpointEvent.findMany({where:{companyId,userId:u.id},orderBy:{occurredAt:'desc'},take:500,select:{id:true,type:true,occurredAt:true,deviceId:true,userId:true}}),
     prisma.trustHistory.findMany({where:{userId:u.id,user:{companyId,deletedAt:null},timestamp:{gte:historyFrom,lte:now}},orderBy:{timestamp:'asc'},take:5000}),
     prisma.riskScore.findMany({where:{userId:u.id,user:{companyId,deletedAt:null},timestamp:{gte:historyFrom,lte:now}},orderBy:{timestamp:'asc'},take:5000}),
     prisma.behaviorProfile.findFirst({where:{userId:u.id,user:{companyId,deletedAt:null}}}),
@@ -44,7 +45,7 @@ router.get('/users/:id',api(async req=>{
   ]);
   const dailyRiskHistory=await prisma.dailyRiskSnapshot.findMany({where:{userId:u.id,companyId,day:{gte:new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-89*86400000)}},orderBy:{day:'asc'},take:90});
   const user=await prisma.user.findFirst({where:{id:u.id,companyId,deletedAt:null},include:monitoringInclude()});
-  return{user:monitoredUser(user),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),dailyRiskHistory,baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents,sessions:sessions.map(session=>({...session,status:'ACTIVE'})),loginHistory,accessRequests,auditEvents};
+  return{user:monitoredUser(user),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),endpointEvents,trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),dailyRiskHistory,baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents,sessions:sessions.map(session=>({...session,status:'ACTIVE'})),loginHistory,accessRequests,auditEvents};
 }));
 router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id);
@@ -229,10 +230,10 @@ router.post('/telemetry/ingest',requireSecurityAdmin,api(async()=>{
 }));
 router.post('/risk/evaluate',requireSecurityAdmin,api(assess));
 router.get('/risk/analysis/:id',requireSecurityAdmin,api(async req=>{const range=req.query.range||'24h';if(!['24h','7d','30d','90d'].includes(range))throw new SecurityError(400,'INVALID_RISK_RANGE','Choose 24h, 7d, 30d, or 90d.');return{analysis:await getRiskAnalysis(prisma,req.user,req.params.id,new Date(),range)};}));
-router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});return{userId:u.id,riskScore:latest?u.riskScore:null,riskLevel:latest?u.riskLevel:null,latest};}));
+router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});return{userId:u.id,riskScore:latest?.score??null,riskLevel:latest?.level??null,latest};}));
 router.get('/risk/history/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.riskScore.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
 router.get('/trust/:id/history',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.trustHistory.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
-router.get('/trust/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{trustScore:u.trustUpdatedAt?u.trustScore:null,assessmentStatus:u.trustUpdatedAt?'ASSESSED':'NOT_ASSESSED'};}));
+router.get('/trust/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.trustHistory.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});const trustScore=latest?.trustScore??(u.trustUpdatedAt?u.trustScore:null);return{trustScore,assessmentStatus:trustScore===null?'NOT_ASSESSED':'ASSESSED',latest};}));
 router.post('/users/:id/baseline/rebuild',requireSecurityAdmin,api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{baseline:await learnBaseline(prisma,u.id)};}));
 
 router.get('/access-requests',api(async req=>({requests:(await prisma.accessRequest.findMany({where:subjectScope(req),include:{user:{select:{name:true}},resource:{select:{name:true}}},orderBy:{createdAt:'desc'},...pagination(req.query)})).map(decorateRequest)})));

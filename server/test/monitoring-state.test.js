@@ -28,6 +28,17 @@ test('observed or restricted scores are never reset by presentation', () => {
   assert.equal(monitoredUser({...fresh(),riskScore:20,trustScore:60}).currentTrustScore,null);
   assert.equal(monitoredUser({...fresh(),trustUpdatedAt:new Date()}).currentTrustScore,90);
 });
+test('latest persisted assessment rows are displayed even when compatibility markers are stale', () => {
+  const input={...fresh(),riskScore:0,trustScore:100,
+    riskScores:[{score:47,level:'MEDIUM',timestamp:new Date('2026-11-01T00:00:00Z')}],
+    trustHistories:[{trustScore:73,riskScore:47,timestamp:new Date('2026-11-01T00:00:00Z')}]};
+  const result=monitoredUser(input);
+  assert.equal(result.riskScore,47);
+  assert.equal(result.currentRiskLevel,'MEDIUM');
+  assert.equal(result.trustScore,73);
+  assert.equal(result.currentTrustScore,73);
+  assert.equal(result.assessmentStatus,'ASSESSED');
+});
 test('session status uses filtered live sessions, not enabled account status', () => {
   const query=monitoringInclude();
   assert.equal(query.sessions.where.revokedAt,null);

@@ -95,10 +95,16 @@ async function runEnrolledService(local) {
       if(!LOCAL_OPERATION_ACTIONS.includes(s.action)||typeof s.requestId!=='string'||typeof s.requestedAt!=='string'||typeof s.reason!=='string'||s.reason.trim().length<8||s.reason.trim().length>500||Math.abs(Date.now()-Date.parse(s.requestedAt))>60000)throw new Error('Invalid local operation request');
       return{localOperationRequest:await transport.post('local-operation-requests',{action:s.action,requestId:s.requestId,requestedAt:s.requestedAt,identity:secrets.mappedIdentity,deviceId:secrets.deviceId,reason:s.reason.trim()})};
     }
-    if(s.kind==='browser-proof') {
-      if(process.platform==='darwin' && config.browserTitles && !config.paused && !uploader.revoked) acceptBrowserProof(proofs,s);
-      return;
-    }
+ if(s.kind==='browser-proof') {
+  if(['darwin','win32'].includes(process.platform) &&
+     config.browserTitles &&
+     !config.paused &&
+     !uploader.revoked &&
+     !adminStopped) {
+    acceptBrowserProof(proofs,s);
+  }
+  return;
+}
     if(adminStopped){health.desktop='disabled: administrator stop';return;}
     if(config.paused || (!config.activeApplication && !config.sessions) || uploader.revoked) return;
     if(s.kind==='desktop-status') {
@@ -110,7 +116,14 @@ async function runEnrolledService(local) {
     }
     if(typeof s.sessionId!=='string' || s.sessionId.length>30 || typeof s.name!=='string' || s.name.length>256 || !Number.isSafeInteger(s.pid) || s.pid<0 || !Number.isFinite(s.idleMilliseconds) || s.idleMilliseconds<0) throw new Error('Invalid desktop sample');
     s.browserTitle=config.browserTitles && isBrowser(s) && typeof s.browserTitle==='string' ? s.browserTitle.replace(/[\x00-\x1f\x7f]/g,' ').trim().slice(0,256) : '';
-    if(process.platform==='darwin' && s.browserTitle && (knownLock(s)!==false || !titleAllowed(proofs,s))) {s.browserTitle='';s.browserTitleStatus='privacy-unverified';}
+    if(s.browserTitle && (
+  !['darwin','win32'].includes(process.platform) ||
+  knownLock(s)!==false ||
+  !titleAllowed(proofs,s)
+)) {
+  s.browserTitle='';
+  s.browserTitleStatus='privacy-unverified';
+}
     if(s.browserTitleStatus==='available' && !s.browserTitle)s.browserTitleStatus='unavailable';
     const now=Date.now();
     helperLastSeen=new Date(now).toISOString();

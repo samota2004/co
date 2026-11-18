@@ -462,6 +462,8 @@ export const EmployeeDashboard = ({
 
           devices={detail.devices || []}
 
+          endpointEvents={detail.endpointEvents || []}
+
           monitoringData={detail}
 
         />
@@ -494,6 +496,8 @@ const EmployeeDashboardDetails = ({
 
   devices = [],
 
+  endpointEvents = [],
+
   monitoringData = null,
 
 }) => {
@@ -518,6 +522,14 @@ const EmployeeDashboardDetails = ({
   const displayEvents = userEvents;
 
   const displayDevices = userDevices;
+
+  // The profile API returns verified, employee-attributed endpoint events
+  // separately from policy ActivityEvent rows. Include both persisted sources
+  // in the distribution without treating endpoint observations as risk/trust
+  // assessments.
+  const employeeActivity = [...userEvents, ...endpointEvents.filter(
+    (event) => event.userId === currentUser?.id
+  )];
 
   const [liveRiskState, setLiveRiskState] = useState({
 
@@ -991,7 +1003,7 @@ const EmployeeDashboardDetails = ({
 
   const groups = new Map();
 
-  for (const event of userEvents) {
+  for (const event of employeeActivity) {
 
     const name = event.eventType || event.type || "Unknown";
 

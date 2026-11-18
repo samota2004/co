@@ -16,10 +16,18 @@ export const ML_AVAILABILITY = Object.freeze({ available: false,
   reason: 'The trained model requires complete 21-feature CERT user-day logon/device/file/HTTP/email coverage. File changes are not reads; connections are not HTTP history. Email/content features and training preprocessing are unavailable. No endpoint inference is performed.' });
 const endpointMonitoringUser = user => {
   if (!user) return null;
-  const { _count, ...record } = user;
-  const riskAssessed = Boolean(_count?.riskScores);
-  const trustAssessed = Boolean(user.trustUpdatedAt);
-  return { ...record, ...(!riskAssessed ? { riskScore: null, riskLevel: null } : {}), ...(!trustAssessed ? { trustScore: null } : {}), assessmentStatus: riskAssessed || trustAssessed ? 'ASSESSED' : 'NOT_ASSESSED' };
+  const { _count, riskScores = [], trustHistories = [], ...record } = user;
+  const latestRisk = riskScores[0] || null;
+  const latestTrust = trustHistories[0] || null;
+  const riskAssessed = Boolean(_count?.riskScores || latestRisk);
+  const trustAssessed = Boolean(user.trustUpdatedAt || latestTrust);
+  return {
+    ...record,
+    riskScore: riskAssessed ? latestRisk?.score ?? user.riskScore : null,
+    riskLevel: riskAssessed ? latestRisk?.level ?? user.riskLevel : null,
+    trustScore: trustAssessed ? latestTrust?.trustScore ?? user.trustScore : null,
+    assessmentStatus: riskAssessed || trustAssessed ? 'ASSESSED' : 'NOT_ASSESSED'
+  };
 };
 const hasFreshAgentContact = (device,now) => {
   const contact=device.platform==='win32'?device.health?.lastHeartbeatAt:device.lastSeen;
@@ -382,7 +390,7 @@ export class EndpointService {
       id: true, userId: true, name: true, platform: true, mappedIdentity: true, enrolledAt: true,
       revokedAt: true, lastSeen: true, agentVersion: true, health: true, config: true,...(cityAvailable?{ipCityEnabled:true,ipCity:true}:{}),
       enforcementCommands:{where:{action:{in:['BLOCK','ALLOW','STOP_AGENT','START_AGENT','SET_USB_POLICY','SERVICE_STOP','AGENT_UNINSTALL']}},orderBy:{createdAt:'desc'},take:10,select:{id:true,commandId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}},
-      user: { select: { id: true, name: true, employeeId: true, status:true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true } } } }
+      user: { select: { id: true, name: true, employeeId: true, status:true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true, trustHistories: true } }, riskScores: { orderBy: { timestamp: 'desc' }, select: { score: true, level: true, timestamp: true }, take: 1 }, trustHistories: { orderBy: { timestamp: 'desc' }, select: { trustScore: true, riskScore: true, timestamp: true }, take: 1 } } }
     }, orderBy: { createdAt: 'desc' } })}));
     const applicationActivity=devices.length?await this.prisma.endpointEvent.groupBy({
       by:['deviceId','userId'],
