@@ -312,11 +312,18 @@ function DetailCard({ title, icon: Icon, children, accent = 'cyan' }) {
 
 }
 
+// Risk band used for risk-change alerts (matches default policy bands).
+const riskBand = (score) =>
+  score >= 80 ? 'CRITICAL' : score >= 60 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW';
+
 export const AlertsPage = ({
 
   users = [],
 
   incidents = [],
+
+
+  notifications = [],
 
 
   onRefreshData,
@@ -452,7 +459,7 @@ const userMap = useMemo(() => {
 
   };
 
-  const alerts = useMemo(() => {
+  const incidentAlerts = useMemo(() => {
 
     return incidents.filter(Boolean).map((incident) => {
 
@@ -461,6 +468,8 @@ const userMap = useMemo(() => {
       return {
 
         incident,
+
+        source: 'INCIDENT',
 
         user,
 
@@ -544,6 +553,102 @@ const userMap = useMemo(() => {
 
   }, [incidents, userMap]);
 
+  // Risk changes from each employee's trust history (only rows where risk > 0
+  // or trust actually moved; quiet hourly 0-risk checks are skipped).
+  const [riskChanges, setRiskChanges] = useState([]);
+  const employeeIds = useMemo(
+    () =>
+      users
+        .filter((u) => ['EMPLOYEE', 'MANAGER'].includes(u?.roleCode || u?.role))
+        .map((u) => u.id)
+        .filter(Boolean),
+    [users]
+  );
+  const employeeKey = employeeIds.join(',');
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      employeeIds.map((id) =>
+        requestApi(`/api/trust/${encodeURIComponent(id)}/history?limit=200`)
+          .then((res) => (res.history || []).map((row) => ({ ...row, userId: row.userId || id })))
+          .catch(() => [])
+      )
+    ).then((lists) => {
+      if (cancelled) return;
+      setRiskChanges(
+        lists.flat().filter((row) => Number(row.riskScore) > 0 || Number(row.delta) !== 0)
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeKey, incidents.length, notifications.length]);
+
+  const alerts = useMemo(() => {
+    const userFor = (id) => (id ? userMap.get(String(id)) : null);
+    const base = (user, userId) => ({
+      user,
+      userId: userId || '',
+      employeeName: user?.name || 'Unknown Employee',
+      employeeEmail: user?.email || '',
+      employeeId: user?.employeeId || '',
+      department: getUserDepartment(user) || '',
+      accountStatus: getUserStatus(user),
+      riskLevel: getUserRiskLevel(user),
+      userRiskScore: getUserRiskScore(user),
+      trustScore: getUserTrustScore(user),
+      recommendedAction: '',
+      contributingFactors: [],
+    });
+
+    const riskAlerts = riskChanges.map((row) => {
+      const user = userFor(row.userId);
+      const score = Math.round(Number(row.riskScore) || 0);
+      const after = Number(row.trustScore);
+      const delta = Number(row.delta) || 0;
+      const before = Math.round((after - delta) * 100) / 100;
+      const trustChange = `Trust ${before} → ${after} (${delta > 0 ? '+' : ''}${delta})`;
+      return {
+        ...base(user, row.userId),
+        source: 'RISK_CHANGE',
+        id: `risk-${row.id}`,
+        severity: riskBand(score),
+        type: 'Risk change',
+        device: 'Endpoint activity',
+        riskScore: score,
+        trustChange,
+        detectedAt: row.timestamp,
+        status: 'NOTICE',
+        details: `${trustChange}. ${row.reason || 'Recorded risk assessment.'}`,
+      };
+    });
+
+    // SECURITY_INCIDENT notifications are skipped: those incidents are already listed.
+    const endpointAlerts = notifications
+      .filter((n) => n && n.type !== 'SECURITY_INCIDENT')
+      .map((n) => {
+        const user = userFor(n.targetUserId);
+        return {
+          ...base(user, n.targetUserId),
+          ...(user ? {} : { employeeName: 'Device-level alert' }),
+          source: 'ENDPOINT',
+          id: `notice-${n.id}`,
+          severity: String(n.severity || 'MEDIUM').toUpperCase(),
+          type: n.title || n.type,
+          device: n.metadata?.deviceName || '—',
+          riskScore: n.metadata?.riskScore ?? null,
+          detectedAt: n.createdAt,
+          status: 'NOTICE',
+          details: n.message || '',
+        };
+      });
+
+    return [...incidentAlerts, ...riskAlerts, ...endpointAlerts].sort(
+      (a, b) => new Date(b.detectedAt || 0) - new Date(a.detectedAt || 0)
+    );
+  }, [incidentAlerts, riskChanges, notifications, userMap]);
+
   const severityOptions = useMemo(() => {
 
     const values = new Set();
@@ -582,7 +687,7 @@ const userMap = useMemo(() => {
 
     });
 
-    ['OPEN', 'UNDER_REVIEW', 'RESOLVED'].forEach((value) => {
+    ['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'NOTICE'].forEach((value) => {
 
       values.add(value);
 
@@ -654,7 +759,7 @@ const userMap = useMemo(() => {
 
   const totalCount = alerts.length;
 
-  const criticalCount = alerts.filter(
+  const criticalCount = incidentAlerts.filter(
 
     (alert) =>
 
@@ -664,13 +769,13 @@ const userMap = useMemo(() => {
 
   ).length;
 
-  const openCount = alerts.filter(
+  const openCount = incidentAlerts.filter(
 
     (alert) => String(alert.status).toUpperCase() === 'OPEN'
 
   ).length;
 
-  const unresolvedCount = alerts.filter(
+  const unresolvedCount = incidentAlerts.filter(
 
     (alert) => String(alert.status).toUpperCase() !== 'RESOLVED'
 
@@ -1002,7 +1107,7 @@ const userMap = useMemo(() => {
 
         <SummaryCard
 
-          label="Total incidents"
+          label="Total alerts"
 
           value={totalCount}
 
@@ -1252,9 +1357,19 @@ const userMap = useMemo(() => {
 
                       <span className="mt-1 block max-w-[160px] truncate font-mono text-[10px] text-[#7F8A96]">
 
-                        {alert.id || '—'}
+                        {alert.source === 'INCIDENT'
+                          ? alert.id || '—'
+                          : alert.source === 'RISK_CHANGE'
+                            ? 'Risk change'
+                            : 'Endpoint alert'}
 
                       </span>
+
+                      {alert.trustChange && (
+                        <span className="mt-1 block text-[11px] font-semibold text-[#D4AF37]">
+                          {alert.trustChange}
+                        </span>
+                      )}
 
                     </td>
 
@@ -1486,7 +1601,8 @@ const userMap = useMemo(() => {
 
               <div className="flex flex-wrap gap-2">
 
-                {selectedAlert.status !== 'INVESTIGATING' &&
+                {selectedAlert.source === 'INCIDENT' &&
+                  selectedAlert.status !== 'INVESTIGATING' &&
 
                   selectedAlert.status !== 'RESOLVED' && (
 
@@ -1518,6 +1634,8 @@ const userMap = useMemo(() => {
 
                   )}
 
+                {selectedAlert.source === 'INCIDENT' && (
+
                 <button
 
                   type="button"
@@ -1533,6 +1651,8 @@ const userMap = useMemo(() => {
                   Open incident
 
                 </button>
+
+                )}
 
                 <button
 

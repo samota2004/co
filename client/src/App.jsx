@@ -1483,6 +1483,7 @@ export default function App() {
                 users={users}
                 events={recentEvents}
                 incidents={incidents}
+                notifications={securityNotifications}
                 onSelectUser={(userId) => {
                   setCurrentUserId(userId);
 
