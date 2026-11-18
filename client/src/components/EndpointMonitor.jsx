@@ -132,15 +132,33 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
 
   useEffect(()=>{
     mounted.current=true;
-    const run=()=>refresh().catch(()=>{});
-    run();
-    const t=setInterval(run,15000);
-    window.addEventListener('cyberorbit-endpoint-updated',run);
+    let inFlight=false,lastRun=0,pending=null;
+    // force=true for the first load after a filter change; background runs
+    // skip while a refresh is running, the tab is hidden, or a filter is in use.
+    const run=(force=false)=>{
+      if(!force){
+        if(inFlight||document.visibilityState==='hidden')return;
+        const active=document.activeElement;
+        if(active&&active.closest?.('[data-endpoint-filters]'))return;
+      }
+      inFlight=true;lastRun=Date.now();
+      refresh().catch(()=>{}).finally(()=>{inFlight=false;});
+    };
+    // Live endpoint updates can arrive every few seconds; refresh at most once per 15 s.
+    const onUpdate=()=>{
+      const wait=15000-(Date.now()-lastRun);
+      if(wait<=0){run();return;}
+      if(!pending)pending=setTimeout(()=>{pending=null;run();},wait);
+    };
+    run(true);
+    const t=setInterval(()=>run(),15000);
+    window.addEventListener('cyberorbit-endpoint-updated',onUpdate);
     return()=>{
       mounted.current=false;
       sequence.current++;
       clearInterval(t);
-      window.removeEventListener('cyberorbit-endpoint-updated',run);
+      clearTimeout(pending);
+      window.removeEventListener('cyberorbit-endpoint-updated',onUpdate);
     };
   },[refresh]);
 
@@ -448,9 +466,9 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
         {eventType==='APPLICATION_USAGE'&&error&&<p role="alert" className="text-red-300">{error}</p>}
     {eventType==='APPLICATION_USAGE'&&notice&&<p role="status" className="text-emerald-300">{notice}</p>}
 
-    <div className="flex flex-wrap gap-4">
+    <div className="flex flex-wrap gap-4" data-endpoint-filters>
       <label className="flex items-center gap-3 text-sm">Show activity
-        <select aria-label="Activity type" value={eventType} disabled={refreshing} className="rounded-lg border border-white/15 bg-[#070C12] p-2 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:outline-none" onChange={e=>{setApplication('');setData(d=>({...d,events:[],timeline:undefined}));setEventType(e.target.value);}}>
+        <select aria-label="Activity type" value={eventType} className="rounded-lg border border-white/15 bg-[#070C12] p-2 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:outline-none" onChange={e=>{setApplication('');setData(d=>({...d,events:[],timeline:undefined}));setEventType(e.target.value);}}>
           <option value="">All activity</option>
           <option value="APPLICATION_USAGE">Application usage</option>
           <option value="PROCESS_ACTIVITY">Background use</option>
@@ -458,14 +476,14 @@ export const EndpointMonitor = forwardRef(function EndpointMonitor({ employeeId,
       </label>
 
       {data.devices.length>1&&<label className="flex items-center gap-3 text-sm">Device
-        <select aria-label="Activity device" value={selectedDeviceId} disabled={refreshing} className="rounded-lg border border-white/15 bg-[#070C12] p-2 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:outline-none" onChange={e=>{setData(d=>({...d,events:[],timeline:undefined}));setSelectedDeviceId(e.target.value);}}>
+        <select aria-label="Activity device" value={selectedDeviceId} className="rounded-lg border border-white/15 bg-[#070C12] p-2 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:outline-none" onChange={e=>{setData(d=>({...d,events:[],timeline:undefined}));setSelectedDeviceId(e.target.value);}}>
           <option value="">All assigned devices</option>
           {data.devices.map(d=><option key={d.id} value={d.id}>{d.name} — {d.user.name}</option>)}
         </select>
       </label>}
 
       <label className="flex items-center gap-3 text-sm">ML readiness day (UTC)
-        <input aria-label="ML readiness day (UTC)" type="date" max={new Date().toISOString().slice(0,10)} value={readinessDate} disabled={refreshing} className="rounded-lg border border-white/15 bg-[#070C12] p-2 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:outline-none" onChange={e=>setReadinessDate(e.target.value)}/>
+        <input aria-label="ML readiness day (UTC)" type="date" max={new Date().toISOString().slice(0,10)} value={readinessDate} className="rounded-lg border border-white/15 bg-[#070C12] p-2 text-[#F4F7FA] focus:border-[#67E8F9]/60 focus:outline-none" onChange={e=>setReadinessDate(e.target.value)}/>
       </label>
 
       {eventType&&<label className="flex items-center gap-3 text-sm">Application
