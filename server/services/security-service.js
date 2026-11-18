@@ -88,15 +88,24 @@ export class SecurityService{
       // Trust follows newly observed signals. A policy hold must not repeatedly
       // punish an employee for the same historical observation.
       const trust=evolveTrust(user.trustScore,observedRisk,config,canRecover);
-      const trustAssessedAfter=Boolean(user.trustUpdatedAt||trust!==user.trustScore);
-      // A policy decision can restrict CYBERORBIT access immediately, but an
-      // account is only labelled FROZEN after a device reports verified OS enforcement.
-      const nextStatus=decision==='FREEZE'?'RESTRICTED':decision==='RESTRICT'?'RESTRICTED':user.status;
       // A carried-forward hold represents an older assessment, not new
       // evidence. Do not create a fresh risk-history row that would extend its
       // age or make an old event look newly observed.
+      const carriedForward=evaluation.contributingFactors.some(factor=>factor.category==='RECENT_ASSESSMENT');
       const hasQualifyingEvidence=evaluation.contributingFactors.some(factor=>factor.category!=='RECENT_ASSESSMENT');
-      const updated=await tx.user.update({where:{id:user.id},data:{...(hasQualifyingEvidence?{riskScore:evaluation.riskScore,riskLevel:evaluation.riskLevel}:{}),...(trust!==user.trustScore?{trustScore:trust,trustUpdatedAt:new Date()}:{}),...(nextStatus!==user.status?{status:nextStatus,authVersion:{increment:1}}:{})}});
+      // Endpoint-agent activity assessments record their result even when no
+      // risk evidence was found, so an active employee shows a measured score.
+      // A positive score from the last 24 hours is kept as current risk rather
+      // than being overwritten by a later zero-evidence hour.
+      const recentPositive=reqContext.endpointActivityAssessment===true&&!hasQualifyingEvidence&&!carriedForward
+        ?await tx.riskScore.findFirst({where:{userId:user.id,score:{gt:0},timestamp:{gte:new Date(timestamp.getTime()-86400000)}},select:{id:true}}):null;
+      const endpointAssessment=reqContext.endpointActivityAssessment===true&&!carriedForward&&!recentPositive;
+      const recordAssessment=hasQualifyingEvidence||endpointAssessment;
+      const trustAssessedAfter=Boolean(user.trustUpdatedAt||trust!==user.trustScore||endpointAssessment);
+      // A policy decision can restrict CYBERORBIT access immediately, but an
+      // account is only labelled FROZEN after a device reports verified OS enforcement.
+      const nextStatus=decision==='FREEZE'?'RESTRICTED':decision==='RESTRICT'?'RESTRICTED':user.status;
+      const updated=await tx.user.update({where:{id:user.id},data:{...(recordAssessment?{riskScore:evaluation.riskScore,riskLevel:evaluation.riskLevel}:{}),...(trust!==user.trustScore||endpointAssessment?{trustScore:trust,trustUpdatedAt:new Date()}:{}),...(nextStatus!==user.status?{status:nextStatus,authVersion:{increment:1}}:{})}});
       if(['FREEZE','RESTRICT'].includes(decision))await tx.session.updateMany({where:{userId:user.id,revokedAt:null},data:{revokedAt:new Date()}});
       const endpoints=decision==='FREEZE'&&config.autoFreezeOnCritical&&user.status!=='FROZEN'
         ?await tx.endpointDevice.findMany({where:{companyId:user.companyId,userId:user.id,revokedAt:null},select:{id:true,lastSeen:true,platform:true,mappedIdentity:true}}):[];
@@ -113,8 +122,8 @@ export class SecurityService{
         }
       }
       const record=await tx.activityEvent.create({data:{eventId,userId:user.id,userEmail:user.email,userRole:user.roleCode,type,timestamp,ip:reqContext.ip||raw.ipAddress||raw.ip||'Unknown',location:raw.location||'Unknown',deviceId:device?.id,deviceName:device?.name,resourceId:resource?.id,resourceName:resource?.name,severity:evaluation.riskLevel,riskContribution:evaluation.riskScore,mlAnomalyScore:evaluation.mlAnomalyScore,isOffHours:evaluation.isOffHours,isCrossDepartment:evaluation.isCrossDepartment,downloadSizeMB:volume,failedAttempts:Math.floor(failed),metadata:{...metadata,source:raw.source||'application',simulation:reqContext.simulation===true,validatedAccess,evaluation:{...evaluation,trustScore:trustAssessedAfter?trust:null},decision,authorizationReasons:authorization.reasons,recoveryEvidence:recovery,...(ml?{ml:{threat_probability:ml.threat_probability,xai_reasons:ml.xai_reasons,operating_threshold:ml.operating_threshold,model_name:ml.model_name,model_version:ml.model_version,feature_schema_fingerprint:ml.feature_schema_fingerprint,feature_count:ml.feature_count,aggregation_level:ml.aggregation_level,provenance:ml.provenance}}:{})}}});
-      if(hasQualifyingEvidence)await tx.riskScore.create({data:{userId:user.id,sourceEventId:eventId,score:evaluation.riskScore,level:evaluation.riskLevel,factors:evaluation.contributingFactors,anomalyScore:evaluation.mlAnomalyScore,policyAction:decision,timestamp}});
-      if((hasQualifyingEvidence||canRecover)&&trustAssessedAfter)await tx.trustHistory.create({data:{userId:user.id,trustScore:trust,riskScore:evaluation.riskScore,delta:trust-user.trustScore,reason:trust>user.trustScore?recovery.reason:evaluation.explanationText,timestamp}});
+      if(recordAssessment)await tx.riskScore.create({data:{userId:user.id,sourceEventId:eventId,score:evaluation.riskScore,level:evaluation.riskLevel,factors:evaluation.contributingFactors,anomalyScore:evaluation.mlAnomalyScore,policyAction:decision,timestamp}});
+      if((recordAssessment||canRecover)&&trustAssessedAfter)await tx.trustHistory.create({data:{userId:user.id,trustScore:trust,riskScore:evaluation.riskScore,delta:trust-user.trustScore,reason:trust>user.trustScore?recovery.reason:evaluation.explanationText,timestamp}});
       if(trust!==user.trustScore)await audit(tx,actor,'TRUST_CHANGED',{eventId,previous:user.trustScore,current:trust,reason:trust>user.trustScore?recovery.reason:evaluation.explanationText},user.id);
       if(ml){const version=await registerModel(tx);await tx.mlPrediction.create({data:{userId:user.id,modelVersionId:version.id,featureVector:raw.features,anomalyScore:ml.threat_probability,isAnomalous:Boolean(ml.predicted_class),riskScore:evaluation.riskScore,attributions:ml.xai_reasons||[],timestamp}});}
       let incident;

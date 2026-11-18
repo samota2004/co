@@ -10,24 +10,17 @@ import {validateUsbPolicy,signUsbPolicyCommand} from '../../agent/src/usb-policy
 import {signAccountControlCommand} from '../../agent/src/account-control.js';
 import {LOCAL_OPERATION_ACTIONS,signLocalOperationGrant} from '../../agent/src/local-operation-auth.js';
 import {broadcastSecurityNotifications,createContainmentNotifications} from './security-notification-service.js';
+import {SecurityService} from './security-service.js';
 export const hashSecret = s => createHash('sha256').update(s).digest('hex');
 export const isEndpointAdmin = u => ['SECURITY_ADMIN', 'SYSTEM_ADMIN'].includes(u.roleCode);
 export const ML_AVAILABILITY = Object.freeze({ available: false,
   reason: 'The trained model requires complete 21-feature CERT user-day logon/device/file/HTTP/email coverage. File changes are not reads; connections are not HTTP history. Email/content features and training preprocessing are unavailable. No endpoint inference is performed.' });
 const endpointMonitoringUser = user => {
   if (!user) return null;
-  const { _count, riskScores = [], trustHistories = [], ...record } = user;
-  const latestRisk = riskScores[0] || null;
-  const latestTrust = trustHistories[0] || null;
-  const riskAssessed = Boolean(_count?.riskScores || latestRisk);
-  const trustAssessed = Boolean(user.trustUpdatedAt || latestTrust);
-  return {
-    ...record,
-    riskScore: riskAssessed ? latestRisk?.score ?? user.riskScore : null,
-    riskLevel: riskAssessed ? latestRisk?.level ?? user.riskLevel : null,
-    trustScore: trustAssessed ? latestTrust?.trustScore ?? user.trustScore : null,
-    assessmentStatus: riskAssessed || trustAssessed ? 'ASSESSED' : 'NOT_ASSESSED'
-  };
+  const { _count, ...record } = user;
+  const riskAssessed = Boolean(_count?.riskScores);
+  const trustAssessed = Boolean(user.trustUpdatedAt);
+  return { ...record, ...(!riskAssessed ? { riskScore: null, riskLevel: null } : {}), ...(!trustAssessed ? { trustScore: null } : {}), assessmentStatus: riskAssessed || trustAssessed ? 'ASSESSED' : 'NOT_ASSESSED' };
 };
 const hasFreshAgentContact = (device,now) => {
   const contact=device.platform==='win32'?device.health?.lastHeartbeatAt:device.lastSeen;
@@ -145,7 +138,8 @@ export class EndpointService {
   async ingest(secret, body) {
     if (!Array.isArray(body.events) || !body.events.length || body.events.length > 100 || Buffer.byteLength(JSON.stringify(body)) > 262144) throw new EndpointError(400, 'Batch limit exceeded');
     try { body.events.forEach(e => validateEvent(e)); } catch (e) { throw new EndpointError(400, e.message); }
-    return this.prisma.$transaction(async tx => {
+    let assessment = null;
+    const result = await this.prisma.$transaction(async tx => {
       const d = await this.authenticate(tx, secret);
       if (body.events.some(e => e.deviceId !== d.id)) throw new EndpointError(403, 'Device mismatch');
       // Locks device row; revocation cannot race past durable acceptance.
@@ -163,6 +157,7 @@ export class EndpointService {
         userId: (/^(PROCESS_|APPLICATION_|SESSION_)/.test(e.type) || e.type==='FILE_CHANGE') && d.mappedIdentity && e.metadata.identity === d.mappedIdentity ? d.userId : null }));
       if(records.length)await tx.endpointEvent.createMany({ data: records, skipDuplicates: true });
       const notifications=[];
+      const freshUsbConnections=[];
       const usbConnections=acceptedEvents.filter(event=>event.type==='USB_CONNECTED');
       if(usbConnections.length&&tx.securityNotification){
         const recipients=await tx.user.findMany({where:{companyId:d.companyId,deletedAt:null,status:'ACTIVE',roleCode:{in:['SECURITY_ADMIN','SYSTEM_ADMIN']},OR:[{isMainAdmin:true},...(d.user.assignedAdminId?[{id:d.user.assignedAdminId}]:[])]},select:{id:true}});
@@ -180,6 +175,7 @@ export class EndpointService {
           if(event.type==='USB_REMOVED'){state.set(hardwareId,'USB_REMOVED');continue;}
           const alreadyConnected=state.get(hardwareId)==='USB_CONNECTED';state.set(hardwareId,'USB_CONNECTED');
           if(alreadyConnected)continue;
+          freshUsbConnections.push(event);
           const dedupeKey=`endpoint-usb:${d.id}:${event.eventId}`;
           const created=recipients.length?await tx.securityNotification.createMany({data:recipients.map(recipient=>({
             companyId:d.companyId,recipientId:recipient.id,targetUserId:null,dedupeKey,
@@ -190,8 +186,55 @@ export class EndpointService {
           if(created.count)notifications.push(...await tx.securityNotification.findMany({where:{companyId:d.companyId,dedupeKey,recipientId:{in:recipients.map(recipient=>recipient.id)}}}));
         }
       }
+      // Collect what the post-commit employee assessment needs. USB events are
+      // device-level, so storage connections only count while the assigned
+      // employee is observed signed in on this endpoint (this batch or the
+      // last 15 minutes).
+      const attributed=records.filter(record=>record.userId);
+      const usbStorage=freshUsbConnections.filter(event=>event.metadata.category==='USB_STORAGE');
+      const employeePresent=usbStorage.length&&d.mappedIdentity
+        ?attributed.length>0||await tx.endpointEvent.count({where:{deviceId:d.id,userId:d.userId,occurredAt:{gte:new Date(Date.now()-15*60000)}}})>0
+        :false;
+      if(attributed.length||employeePresent){
+        const latest=attributed.reduce((max,record)=>record.occurredAt>max?record.occurredAt:max,new Date(0));
+        assessment={userId:d.userId,companyId:d.companyId,deviceId:d.id,deviceName:d.name,
+          activityAt:attributed.length?latest:null,usbStorage:employeePresent?usbStorage:[]};
+      }
       return { acceptedEventIds: uniqueEvents.map(e => e.eventId), companyId: d.companyId, userId: d.userId, deviceId: d.id, notifications };
     });
+    await this.assessEndpointActivity(assessment);
+    return result;
+  }
+  // Runs the server risk engine on the assigned employee's endpoint activity
+  // after the events are durably stored. At most one activity assessment per
+  // employee per hour (deterministic event ID, deduplicated by evaluate), plus
+  // one per fresh USB storage connection. Best-effort: ingestion never fails
+  // because an assessment could not be recorded.
+  async assessEndpointActivity(pending) {
+    if (!pending) return;
+    try {
+      const user = await this.prisma.user.findFirst({ where: { id: pending.userId, companyId: pending.companyId, deletedAt: null, status: 'ACTIVE', roleCode: { in: ['EMPLOYEE', 'MANAGER'] } } });
+      // Only ACTIVE employees: held, restricted or frozen accounts keep their
+      // reviewed status and are not re-evaluated by background telemetry.
+      if (!user) return;
+      const security = new SecurityService(this.prisma);
+      const oldest = Date.now() - 30 * 86400000;
+      for (const usb of pending.usbStorage) {
+        const at = new Date(usb.occurredAt);
+        if (at.getTime() < oldest) continue;
+        await security.evaluate(user, { userId: user.id, eventId: `endpoint-usb:${pending.deviceId}:${usb.eventId}`, eventType: 'USB_ACTIVITY', timestamp: at.toISOString(), source: 'endpoint-agent',
+          metadata: { usbStorageConnected: true, endpointDevice: pending.deviceName, endpointEventId: usb.eventId } }, { endpointActivityAssessment: true });
+      }
+      if (pending.activityAt && pending.activityAt.getTime() >= oldest) {
+        const eventId = `endpoint-activity:${user.id}:${pending.activityAt.toISOString().slice(0, 13)}`;
+        if (!await this.prisma.activityEvent.findUnique({ where: { eventId }, select: { id: true } })) {
+          await security.evaluate(user, { userId: user.id, eventId, eventType: 'APPLICATION_USAGE', timestamp: pending.activityAt.toISOString(), source: 'endpoint-agent',
+            metadata: { aggregation: 'endpoint-hour', endpointDevice: pending.deviceName } }, { endpointActivityAssessment: true });
+        }
+      }
+    } catch (error) {
+      console.warn('[endpoint-assessment] deferred:', error?.code || error?.name || 'unavailable');
+    }
   }
   async heartbeat(secret, body, address, addressDiagnostics) {
     try { validateHealth(body.health); } catch (e) { throw new EndpointError(400, e.message); }
@@ -390,7 +433,7 @@ export class EndpointService {
       id: true, userId: true, name: true, platform: true, mappedIdentity: true, enrolledAt: true,
       revokedAt: true, lastSeen: true, agentVersion: true, health: true, config: true,...(cityAvailable?{ipCityEnabled:true,ipCity:true}:{}),
       enforcementCommands:{where:{action:{in:['BLOCK','ALLOW','STOP_AGENT','START_AGENT','SET_USB_POLICY','SERVICE_STOP','AGENT_UNINSTALL']}},orderBy:{createdAt:'desc'},take:10,select:{id:true,commandId:true,action:true,status:true,resultCode:true,reason:true,issuedAt:true,expiresAt:true,acknowledgedAt:true,createdAt:true,createdById:true}},
-      user: { select: { id: true, name: true, employeeId: true, status:true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true, trustHistories: true } }, riskScores: { orderBy: { timestamp: 'desc' }, select: { score: true, level: true, timestamp: true }, take: 1 }, trustHistories: { orderBy: { timestamp: 'desc' }, select: { trustScore: true, riskScore: true, timestamp: true }, take: 1 } } }
+      user: { select: { id: true, name: true, employeeId: true, status:true, riskScore: true, trustScore: true, riskLevel: true, trustUpdatedAt: true, _count: { select: { riskScores: true } } } }
     }, orderBy: { createdAt: 'desc' } })}));
     const applicationActivity=devices.length?await this.prisma.endpointEvent.groupBy({
       by:['deviceId','userId'],

@@ -27,6 +27,9 @@ export class RiskEngine {
     if(failures>0)add('Repeated authentication failures',Math.min(25,5*failures),failures+' observed failed authentication attempts.','AUTH');
     if(event.isPrivilegeEscalation||event.metadata?.escalationAttempt||['PRIVILEGE_CHANGE','PRIVILEGE_ELEVATION'].includes(event.eventType))add('Privilege change',20,'A privilege-change observation was submitted.','PRIVILEGE');
     if(event.isUsbTransfer||event.metadata?.usbTransfer)add('Data transfer over removable media',12,'An explicit transfer event was observed; USB connection alone is not a transfer.','TRANSFER');
+    // Lower-weight than a confirmed transfer: storage was attached while the
+    // employee was signed in. The TRANSFER category keeps only the stronger one.
+    else if(event.metadata?.usbStorageConnected===true)add('Removable storage connected',8,'USB storage was connected on the employee\'s enrolled endpoint during their session. Connection alone does not confirm a file transfer.','TRANSFER');
     const location=event.location;
     if(baseline&&location&&baseline.typicalLocations.length&&!baseline.typicalLocations.includes(location))add('Location outside learned baseline',10,'Observed location is absent from historical activity.','LOCATION');
     if(isOffHours&&factors.length)add('Outside normal access hours',c.offHoursPenalty,'Observed access outside '+start+':00–'+end+':00 ('+(baseline?'learned baseline':'configured cold-start hours')+'); timing is corroborating context, not a standalone threat signal.','TIME');
