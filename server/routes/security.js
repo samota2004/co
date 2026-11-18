@@ -30,10 +30,9 @@ router.get('/users',api(async req=>({users:(await prisma.user.findMany({where:{.
 router.get('/users/:id',api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id);
   const companyId=req.user.companyId,now=new Date(),historyFrom=new Date(now.getTime()-90*86400000),canReview=isAdmin(req.user)||req.user.roleCode==='MANAGER';
-  const [devices,events,endpointEvents,trustHistory,riskHistory,baseline,incidents,sessions,loginHistory,accessRequests,auditEvents]=await Promise.all([
+  const [devices,events,trustHistory,riskHistory,baseline,incidents,sessions,loginHistory,accessRequests,auditEvents]=await Promise.all([
     prisma.device.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}}}),
     prisma.activityEvent.findMany({where:{userId:u.id,user:{companyId,deletedAt:null}},orderBy:{timestamp:'desc'},take:100}),
-    prisma.endpointEvent.findMany({where:{companyId,userId:u.id},orderBy:{occurredAt:'desc'},take:500,select:{id:true,type:true,occurredAt:true,deviceId:true,userId:true}}),
     prisma.trustHistory.findMany({where:{userId:u.id,user:{companyId,deletedAt:null},timestamp:{gte:historyFrom,lte:now}},orderBy:{timestamp:'asc'},take:5000}),
     prisma.riskScore.findMany({where:{userId:u.id,user:{companyId,deletedAt:null},timestamp:{gte:historyFrom,lte:now}},orderBy:{timestamp:'asc'},take:5000}),
     prisma.behaviorProfile.findFirst({where:{userId:u.id,user:{companyId,deletedAt:null}}}),
@@ -45,7 +44,7 @@ router.get('/users/:id',api(async req=>{
   ]);
   const dailyRiskHistory=await prisma.dailyRiskSnapshot.findMany({where:{userId:u.id,companyId,day:{gte:new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-89*86400000)}},orderBy:{day:'asc'},take:90});
   const user=await prisma.user.findFirst({where:{id:u.id,companyId,deletedAt:null},include:monitoringInclude()});
-  return{user:monitoredUser(user),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),endpointEvents,trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),dailyRiskHistory,baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents,sessions:sessions.map(session=>({...session,status:'ACTIVE'})),loginHistory,accessRequests,auditEvents};
+  return{user:monitoredUser(user),devices:devices.map(({fingerprint,...d})=>d),events:events.map(decorateEvent),trustHistory:trustHistory.reverse(),riskHistory:riskHistory.reverse(),dailyRiskHistory,baseline:baseline?.sampleDays>=7?baseline:{available:false,reason:'Insufficient observed history'},incidents,sessions:sessions.map(session=>({...session,status:'ACTIVE'})),loginHistory,accessRequests,auditEvents};
 }));
 router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
   const u=await scopedUser(prisma,req.user,req.params.id);
@@ -65,12 +64,16 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
   const hasAllRequiredContainment=hasEligibleEndpoint&&devices.every(device=>confirmedContainmentDeviceIds.has(device.id));
   const pendingRestorationCommands=commands.filter(command=>command.action==='ALLOW'&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&command.expiresAt>new Date());
   const hasPendingRestoration=pendingRestorationCommands.length>0;
+  const deviceIds=new Set(devices.map(device=>device.id));
+  const containmentInFlight=[...latestContainmentByDevice.values()].some(command=>deviceIds.has(command.deviceId)&&['PENDING','PENDING_OFFLINE'].includes(command.status)&&command.expiresAt>new Date());
+  const lockedDevices=devices.filter(device=>confirmedContainmentDeviceIds.has(device.id));
+  // Matches POST /unfreeze: OS-locked laptops get ALLOW commands; if none was
+  // locked the account is restored immediately. Incident review is required
+  // only when a critical incident exists and is still unresolved.
   const blockingReasons=[];
   if(!['RESTRICTED','FROZEN'].includes(u.status))blockingReasons.push({code:'ACCOUNT_NOT_CONTAINED',message:'The account is not currently restricted or OS-confirmed frozen.'});
-  if(!hasEligibleEndpoint)blockingReasons.push({code:'NO_ELIGIBLE_ENDPOINT',message:'No enrolled, active Windows endpoint is available for this employee.'});
-  if(!hasAllRequiredContainment)blockingReasons.push({code:'CONTAINMENT_CONFIRMATION_INCOMPLETE',message:'Every eligible Windows endpoint must authenticate the original BLOCK command before restoration.'});
+  if(containmentInFlight)blockingReasons.push({code:'CONTAINMENT_IN_PROGRESS',message:'A containment command is still awaiting the laptop\'s answer. Retry in about two minutes.'});
   if(unresolvedCritical)blockingReasons.push({code:'CRITICAL_HOLD_ACTIVE',message:'An unresolved critical incident still blocks restoration.'});
-  if(!reviewedCritical)blockingReasons.push({code:'INCIDENT_REVIEW_REQUIRED',message:'A reviewed critical incident record is required before restoration.'});
   if(hasPendingRestoration)blockingReasons.push({code:'RESTORATION_ALREADY_PENDING',message:'An ALLOW command is already awaiting endpoint acknowledgment.'});
   return{
     user:publicUser(u),
@@ -83,6 +86,7 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
     pendingRestorationCommands,
     incidents,
     canRestore:blockingReasons.length===0,
+    restorationMode:lockedDevices.length?'ENDPOINT_CONFIRMATION':'IMMEDIATE',
     blockingReasons,
     requirements:{mainAdmin:true,freshMfa:true,administrativeReason:true,hasEligibleEndpoint,hasConfirmedContainment,hasAllRequiredContainment,hasUnresolvedCriticalIncident:unresolvedCritical,hasReviewedCriticalIncident:reviewedCritical,hasPendingRestoration},
   };
@@ -90,14 +94,7 @@ router.get('/users/:id/restoration-status',requireMainAdmin,api(async req=>{
 async function userChanges(req,create=false,current=null){
   const b=req.body||{},fields={};
   if(b.password!==undefined||b.passwordHash!==undefined)throw new SecurityError(400,'EMPLOYEE_PASSWORD_NOT_ALLOWED','Employees are monitoring identities and cannot have console passwords. Refresh the employee form and submit without a password.');
-  if(b.status!==undefined){
-    if(!['ACTIVE','RESTRICTED','FROZEN','DISABLED','INVESTIGATION'].includes(b.status))
-      throw new SecurityError(400,'INVALID_STATUS','Invalid account status.');
-    if(!create)
-      throw new SecurityError(400,'ACCOUNT_STATUS_WORKFLOW_REQUIRED','Use the audited containment or Main Admin restoration workflow to change account status.');
-    if(b.status!=='ACTIVE')throw new SecurityError(400,'INVALID_STATUS','New employee accounts must start ACTIVE.');
-    fields.status=b.status;
-  }
+  if(b.status!==undefined){if(!['ACTIVE','RESTRICTED','FROZEN','DISABLED','INVESTIGATION'].includes(b.status))throw new SecurityError(400,'INVALID_STATUS','Invalid account status.');if(!create)throw new SecurityError(400,'ACCOUNT_STATUS_WORKFLOW_REQUIRED','Use the audited containment or Main Admin restoration workflow to change account status.');if(b.status!=='ACTIVE')throw new SecurityError(400,'INVALID_STATUS','New employee accounts must start ACTIVE.');fields.status=b.status;}
   for(const k of ['name','employeeId'])if(create||b[k]!==undefined)fields[k]=text(b[k],k,100);
   if(create||b.email!==undefined){fields.email=text(b.email,'Email',254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email))throw new SecurityError(400,'INVALID_EMAIL','Enter a valid email.');}
   if(create||b.departmentCode!==undefined||b.department!==undefined){fields.departmentCode=b.departmentCode||b.department;if(!await prisma.department.findUnique({where:{code:fields.departmentCode}}))throw new SecurityError(400,'INVALID_DEPARTMENT','Select an existing department.');}
@@ -164,13 +161,35 @@ router.post('/users/:id/unfreeze',requireMainAdmin,requireFreshMfa,api(async req
   if(isAdmin(u))throw new SecurityError(403,'ADMIN_MANAGEMENT_REQUIRED','This workflow restores employee accounts only.');
   if(!['RESTRICTED','FROZEN'].includes(u.status))throw new SecurityError(409,'ACCOUNT_NOT_CONTAINED','Only a currently restricted or OS-confirmed frozen account can be restored.');
   if(reason.trim().length<8)throw new SecurityError(400,'REASON_REQUIRED','Provide review notes of at least 8 characters.');
+  // An unresolved critical incident always blocks restoration. A manual Main
+  // Admin containment has no incident, so review notes + fresh MFA suffice.
   if(await prisma.incident.findFirst({where:{userId:u.id,severity:'CRITICAL',status:{notIn:['RESOLVED','FALSE_POSITIVE','REJECTED']}}}))throw new SecurityError(409,'CRITICAL_HOLD_ACTIVE','Resolve the critical incident before restoration.');
-  if(!await prisma.incident.findFirst({where:{userId:u.id,severity:'CRITICAL',status:{in:['RESOLVED','FALSE_POSITIVE','REJECTED']}}}))throw new SecurityError(409,'INCIDENT_REVIEW_REQUIRED','A Main Admin must complete and record a critical-incident review before restoration.');
   const result=await prisma.$transaction(async tx=>{
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "users" WHERE "id"=${u.id} AND "companyId"=${req.user.companyId} FOR UPDATE`);
     const devices=await tx.endpointDevice.findMany({where:{companyId:req.user.companyId,userId:u.id,revokedAt:null,platform:'win32',mappedIdentity:{not:null}},select:{id:true,lastSeen:true}});
-    const blocked=[];for(const d of devices){const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:d.id,userId:u.id,action:'BLOCK'},orderBy:{createdAt:'desc'}});if(prior?.status==='SUCCEEDED')blocked.push({device:d,prior});}
-    if(blocked.length!==devices.length)throw new SecurityError(409,'NO_CONFIRMED_CONTAINMENT','Every eligible enrolled Windows device must have confirmed OS containment before restoration.');
+    const blocked=[];let inFlight=false;
+    for(const d of devices){
+      const prior=await tx.endpointEnforcementCommand.findFirst({where:{deviceId:d.id,userId:u.id,action:'BLOCK'},orderBy:{createdAt:'desc'}});
+      if(prior?.status==='SUCCEEDED')blocked.push({device:d,prior});
+      else if(prior&&['PENDING','PENDING_OFFLINE'].includes(prior.status)&&prior.expiresAt>new Date())inFlight=true;
+    }
+    // Wait for an in-flight BLOCK to be answered so its outcome is known.
+    if(inFlight)throw new SecurityError(409,'NO_CONFIRMED_CONTAINMENT','An endpoint containment command is still awaiting the laptop\'s answer. Retry in about two minutes.');
+    // BLOCK commands that failed, expired or were unsupported never changed
+    // the OS account, so those laptops need no ALLOW. Cancel any leftovers so
+    // a late delivery cannot lock the laptop after restoration.
+    await tx.endpointEnforcementCommand.updateMany({where:{companyId:req.user.companyId,userId:u.id,action:'BLOCK',status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'RESTORATION_AUTHORIZED'}});
+    if(!blocked.length){
+      // No laptop was OS-locked: the containment was application-level only,
+      // so restore the account immediately.
+      const restored=await tx.user.updateMany({where:{id:u.id,companyId:req.user.companyId,status:{in:['RESTRICTED','FROZEN']}},data:{status:'ACTIVE',authVersion:{increment:1}}});
+      if(restored.count!==1)throw new SecurityError(409,'ACCOUNT_NOT_CONTAINED','The account changed state during restoration. Refresh and retry.');
+      await tx.endpointEnforcementCommand.updateMany({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'NEW_RESTORATION_REVIEW'}});
+      await tx.session.updateMany({where:{userId:u.id,revokedAt:null},data:{revokedAt:new Date()}});
+      await audit(tx,req.user,'ACCOUNT_RESTORED',{reason,mode:'APPLICATION_ONLY',deviceCount:0},u.id);
+      const notifications=await createContainmentNotifications(tx,{companyId:req.user.companyId,user:u,type:'RESTORATION_CONFIRMED',severity:'HIGH',title:'Account restored',message:`${u.name}: fresh Main Admin MFA restored the account. No laptop had a confirmed OS lock, so no endpoint confirmation was needed.`,dedupeKey:`containment:restore-direct:${req.user.id}:${u.id}:${Date.now()}`,metadata:{requestedById:req.user.id,deviceCount:0,mode:'APPLICATION_ONLY'}});
+      return{restoredUser:await tx.user.findUnique({where:{id:u.id}}),commands:[],notifications};
+    }
     const pendingRestoration=await tx.endpointEnforcementCommand.count({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',deviceId:{in:blocked.map(({device})=>device.id)},status:{in:['PENDING','PENDING_OFFLINE']},expiresAt:{gt:new Date()}}});
     if(pendingRestoration===blocked.length)throw new SecurityError(409,'RESTORATION_ALREADY_PENDING','Endpoint restoration is already awaiting acknowledgment.');
     await tx.endpointEnforcementCommand.updateMany({where:{companyId:req.user.companyId,userId:u.id,action:'ALLOW',status:{in:['PENDING','PENDING_OFFLINE']}},data:{status:'SUPERSEDED',resultCode:'NEW_RESTORATION_REVIEW'}});
@@ -183,7 +202,11 @@ router.post('/users/:id/unfreeze',requireMainAdmin,requireFreshMfa,api(async req
     return{commands:await tx.endpointEnforcementCommand.findMany({where:{userId:u.id,action:'ALLOW',createdById:req.user.id},orderBy:{createdAt:'desc'},take:rows.length}),notifications};
   });
   broadcastSecurityNotifications(result.notifications);
-  return{user:publicUser(u),endpointEnforcement:result.commands,message:'Fresh Main Admin MFA approved restoration. The account remains restricted until every targeted device reports verified OS restoration.'};
+  if(result.restoredUser){
+    sseManager.broadcastAccountStatus(u.id,'ACTIVE',publicUser(result.restoredUser));
+    return{user:publicUser(result.restoredUser),endpointEnforcement:[],message:'Account restored to ACTIVE. No laptop had a confirmed OS lock, so no endpoint confirmation was needed.'};
+  }
+  return{user:publicUser(u),endpointEnforcement:result.commands,message:'Fresh Main Admin MFA approved restoration. The account remains restricted until every OS-locked laptop reports verified restoration.'};
 }));
 
 router.get('/notifications',requireSecurityAdmin,api(async req=>{const take=Math.min(100,Math.max(1,Number(req.query.limit)||50));const notifications=await prisma.securityNotification.findMany({where:{companyId:req.user.companyId,recipientId:req.user.id},orderBy:{createdAt:'desc'},take});const unread=await prisma.securityNotification.count({where:{companyId:req.user.companyId,recipientId:req.user.id,readAt:null}});return{notifications,unread};}));
@@ -230,10 +253,10 @@ router.post('/telemetry/ingest',requireSecurityAdmin,api(async()=>{
 }));
 router.post('/risk/evaluate',requireSecurityAdmin,api(assess));
 router.get('/risk/analysis/:id',requireSecurityAdmin,api(async req=>{const range=req.query.range||'24h';if(!['24h','7d','30d','90d'].includes(range))throw new SecurityError(400,'INVALID_RISK_RANGE','Choose 24h, 7d, 30d, or 90d.');return{analysis:await getRiskAnalysis(prisma,req.user,req.params.id,new Date(),range)};}));
-router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});return{userId:u.id,riskScore:latest?.score??null,riskLevel:latest?.level??null,latest};}));
+router.get('/risk/users/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.riskScore.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});return{userId:u.id,riskScore:latest?u.riskScore:null,riskLevel:latest?u.riskLevel:null,latest};}));
 router.get('/risk/history/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.riskScore.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
 router.get('/trust/:id/history',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{history:await prisma.trustHistory.findMany({where:{userId:u.id},orderBy:{timestamp:'desc'},...pagination(req.query)})};}));
-router.get('/trust/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);const latest=await prisma.trustHistory.findFirst({where:{userId:u.id},orderBy:{timestamp:'desc'}});const trustScore=latest?.trustScore??(u.trustUpdatedAt?u.trustScore:null);return{trustScore,assessmentStatus:trustScore===null?'NOT_ASSESSED':'ASSESSED',latest};}));
+router.get('/trust/:id',api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{trustScore:u.trustUpdatedAt?u.trustScore:null,assessmentStatus:u.trustUpdatedAt?'ASSESSED':'NOT_ASSESSED'};}));
 router.post('/users/:id/baseline/rebuild',requireSecurityAdmin,api(async req=>{const u=await scopedUser(prisma,req.user,req.params.id);return{baseline:await learnBaseline(prisma,u.id)};}));
 
 router.get('/access-requests',api(async req=>({requests:(await prisma.accessRequest.findMany({where:subjectScope(req),include:{user:{select:{name:true}},resource:{select:{name:true}}},orderBy:{createdAt:'desc'},...pagination(req.query)})).map(decorateRequest)})));

@@ -6,6 +6,7 @@ import {requestApi} from './services/api.js';
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { CopilotModal } from "./components/CopilotModal";
+import { MfaChallengeModal } from "./components/MfaChallengeModal";
 
 import { ShieldAlert, CheckCircle2, AlertTriangle, X } from "lucide-react";
 
@@ -1096,16 +1097,25 @@ export default function App() {
     setCopilotOpen(true);
   };
 
+  // Restoration needs Main Admin MFA from the last 15 minutes. When it is
+  // older, the OTP modal opens and the same request is retried after verify.
+  const [mfaRetry,setMfaRetry]=useState(null);
+  const submitAccountAction=async(userId,action,reason)=>{
+    try{
+      const result=await requestApi('/api/users/'+userId+'/'+action,{method:'POST',body:{reason}});
+      setLiveToast({type:'warning',title:'Account updated',message:result.message,timestamp:new Date().toLocaleTimeString()});
+      await fetchAllData();
+    }catch(error){
+      if(error.code==='FRESH_MFA_REQUIRED'){setMfaRetry({userId,action,reason});return;}
+      setLiveToast({type:'danger',title:'Account update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});
+    }
+  };
   const accountAction=async(userId,action)=>{
     const verb=action==='freeze'?'freeze':'unfreeze';
     if(!window.confirm(`Confirm ${verb} for this employee? This revokes active application sessions.`))return;
     const reason=window.prompt(`Enter the reason for ${verb} (minimum 8 characters):`);
     if(typeof reason!=='string'||reason.trim().length<8){setLiveToast({type:'warning',title:'Reason required',message:'No account change was made. Enter at least 8 characters.',timestamp:new Date().toLocaleTimeString()});return;}
-    try{
-      const result=await requestApi('/api/users/'+userId+'/'+action,{method:'POST',body:{reason:reason.trim()}});
-      setLiveToast({type:'warning',title:'Account updated',message:result.message,timestamp:new Date().toLocaleTimeString()});
-      await fetchAllData();
-    }catch(error){setLiveToast({type:'danger',title:'Account update failed',message:error.message,timestamp:new Date().toLocaleTimeString()});}
+    await submitAccountAction(userId,action,reason.trim());
   };
   const handleFreezeUser=userId=>accountAction(userId,'freeze');
   const handleUnfreezeUser=userId=>accountAction(userId,'unfreeze');
@@ -1539,6 +1549,16 @@ export default function App() {
         isOpen={copilotOpen}
         onClose={() => setCopilotOpen(false)}
         context={copilotContext}
+      />
+
+      <MfaChallengeModal
+        isOpen={Boolean(mfaRetry)}
+        reason="Restoring an account needs a fresh Main Admin verification code."
+        onClose={() => setMfaRetry(null)}
+        onSuccess={() => {
+          const pending = mfaRetry;
+          if (pending) submitAccountAction(pending.userId, pending.action, pending.reason);
+        }}
       />
     </div>
   );

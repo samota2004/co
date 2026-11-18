@@ -122,6 +122,10 @@ export const EmployeeManagementPage = ({
 
   onDeleteUser,
 
+  onFreezeUser,
+
+  onUnfreezeUser,
+
 }) => {
 
   const { isDark } = useTheme();
@@ -1745,6 +1749,30 @@ export const EmployeeManagementPage = ({
                             UPDATE
 
                           </button>
+
+                          {user.status === "ACTIVE" && onFreezeUser && (
+                            <button
+                              onClick={() => {
+                                if (confirmWindowsFreeze()) onFreezeUser(user.id);
+                              }}
+                              title="Restrict this employee and lock their Windows sign-in on configured laptops"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/20 px-2.5 py-2 text-[12px] font-mono font-semibold tracking-wide text-[#D4AF37] transition-all hover:border-amber-400/45 hover:bg-amber-400/5"
+                            >
+                              <UserX className="h-3 w-3" />
+                              FREEZE
+                            </button>
+                          )}
+
+                          {["RESTRICTED", "FROZEN"].includes(user.status) && onUnfreezeUser && (
+                            <button
+                              onClick={() => onUnfreezeUser(user.id)}
+                              title="Main Admin restoration: requires review notes and a fresh verification code"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/20 px-2.5 py-2 text-[12px] font-mono font-semibold tracking-wide text-emerald-300 transition-all hover:border-emerald-400/45 hover:bg-emerald-400/5"
+                            >
+                              <ShieldCheck className="h-3 w-3" />
+                              UNFREEZE
+                            </button>
+                          )}
 
                           <button
 
