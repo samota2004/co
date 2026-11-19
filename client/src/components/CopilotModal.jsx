@@ -1,5 +1,5 @@
-
 import React, { useState, useEffect, useRef } from "react";
+import { requestApi } from "../services/api.js";
 import {
   Sparkles,
   Send,
@@ -19,6 +19,17 @@ export const CopilotModal = ({
   context,
 }) => {
   const activeContext = context || initialContext;
+  // Some buttons pass the click event as "context" (onClick={onOpenCopilot}).
+  // Send only the two IDs the server uses; anything else (like a DOM event)
+  // cannot be turned into JSON and would stop the request before it is sent.
+  const safeContext = {
+    ...(typeof activeContext?.userId === "string" && activeContext.userId
+      ? { userId: activeContext.userId }
+      : {}),
+    ...(typeof activeContext?.incidentId === "string" && activeContext.incidentId
+      ? { incidentId: activeContext.incidentId }
+      : {}),
+  };
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([
@@ -46,8 +57,7 @@ export const CopilotModal = ({
   if (!isOpen) return null;
 
   const handleSend = async (queryText) => {
-    const textToSend =
-  typeof queryText === "string" ? queryText : input;
+    const textToSend = queryText || input;
 
     if (!textToSend.trim() || loading) return;
 
@@ -64,63 +74,33 @@ export const CopilotModal = ({
 
     setLoading(true);
 
-    
     try {
-      const res = await fetch("/api/copilot/chat", {
+      // requestApi adds the login token and throws on HTTP errors.
+      const data = await requestApi("/api/copilot/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        body: {
           message: textToSend,
-          context: activeContext,
-        }),
-      });
-
-      const rawResponse = await res.text();
-      let data;
-
-      try {
-        data = JSON.parse(rawResponse);
-      } catch {
-        throw new Error(
-          `Invalid server response. HTTP ${res.status}: ${rawResponse.slice(0, 300)}`
-        );
-      }
-
-      console.log("[Copilot API]", {
-        status: res.status,
-        response: data,
-      });
-
-      if (!res.ok) {
-        throw new Error(
-          data.message || data.error || `HTTP ${res.status}`
-        );
-      }
-
-      if (!data.reply) {
-        throw new Error("API returned no Copilot reply: " + JSON.stringify(data));
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-a-${Date.now()}`,
-          sender: "assistant",
-          text: data.reply,
-          timestamp: new Date().toLocaleTimeString(),
+          context: safeContext,
         },
-      ]);
-    } catch (error) {
-      console.error("[Copilot Error]", error);
+        // Gemini can take up to ~15 s; wait longer than the default 15 s.
+        signal: AbortSignal.timeout(30000),
+      });
 
+      const assistantMsg = {
+        id: `msg-a-${Date.now()}`,
+        sender: "assistant",
+        text: data?.reply || "Copilot returned an empty answer. Please try again.",
+        timestamp: new Date().toLocaleTimeString(),
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (error) {
       setMessages((prev) => [
         ...prev,
         {
           id: `msg-err-${Date.now()}`,
           sender: "assistant",
-          text: `Copilot Error: ${error.message}`,
+          text: `Copilot error: ${error?.message || "request failed"}`,
           timestamp: new Date().toLocaleTimeString(),
         },
       ]);
