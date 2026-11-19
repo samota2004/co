@@ -46,7 +46,8 @@ export const CopilotModal = ({
   if (!isOpen) return null;
 
   const handleSend = async (queryText) => {
-    const textToSend = queryText || input;
+    const textToSend =
+  typeof queryText === "string" ? queryText : input;
 
     if (!textToSend.trim() || loading) return;
 
