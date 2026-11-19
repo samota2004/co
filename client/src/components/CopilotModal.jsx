@@ -63,6 +63,7 @@ export const CopilotModal = ({
 
     setLoading(true);
 
+    
     try {
       const res = await fetch("/api/copilot/chat", {
         method: "POST",
@@ -75,25 +76,50 @@ export const CopilotModal = ({
         }),
       });
 
-      const data = await res.json();
+      const rawResponse = await res.text();
+      let data;
 
-      const assistantMsg = {
-        id: `msg-a-${Date.now()}`,
-        sender: "assistant",
-        text:
-          data.reply ||
-          "I have evaluated telemetry against active policy baselines. Continuous zero trust posture maintained.",
-        timestamp: new Date().toLocaleTimeString(),
-      };
+      try {
+        data = JSON.parse(rawResponse);
+      } catch {
+        throw new Error(
+          `Invalid server response. HTTP ${res.status}: ${rawResponse.slice(0, 300)}`
+        );
+      }
 
-      setMessages((prev) => [...prev, assistantMsg]);
-    } catch {
+      console.log("[Copilot API]", {
+        status: res.status,
+        response: data,
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          data.message || data.error || `HTTP ${res.status}`
+        );
+      }
+
+      if (!data.reply) {
+        throw new Error("API returned no Copilot reply: " + JSON.stringify(data));
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg-a-${Date.now()}`,
+          sender: "assistant",
+          text: data.reply,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
+    } catch (error) {
+      console.error("[Copilot Error]", error);
+
       setMessages((prev) => [
         ...prev,
         {
           id: `msg-err-${Date.now()}`,
           sender: "assistant",
-          text: "Notice: Copilot inference connection degraded. Local policy evaluation remains active.",
+          text: `Copilot Error: ${error.message}`,
           timestamp: new Date().toLocaleTimeString(),
         },
       ]);
